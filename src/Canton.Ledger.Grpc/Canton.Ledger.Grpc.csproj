@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Canton.Ledger.Grpc</PackageId>
+    <Description>Generated gRPC client stubs for the Canton Ledger API. Provides low-level access to Canton participant nodes via gRPC.</Description>
+    <PackageTags>canton;daml;ledger;grpc;blockchain;smart-contracts</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Proto source configuration -->
+  <!-- TODO: Automate proto download from Maven. Currently uses vendored protos from quickstart. -->
+  <!-- Required Maven artifacts:
+       - com.daml:ledger-api-proto:${CantonVersion}
+       - com.daml:ledger-api-value-proto:${CantonVersion}
+       - com.google.api.grpc:proto-google-common-protos:2.42.0
+  -->
+  <PropertyGroup>
+    <ProtoSourceDir>$(MSBuildThisFileDirectory)../../../cats/quickstart/backend/build/extracted-protos/main</ProtoSourceDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Include proto files for gRPC code generation -->
+  <ItemGroup>
+    <!-- Canton Ledger API v2 protos -->
+    <Protobuf Include="$(ProtoSourceDir)/com/daml/ledger/api/v2/**/*.proto" GrpcServices="Client" ProtoRoot="$(ProtoSourceDir)" />
+    <!-- Google common protos (dependencies) - exclude google/protobuf which is provided by Grpc.Tools -->
+    <Protobuf Include="$(ProtoSourceDir)/google/api/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
+    <Protobuf Include="$(ProtoSourceDir)/google/rpc/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
+    <Protobuf Include="$(ProtoSourceDir)/google/type/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
+    <Protobuf Include="$(ProtoSourceDir)/google/longrunning/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
+  </ItemGroup>
+
+</Project>
