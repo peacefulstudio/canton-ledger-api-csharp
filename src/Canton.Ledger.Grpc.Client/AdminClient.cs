@@ -14,29 +14,28 @@ namespace Canton.Ledger.Grpc.Client;
 /// </summary>
 public sealed class AdminClient : IAdminClient
 {
-    private static readonly ActivitySource ActivitySource = new("Canton.Ledger.Grpc.AdminClient");
+    private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).AssemblyQualifiedName!);
+    private static readonly ILogger<AdminClient> Logger = LoggerFactory.Create<AdminClient>();
 
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
     private readonly UserManagementService.UserManagementServiceClient _userService;
     private readonly LedgerClientOptions _options;
-    private readonly ILogger<AdminClient>? _logger;
 
     /// <summary>
     /// Creates a new AdminClient with the specified options.
     /// </summary>
-    public AdminClient(IOptions<LedgerClientOptions> options, ILogger<AdminClient>? logger = null)
-        : this(options.Value, logger)
+    public AdminClient(IOptions<LedgerClientOptions> options)
+        : this(options.Value)
     {
     }
 
     /// <summary>
     /// Creates a new AdminClient with the specified options.
     /// </summary>
-    public AdminClient(LedgerClientOptions options, ILogger<AdminClient>? logger = null)
+    public AdminClient(LedgerClientOptions options)
     {
         _options = options;
-        _logger = logger;
 
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
         {
@@ -47,13 +46,29 @@ public sealed class AdminClient : IAdminClient
         _partyService = new PartyManagementService.PartyManagementServiceClient(_channel);
         _userService = new UserManagementService.UserManagementServiceClient(_channel);
 
-        _logger?.LogInformation("AdminClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+        Logger.LogInformation("AdminClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+    }
+
+    /// <summary>
+    /// Creates a new AdminClient with injected gRPC channel and service clients.
+    /// This constructor is intended for testing scenarios.
+    /// </summary>
+    internal AdminClient(
+        LedgerClientOptions options,
+        GrpcChannel channel,
+        PartyManagementService.PartyManagementServiceClient partyService,
+        UserManagementService.UserManagementServiceClient userService)
+    {
+        _options = options;
+        _channel = channel;
+        _partyService = partyService;
+        _userService = userService;
     }
 
     /// <inheritdoc />
     public async Task<string> GetParticipantIdAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.GetParticipantId");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var response = await _partyService.GetParticipantIdAsync(
             new GetParticipantIdRequest(),
@@ -70,10 +85,10 @@ public sealed class AdminClient : IAdminClient
         string? displayName = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.AllocateParty");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("partyIdHint", partyIdHint);
 
-        _logger?.LogDebug("Allocating party with hint: {PartyIdHint}", partyIdHint);
+        Logger.LogDebug("Allocating party with hint: {PartyIdHint}", partyIdHint);
 
         var request = new AllocatePartyRequest
         {
@@ -88,7 +103,7 @@ public sealed class AdminClient : IAdminClient
 
         var details = response.PartyDetails;
 
-        _logger?.LogInformation("Party allocated: {PartyId}", details.Party);
+        Logger.LogInformation("Party allocated: {PartyId}", details.Party);
 
         return new PartyDetails(details.Party, details.IsLocal);
     }
@@ -98,7 +113,7 @@ public sealed class AdminClient : IAdminClient
         IEnumerable<string> partyIds,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.GetParties");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new GetPartiesRequest();
         request.Parties.AddRange(partyIds);
@@ -120,7 +135,7 @@ public sealed class AdminClient : IAdminClient
         string? pageToken = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.ListKnownParties");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new ListKnownPartiesRequest
         {
@@ -146,10 +161,10 @@ public sealed class AdminClient : IAdminClient
         IEnumerable<UserRight>? rights = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.CreateUser");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("userId", userId);
 
-        _logger?.LogDebug("Creating user: {UserId}", userId);
+        Logger.LogDebug("Creating user: {UserId}", userId);
 
         var user = new User
         {
@@ -170,7 +185,7 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        _logger?.LogInformation("User created: {UserId}", userId);
+        Logger.LogInformation("User created: {UserId}", userId);
 
         return FromProtoUser(response.User);
     }
@@ -180,7 +195,7 @@ public sealed class AdminClient : IAdminClient
         string userId,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.GetUser");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         try
         {
@@ -204,7 +219,7 @@ public sealed class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.GrantUserRights");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new GrantUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
@@ -215,7 +230,7 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        _logger?.LogInformation("Rights granted to user {UserId}", userId);
+        Logger.LogInformation("Rights granted to user {UserId}", userId);
     }
 
     /// <inheritdoc />
@@ -224,7 +239,7 @@ public sealed class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.RevokeUserRights");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new RevokeUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
@@ -235,7 +250,7 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        _logger?.LogInformation("Rights revoked from user {UserId}", userId);
+        Logger.LogInformation("Rights revoked from user {UserId}", userId);
     }
 
     /// <inheritdoc />
@@ -244,7 +259,7 @@ public sealed class AdminClient : IAdminClient
         string? pageToken = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("AdminClient.ListUsers");
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new ListUsersRequest
         {
@@ -261,7 +276,7 @@ public sealed class AdminClient : IAdminClient
         return response.Users.Select(FromProtoUser).ToList();
     }
 
-    private static Right ToProtoRight(UserRight right) => right switch
+    internal static Right ToProtoRight(UserRight right) => right switch
     {
         UserRight.ActAs actAs => new Right { CanActAs = new Right.Types.CanActAs { Party = actAs.Party } },
         UserRight.ReadAs readAs => new Right { CanReadAs = new Right.Types.CanReadAs { Party = readAs.Party } },
@@ -270,7 +285,7 @@ public sealed class AdminClient : IAdminClient
         _ => throw new NotSupportedException($"Unknown right type: {right.GetType().Name}")
     };
 
-    private static UserDetails FromProtoUser(User user) =>
+    internal static UserDetails FromProtoUser(User user) =>
         new(user.Id, user.PrimaryParty, Array.Empty<UserRight>());
 
     private Metadata? GetHeaders()

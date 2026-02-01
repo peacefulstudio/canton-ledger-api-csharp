@@ -19,28 +19,27 @@ namespace Canton.Ledger.Grpc.Client;
 /// </summary>
 public sealed class LedgerClient : ILedgerClient
 {
-    private static readonly ActivitySource ActivitySource = new("Canton.Ledger.Grpc.Client");
+    private static readonly ActivitySource ActivitySource = new(typeof(LedgerClient).AssemblyQualifiedName!);
+    private static readonly ILogger<LedgerClient> Logger = LoggerFactory.Create<LedgerClient>();
 
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
     private readonly LedgerClientOptions _options;
-    private readonly ILogger<LedgerClient>? _logger;
 
     /// <summary>
     /// Creates a new LedgerClient with the specified options.
     /// </summary>
-    public LedgerClient(IOptions<LedgerClientOptions> options, ILogger<LedgerClient>? logger = null)
-        : this(options.Value, logger)
+    public LedgerClient(IOptions<LedgerClientOptions> options)
+        : this(options.Value)
     {
     }
 
     /// <summary>
     /// Creates a new LedgerClient with the specified options.
     /// </summary>
-    public LedgerClient(LedgerClientOptions options, ILogger<LedgerClient>? logger = null)
+    public LedgerClient(LedgerClientOptions options)
     {
         _options = options;
-        _logger = logger;
 
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
         {
@@ -50,7 +49,21 @@ public sealed class LedgerClient : ILedgerClient
 
         _commandService = new CommandService.CommandServiceClient(_channel);
 
-        _logger?.LogInformation("LedgerClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+        Logger.LogInformation("LedgerClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+    }
+
+    /// <summary>
+    /// Creates a new LedgerClient with injected gRPC channel and service client.
+    /// This constructor is intended for testing scenarios.
+    /// </summary>
+    internal LedgerClient(
+        LedgerClientOptions options,
+        GrpcChannel channel,
+        CommandService.CommandServiceClient commandService)
+    {
+        _options = options;
+        _channel = channel;
+        _commandService = commandService;
     }
 
     /// <inheritdoc />
@@ -61,7 +74,7 @@ public sealed class LedgerClient : ILedgerClient
         CancellationToken cancellationToken = default)
         where T : ITemplate
     {
-        using var activity = ActivitySource.StartActivity("LedgerClient.Create");
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("template.type", typeof(T).Name);
         activity?.SetTag("actAs", actAs);
 
@@ -71,14 +84,14 @@ public sealed class LedgerClient : ILedgerClient
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"create-{typeof(T).Name.ToLowerInvariant()}");
 
-        _logger?.LogDebug("Creating contract {TemplateType}", typeof(T).Name);
+        Logger.LogDebug("Creating contract {TemplateType}", typeof(T).Name);
 
         var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
 
         var createdContract = result.CreatedContracts.FirstOrDefault()
             ?? throw new InvalidOperationException("No contract was created");
 
-        _logger?.LogInformation("Contract created: {ContractId}", createdContract.ContractId);
+        Logger.LogInformation("Contract created: {ContractId}", createdContract.ContractId);
 
         return new ContractId<T>(createdContract.ContractId);
     }
@@ -90,7 +103,7 @@ public sealed class LedgerClient : ILedgerClient
         string? workflowId = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("LedgerClient.Exercise");
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("choice", command.Choice);
         activity?.SetTag("contractId", command.ContractId);
 
@@ -99,11 +112,11 @@ public sealed class LedgerClient : ILedgerClient
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
 
-        _logger?.LogDebug("Exercising choice {Choice} on {ContractId}", command.Choice, command.ContractId);
+        Logger.LogDebug("Exercising choice {Choice} on {ContractId}", command.Choice, command.ContractId);
 
         var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
 
-        _logger?.LogInformation("Choice exercised: {Choice} on {ContractId}", command.Choice, command.ContractId);
+        Logger.LogInformation("Choice exercised: {Choice} on {ContractId}", command.Choice, command.ContractId);
 
         // TODO: Deserialize the choice result from transaction events
         return default!;
@@ -133,13 +146,13 @@ public sealed class LedgerClient : ILedgerClient
         RuntimeCommands.CommandsSubmission submission,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("LedgerClient.SubmitAndWaitForTransaction");
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
 
         var commands = BuildCommands(submission);
 
         var request = new SubmitAndWaitForTransactionRequest { Commands = commands };
 
-        _logger?.LogDebug("Submitting {CommandCount} commands", submission.Commands.Count);
+        Logger.LogDebug("Submitting {CommandCount} commands", submission.Commands.Count);
 
         var response = await _commandService.SubmitAndWaitForTransactionAsync(
             request,
@@ -167,7 +180,7 @@ public sealed class LedgerClient : ILedgerClient
             }
         }
 
-        _logger?.LogInformation(
+        Logger.LogInformation(
             "Transaction completed: {UpdateId}, Created: {CreatedCount}, Archived: {ArchivedCount}",
             transaction.UpdateId,
             createdContracts.Count,
@@ -194,7 +207,7 @@ public sealed class LedgerClient : ILedgerClient
             cancellationToken: cancellationToken);
     }
 
-    private Commands BuildCommands(RuntimeCommands.CommandsSubmission submission)
+    internal Commands BuildCommands(RuntimeCommands.CommandsSubmission submission)
     {
         var commands = new Commands
         {
@@ -248,7 +261,7 @@ public sealed class LedgerClient : ILedgerClient
         return commands;
     }
 
-    private static ProtoIdentifier ToProtoIdentifier(RuntimeIdentifier identifier)
+    internal static ProtoIdentifier ToProtoIdentifier(RuntimeIdentifier identifier)
     {
         return new ProtoIdentifier
         {
@@ -258,7 +271,7 @@ public sealed class LedgerClient : ILedgerClient
         };
     }
 
-    private static Record ToProtoRecord(DamlRecord record)
+    internal static Record ToProtoRecord(DamlRecord record)
     {
         var protoRecord = new Record();
 
@@ -279,7 +292,7 @@ public sealed class LedgerClient : ILedgerClient
         return protoRecord;
     }
 
-    private static Value ToProtoValue(DamlValue value)
+    internal static Value ToProtoValue(DamlValue value)
     {
         return value switch
         {
@@ -380,7 +393,7 @@ public sealed class LedgerClient : ILedgerClient
 
     public void Dispose()
     {
-        _channel.Dispose();
+        _channel?.Dispose();
         ActivitySource.Dispose();
     }
 }

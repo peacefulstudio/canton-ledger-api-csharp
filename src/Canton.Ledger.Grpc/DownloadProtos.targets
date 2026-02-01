@@ -1,0 +1,81 @@
+<Project>
+  <!--
+    MSBuild targets for downloading Canton Ledger API proto files from Maven Central.
+
+    Downloads:
+    - com.daml:ledger-api-proto (Canton Ledger API protos)
+    - com.daml:ledger-api-value-proto (Canton value types proto)
+    - com.google.api.grpc:proto-google-common-protos (Google common protos)
+  -->
+
+  <PropertyGroup>
+    <!-- Proto output directory -->
+    <ProtoSourceDir>$(MSBuildThisFileDirectory)Proto</ProtoSourceDir>
+
+    <!-- Maven artifact versions -->
+    <CantonVersion Condition="'$(CantonVersion)' == ''">3.4.8</CantonVersion>
+    <GoogleCommonProtosVersion>2.49.0</GoogleCommonProtosVersion>
+
+    <!-- Maven Central URLs -->
+    <MavenCentralBase>https://repo1.maven.org/maven2</MavenCentralBase>
+    <LedgerApiProtoUrl>$(MavenCentralBase)/com/daml/ledger-api-proto/$(CantonVersion)/ledger-api-proto-$(CantonVersion).jar</LedgerApiProtoUrl>
+    <LedgerApiValueProtoUrl>$(MavenCentralBase)/com/daml/ledger-api-value-proto/$(CantonVersion)/ledger-api-value-proto-$(CantonVersion).jar</LedgerApiValueProtoUrl>
+    <GoogleCommonProtosUrl>$(MavenCentralBase)/com/google/api/grpc/proto-google-common-protos/$(GoogleCommonProtosVersion)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar</GoogleCommonProtosUrl>
+
+    <!-- Cache directory for downloaded JARs -->
+    <ProtoCacheDir>$(MSBuildThisFileDirectory)obj/proto-cache</ProtoCacheDir>
+
+    <!-- Marker file to track if protos are already downloaded -->
+    <ProtoMarkerFile>$(ProtoSourceDir)/.downloaded-$(CantonVersion)-$(GoogleCommonProtosVersion)</ProtoMarkerFile>
+  </PropertyGroup>
+
+  <!-- Download protos during Restore phase so they exist before build -->
+  <Target Name="DownloadProtos" BeforeTargets="Restore;CollectPackageReferences;PrepareForBuild" Condition="!Exists('$(ProtoMarkerFile)')">
+    <Message Importance="high" Text="Downloading Canton Ledger API protos (version $(CantonVersion))..." />
+
+    <!-- Create directories -->
+    <MakeDir Directories="$(ProtoCacheDir)" />
+    <MakeDir Directories="$(ProtoSourceDir)" />
+
+    <!-- Download JARs -->
+    <DownloadFile
+      SourceUrl="$(LedgerApiProtoUrl)"
+      DestinationFolder="$(ProtoCacheDir)"
+      DestinationFileName="ledger-api-proto-$(CantonVersion).jar"
+      SkipUnchangedFiles="true" />
+
+    <DownloadFile
+      SourceUrl="$(LedgerApiValueProtoUrl)"
+      DestinationFolder="$(ProtoCacheDir)"
+      DestinationFileName="ledger-api-value-proto-$(CantonVersion).jar"
+      SkipUnchangedFiles="true" />
+
+    <DownloadFile
+      SourceUrl="$(GoogleCommonProtosUrl)"
+      DestinationFolder="$(ProtoCacheDir)"
+      DestinationFileName="proto-google-common-protos-$(GoogleCommonProtosVersion).jar"
+      SkipUnchangedFiles="true" />
+
+    <!-- Extract proto files from JARs using unzip -->
+    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar&quot; &quot;com/daml/ledger/api/v2/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
+          IgnoreExitCode="false" />
+
+    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/ledger-api-value-proto-$(CantonVersion).jar&quot; &quot;com/daml/ledger/api/v2/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
+          IgnoreExitCode="false" />
+
+    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar&quot; &quot;google/api/*.proto&quot; &quot;google/rpc/*.proto&quot; &quot;google/type/*.proto&quot; &quot;google/longrunning/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
+          IgnoreExitCode="false" />
+
+    <!-- Create marker file -->
+    <WriteLinesToFile File="$(ProtoMarkerFile)" Lines="Downloaded: $(CantonVersion) + $(GoogleCommonProtosVersion)" Overwrite="true" />
+
+    <Message Importance="high" Text="Proto files downloaded successfully to $(ProtoSourceDir)" />
+  </Target>
+
+  <!-- Clean target to remove downloaded protos -->
+  <Target Name="CleanProtos" AfterTargets="Clean">
+    <RemoveDir Directories="$(ProtoSourceDir)" />
+    <RemoveDir Directories="$(ProtoCacheDir)" />
+  </Target>
+
+</Project>

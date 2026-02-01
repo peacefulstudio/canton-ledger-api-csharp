@@ -8,16 +8,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!-- Proto source configuration -->
-  <!-- TODO: Automate proto download from Maven. Currently uses vendored protos from quickstart. -->
-  <!-- Required Maven artifacts:
-       - com.daml:ledger-api-proto:${CantonVersion}
-       - com.daml:ledger-api-value-proto:${CantonVersion}
-       - com.google.api.grpc:proto-google-common-protos:2.42.0
-  -->
-  <PropertyGroup>
-    <ProtoSourceDir>$(MSBuildThisFileDirectory)../../../cats/quickstart/backend/build/extracted-protos/main</ProtoSourceDir>
-  </PropertyGroup>
+  <!-- Import proto download targets (downloads from Maven Central) -->
+  <Import Project="DownloadProtos.targets" />
 
   <ItemGroup>
     <PackageReference Include="Google.Protobuf" />
