@@ -13,18 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-  </ItemGroup>
-
-  <!-- Use local project reference for development, package reference for release -->
-  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)../../../daml-codegen-csharp/src/Daml.Codegen.CSharp.Runtime/Daml.Codegen.CSharp.Runtime.csproj')">
-    <ProjectReference Include="$(MSBuildThisFileDirectory)../../../daml-codegen-csharp/src/Daml.Codegen.CSharp.Runtime/Daml.Codegen.CSharp.Runtime.csproj" />
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('$(MSBuildThisFileDirectory)../../../daml-codegen-csharp/src/Daml.Codegen.CSharp.Runtime/Daml.Codegen.CSharp.Runtime.csproj')">
-    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
   </ItemGroup>
 
   <ItemGroup>
