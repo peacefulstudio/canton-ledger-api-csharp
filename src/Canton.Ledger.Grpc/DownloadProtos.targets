@@ -13,7 +13,7 @@
     <ProtoSourceDir>$(MSBuildThisFileDirectory)Proto</ProtoSourceDir>
 
     <!-- Maven artifact versions -->
-    <CantonVersion Condition="'$(CantonVersion)' == ''">3.4.8</CantonVersion>
+    <CantonVersion Condition="'$(CantonVersion)' == ''">3.4.10</CantonVersion>
     <GoogleCommonProtosVersion>2.49.0</GoogleCommonProtosVersion>
 
     <!-- Maven Central URLs -->

@@ -19,7 +19,7 @@
     <RepositoryType>git</RepositoryType>
 
     <!-- Canton/Daml version - controls which proto version to download -->
-    <CantonVersion>3.4.8</CantonVersion>
+    <CantonVersion>3.4.10</CantonVersion>
 
     <!-- Package versioning -->
     <Version>0.1.0</Version>
