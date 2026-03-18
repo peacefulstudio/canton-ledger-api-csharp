@@ -17,7 +17,7 @@ namespace Canton.Ledger.Grpc.Client;
 /// <summary>
 /// Implementation of the Canton Ledger API client using gRPC.
 /// </summary>
-public sealed class LedgerClient : ILedgerClient
+public sealed partial class LedgerClient : ILedgerClient
 {
     private static readonly ActivitySource ActivitySource = new(typeof(LedgerClient).AssemblyQualifiedName!);
     private static readonly ILogger<LedgerClient> Logger = LoggerFactory.Create<LedgerClient>();
@@ -49,8 +49,11 @@ public sealed class LedgerClient : ILedgerClient
 
         _commandService = new CommandService.CommandServiceClient(_channel);
 
-        Logger.LogInformation("LedgerClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+        LogInitialized(Logger, _options.GrpcAddress);
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "LedgerClient initialized with endpoint {Endpoint}")]
+    private static partial void LogInitialized(ILogger logger, string endpoint);
 
     /// <summary>
     /// Creates a new LedgerClient with injected gRPC channel and service client.
@@ -68,7 +71,7 @@ public sealed class LedgerClient : ILedgerClient
 
     /// <inheritdoc />
     public async Task<ContractId<T>> CreateAsync<T>(
-        T template,
+        T payload,
         string actAs,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
@@ -78,23 +81,30 @@ public sealed class LedgerClient : ILedgerClient
         activity?.SetTag("template.type", typeof(T).Name);
         activity?.SetTag("actAs", actAs);
 
-        var createCommand = RuntimeCommands.CreateCommand.For(template);
+        var createCommand = RuntimeCommands.CreateCommand.For(payload);
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
             .WithActAs(actAs)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"create-{typeof(T).Name.ToLowerInvariant()}");
 
-        Logger.LogDebug("Creating contract {TemplateType}", typeof(T).Name);
+        LogCreatingContract(Logger, typeof(T).Name);
 
         var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
 
-        var createdContract = result.CreatedContracts.FirstOrDefault()
-            ?? throw new InvalidOperationException("No contract was created");
+        var createdContract = result.CreatedContracts.Count > 0
+            ? result.CreatedContracts[0]
+            : throw new InvalidOperationException("No contract was created");
 
-        Logger.LogInformation("Contract created: {ContractId}", createdContract.ContractId);
+        LogContractCreated(Logger, createdContract.ContractId);
 
         return new ContractId<T>(createdContract.ContractId);
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Creating contract {TemplateType}")]
+    private static partial void LogCreatingContract(ILogger logger, string templateType);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Contract created: {ContractId}")]
+    private static partial void LogContractCreated(ILogger logger, string contractId);
 
     /// <inheritdoc />
     public async Task<TResult> ExerciseAsync<TResult>(
@@ -112,15 +122,21 @@ public sealed class LedgerClient : ILedgerClient
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
 
-        Logger.LogDebug("Exercising choice {Choice} on {ContractId}", command.Choice, command.ContractId);
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
         var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
 
-        Logger.LogInformation("Choice exercised: {Choice} on {ContractId}", command.Choice, command.ContractId);
+        LogChoiceExercised(Logger, command.Choice, command.ContractId);
 
         // TODO: Deserialize the choice result from transaction events
         return default!;
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
+    private static partial void LogExercisingChoice(ILogger logger, string choice, string contractId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
+    private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
 
     /// <inheritdoc />
     public async Task ExerciseAsync(
@@ -152,7 +168,7 @@ public sealed class LedgerClient : ILedgerClient
 
         var request = new SubmitAndWaitForTransactionRequest { Commands = commands };
 
-        Logger.LogDebug("Submitting {CommandCount} commands", submission.Commands.Count);
+        LogSubmittingCommands(Logger, submission.Commands.Count);
 
         var response = await _commandService.SubmitAndWaitForTransactionAsync(
             request,
@@ -180,11 +196,7 @@ public sealed class LedgerClient : ILedgerClient
             }
         }
 
-        Logger.LogInformation(
-            "Transaction completed: {UpdateId}, Created: {CreatedCount}, Archived: {ArchivedCount}",
-            transaction.UpdateId,
-            createdContracts.Count,
-            archivedContractIds.Count);
+        LogTransactionCompleted(Logger, transaction.UpdateId, createdContracts.Count, archivedContractIds.Count);
 
         return new TransactionResult(
             transaction.UpdateId,
@@ -192,6 +204,12 @@ public sealed class LedgerClient : ILedgerClient
             createdContracts,
             archivedContractIds);
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Submitting {CommandCount} commands")]
+    private static partial void LogSubmittingCommands(ILogger logger, int commandCount);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Transaction completed: {UpdateId}, Created: {CreatedCount}, Archived: {ArchivedCount}")]
+    private static partial void LogTransactionCompleted(ILogger logger, string updateId, int createdCount, int archivedCount);
 
     private async Task<SubmitAndWaitResponse> SubmitAndWaitAsync(
         RuntimeCommands.CommandsSubmission submission,

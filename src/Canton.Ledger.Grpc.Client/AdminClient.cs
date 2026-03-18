@@ -12,7 +12,7 @@ namespace Canton.Ledger.Grpc.Client;
 /// <summary>
 /// Implementation of the Canton participant admin client using gRPC.
 /// </summary>
-public sealed class AdminClient : IAdminClient
+public sealed partial class AdminClient : IAdminClient
 {
     private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).AssemblyQualifiedName!);
     private static readonly ILogger<AdminClient> Logger = LoggerFactory.Create<AdminClient>();
@@ -46,9 +46,12 @@ public sealed class AdminClient : IAdminClient
         _partyService = new PartyManagementService.PartyManagementServiceClient(_channel);
         _userService = new UserManagementService.UserManagementServiceClient(_channel);
 
-        Logger.LogInformation("AdminClient initialized with endpoint {Endpoint}", _options.GrpcAddress);
+        LogInitialized(Logger, _options.GrpcAddress);
     }
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "AdminClient initialized with endpoint {Endpoint}")]
+
+    private static partial void LogInitialized(ILogger logger, string endpoint);
     /// <summary>
     /// Creates a new AdminClient with injected gRPC channel and service clients.
     /// This constructor is intended for testing scenarios.
@@ -88,7 +91,7 @@ public sealed class AdminClient : IAdminClient
         using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("partyIdHint", partyIdHint);
 
-        Logger.LogDebug("Allocating party with hint: {PartyIdHint}", partyIdHint);
+        LogAllocatingParty(Logger, partyIdHint);
 
         var request = new AllocatePartyRequest
         {
@@ -103,10 +106,16 @@ public sealed class AdminClient : IAdminClient
 
         var details = response.PartyDetails;
 
-        Logger.LogInformation("Party allocated: {PartyId}", details.Party);
+        LogPartyAllocated(Logger, details.Party);
 
         return new PartyDetails(details.Party, details.IsLocal);
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Allocating party with hint: {PartyIdHint}")]
+    private static partial void LogAllocatingParty(ILogger logger, string partyIdHint);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Party allocated: {PartyId}")]
+    private static partial void LogPartyAllocated(ILogger logger, string partyId);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PartyDetails>> GetPartiesAsync(
@@ -164,7 +173,7 @@ public sealed class AdminClient : IAdminClient
         using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("userId", userId);
 
-        Logger.LogDebug("Creating user: {UserId}", userId);
+        LogCreatingUser(Logger, userId);
 
         var user = new User
         {
@@ -185,10 +194,16 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        Logger.LogInformation("User created: {UserId}", userId);
+        LogUserCreated(Logger, userId);
 
         return FromProtoUser(response.User);
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Creating user: {UserId}")]
+    private static partial void LogCreatingUser(ILogger logger, string userId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "User created: {UserId}")]
+    private static partial void LogUserCreated(ILogger logger, string userId);
 
     /// <inheritdoc />
     public async Task<UserDetails?> GetUserAsync(
@@ -230,8 +245,11 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        Logger.LogInformation("Rights granted to user {UserId}", userId);
+        LogRightsGranted(Logger, userId);
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Rights granted to user {UserId}")]
+    private static partial void LogRightsGranted(ILogger logger, string userId);
 
     /// <inheritdoc />
     public async Task RevokeUserRightsAsync(
@@ -250,8 +268,11 @@ public sealed class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        Logger.LogInformation("Rights revoked from user {UserId}", userId);
+        LogRightsRevoked(Logger, userId);
     }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Rights revoked from user {UserId}")]
+    private static partial void LogRightsRevoked(ILogger logger, string userId);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<UserDetails>> ListUsersAsync(
