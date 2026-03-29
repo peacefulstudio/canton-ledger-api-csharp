@@ -2,6 +2,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Daml.Codegen.CSharp.Runtime.Contracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,9 +18,13 @@ public sealed partial class PqsClient : IPqsClient
     private static readonly ActivitySource ActivitySource = new("Canton.Ledger.Pqs.Client");
 
     // PQS payloads use camelCase keys while generated C# records use PascalCase properties.
-    private static readonly JsonSerializerOptions CaseInsensitiveOptions = new()
+    // Daml Numeric values are stored as JSON strings ("1.0000000000") requiring AllowReadingFromString.
+    // Daml enum values are stored as plain strings ("Active", "Sell") requiring JsonStringEnumConverter.
+    private static readonly JsonSerializerOptions PqsJsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        Converters = { new JsonStringEnumConverter() }
     };
 
     private readonly PqsClientOptions _options;
@@ -271,7 +276,7 @@ public sealed partial class PqsClient : IPqsClient
 
     private static Contract<T> DeserializeContract<T>(string contractId, string payloadJson) where T : ITemplate
     {
-        var payload = JsonSerializer.Deserialize<T>(payloadJson, CaseInsensitiveOptions)
+        var payload = JsonSerializer.Deserialize<T>(payloadJson, PqsJsonOptions)
             ?? throw new InvalidOperationException(
                 $"Failed to deserialize PQS payload for contract '{contractId}' " +
                 $"as template '{typeof(T).FullName ?? typeof(T).Name}'.");
