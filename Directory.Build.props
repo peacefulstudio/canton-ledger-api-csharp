@@ -17,6 +17,7 @@
     <PackageProjectUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageIcon>icon.png</PackageIcon>
 
     <!-- Canton/Daml version - controls which proto version to download -->
     <CantonVersion>3.4.11</CantonVersion>
@@ -29,4 +30,8 @@
     <!-- Package output directory -->
     <PackageOutputPath>$(MSBuildThisFileDirectory)output/nuget</PackageOutputPath>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>
