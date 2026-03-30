@@ -10,6 +10,25 @@ namespace Canton.Ledger.Pqs.Client.Tests;
 public class PqsClientTests
 {
     // ──────────────────────────────────────────────────────────────
+    // DefaultJsonSerializerOptions
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void default_json_options_can_deserialize_camel_case_payload()
+    {
+        var json = """{"initiator":"alice","counterparty":"bob","numSwaps":"42","status":"Active"}""";
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<FilterTests.SampleTemplate>(
+            json, PqsClient.DefaultJsonSerializerOptions);
+
+        result.Should().NotBeNull();
+        result!.Initiator.Should().Be("alice");
+        result.Counterparty.Should().Be("bob");
+        result.NumSwaps.Should().Be(42);
+        result.Status.Should().Be("Active");
+    }
+
+    // ──────────────────────────────────────────────────────────────
     // IsTemplateNotFoundError
     // ──────────────────────────────────────────────────────────────
 

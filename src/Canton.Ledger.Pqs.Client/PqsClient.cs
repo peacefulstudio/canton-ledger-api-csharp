@@ -41,7 +41,7 @@ public sealed partial class PqsClient : IPqsClient
             NumberHandling = JsonNumberHandling.AllowReadingFromString,
         };
         options.Converters.Add(new JsonStringEnumConverter());
-        options.MakeReadOnly();
+        options.MakeReadOnly(populateMissingResolver: true);
         return options;
     }
 
