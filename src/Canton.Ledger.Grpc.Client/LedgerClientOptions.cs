@@ -1,4 +1,6 @@
-// Copyright (c) 2026 Peaceful Studio. All rights reserved.
+// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
+
+using System.ComponentModel.DataAnnotations;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -10,6 +12,7 @@ public class LedgerClientOptions
     /// <summary>
     /// The gRPC endpoint address (e.g., "https://localhost:5001").
     /// </summary>
+    [Required]
     public required string GrpcAddress { get; set; }
 
     /// <summary>

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio. All rights reserved.
+// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using System.Diagnostics;
 using Com.Daml.Ledger.Api.V2;
@@ -19,7 +19,13 @@ namespace Canton.Ledger.Grpc.Client;
 /// </summary>
 public sealed partial class LedgerClient : ILedgerClient
 {
-    private static readonly ActivitySource ActivitySource = new(typeof(LedgerClient).AssemblyQualifiedName!);
+    /// <summary>
+    /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
+    /// Register with <c>tracing.AddSource(LedgerClient.ActivitySourceName)</c>.
+    /// </summary>
+    public static string ActivitySourceName => typeof(LedgerClient).FullName!;
+
+    private static readonly ActivitySource ActivitySource = new(typeof(LedgerClient).FullName!);
     private static readonly ILogger<LedgerClient> Logger = LoggerFactory.Create<LedgerClient>();
 
     private readonly GrpcChannel _channel;

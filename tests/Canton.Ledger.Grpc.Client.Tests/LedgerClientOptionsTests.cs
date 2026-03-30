@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio. All rights reserved.
+// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using FluentAssertions;
 using Xunit;

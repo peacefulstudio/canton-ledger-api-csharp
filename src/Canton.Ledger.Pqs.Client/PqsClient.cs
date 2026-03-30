@@ -15,37 +15,61 @@ namespace Canton.Ledger.Pqs.Client;
 /// </summary>
 public sealed partial class PqsClient : IPqsClient
 {
-    private static readonly ActivitySource ActivitySource = new("Canton.Ledger.Pqs.Client");
+    /// <summary>
+    /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
+    /// Register with <c>tracing.AddSource(PqsClient.ActivitySourceName)</c>.
+    /// </summary>
+    public static string ActivitySourceName => typeof(PqsClient).FullName!;
 
-    // PQS payloads use camelCase keys while generated C# records use PascalCase properties.
-    // Daml Numeric values are stored as JSON strings ("1.0000000000") requiring AllowReadingFromString.
-    // Daml enum values are stored as plain strings ("Active", "Sell") requiring JsonStringEnumConverter.
-    private static readonly JsonSerializerOptions PqsJsonOptions = new()
+    private static readonly ActivitySource ActivitySource = new(typeof(PqsClient).FullName!);
+
+    /// <summary>
+    /// Default <see cref="JsonSerializerOptions"/> used for deserializing PQS contract payloads.
+    /// PQS payloads use camelCase keys while generated C# records use PascalCase properties,
+    /// so <see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> is enabled to handle the case mismatch.
+    /// Daml Numeric values are stored as JSON strings ("1.0000000000") requiring AllowReadingFromString.
+    /// Daml enum values are stored as plain strings ("Active", "Sell") requiring JsonStringEnumConverter.
+    /// This instance is read-only and cannot be modified.
+    /// </summary>
+    public static readonly JsonSerializerOptions DefaultJsonSerializerOptions = CreateDefaultJsonOptions();
+
+    private static JsonSerializerOptions CreateDefaultJsonOptions()
     {
-        PropertyNameCaseInsensitive = true,
-        NumberHandling = JsonNumberHandling.AllowReadingFromString,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
-    private readonly PqsClientOptions _options;
-    private readonly ILogger<PqsClient> _logger;
-
-    public PqsClient(IOptions<PqsClientOptions> options, ILogger<PqsClient> logger)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(logger);
-        _options = options.Value;
-        ArgumentException.ThrowIfNullOrWhiteSpace(_options.ConnectionString);
-        _logger = logger;
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString,
+        };
+        options.Converters.Add(new JsonStringEnumConverter());
+        options.MakeReadOnly();
+        return options;
     }
 
-    public PqsClient(PqsClientOptions options, ILogger<PqsClient> logger)
+    private static readonly ILogger<PqsClient> Logger = LoggerFactory.Create<PqsClient>();
+
+    private readonly PqsClientOptions _options;
+    private readonly JsonSerializerOptions _jsonOptions;
+
+    /// <summary>
+    /// Creates a new PqsClient using options from dependency injection.
+    /// </summary>
+    public PqsClient(IOptions<PqsClientOptions> options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(logger);
+        _options = options.Value;
+        ArgumentException.ThrowIfNullOrWhiteSpace(_options.ConnectionString);
+        _jsonOptions = _options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
+    }
+
+    /// <summary>
+    /// Creates a new PqsClient with the specified options.
+    /// </summary>
+    public PqsClient(PqsClientOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ConnectionString);
         _options = options;
-        _logger = logger;
+        _jsonOptions = _options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
     }
 
     /// <inheritdoc />
@@ -112,7 +136,7 @@ public sealed partial class PqsClient : IPqsClient
         using var activity = ActivitySource.StartActivity("PqsExists");
         activity?.SetTag("pqs.template", templateId);
 
-        LogQueryStart(templateId);
+        LogQueryStart(Logger, templateId);
 
         try
         {
@@ -128,17 +152,17 @@ public sealed partial class PqsClient : IPqsClient
             var result = await command.ExecuteScalarAsync(cancellationToken);
             var exists = result is not null;
 
-            LogQueryOneResult(exists ? "found" : "not found", templateId);
+            LogQueryOneResult(Logger, exists ? "found" : "not found", templateId);
             return exists;
         }
         catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
         {
-            LogTemplateNotFound(templateId);
+            LogTemplateNotFound(Logger, templateId);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogQueryError(ex, templateId);
+            LogQueryError(Logger, ex, templateId);
             throw;
         }
     }
@@ -186,7 +210,7 @@ public sealed partial class PqsClient : IPqsClient
         using var activity = ActivitySource.StartActivity("PqsQuery");
         activity?.SetTag("pqs.template", templateId);
 
-        LogQueryStart(templateId);
+        LogQueryStart(Logger, templateId);
 
         try
         {
@@ -204,18 +228,18 @@ public sealed partial class PqsClient : IPqsClient
                 contracts.Add(DeserializeContract<T>(reader.GetString(0), reader.GetString(1)));
             }
 
-            LogQueryResult(contracts.Count, templateId);
+            LogQueryResult(Logger, contracts.Count, templateId);
             activity?.SetTag("pqs.result.count", contracts.Count);
             return contracts;
         }
         catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
         {
-            LogTemplateNotFound(templateId);
+            LogTemplateNotFound(Logger, templateId);
             return [];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogQueryError(ex, templateId);
+            LogQueryError(Logger, ex, templateId);
             throw;
         }
     }
@@ -231,7 +255,7 @@ public sealed partial class PqsClient : IPqsClient
         using var activity = ActivitySource.StartActivity("PqsQueryOne");
         activity?.SetTag("pqs.template", templateId);
 
-        LogQueryStart(templateId);
+        LogQueryStart(Logger, templateId);
 
         try
         {
@@ -246,21 +270,21 @@ public sealed partial class PqsClient : IPqsClient
             if (await reader.ReadAsync(cancellationToken))
             {
                 var contract = DeserializeContract<T>(reader.GetString(0), reader.GetString(1));
-                LogQueryOneResult("found", templateId);
+                LogQueryOneResult(Logger, "found", templateId);
                 return contract;
             }
 
-            LogQueryOneResult("not found", templateId);
+            LogQueryOneResult(Logger, "not found", templateId);
             return null;
         }
         catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
         {
-            LogTemplateNotFound(templateId);
+            LogTemplateNotFound(Logger, templateId);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogQueryError(ex, templateId);
+            LogQueryError(Logger, ex, templateId);
             throw;
         }
     }
@@ -274,9 +298,9 @@ public sealed partial class PqsClient : IPqsClient
     internal static bool IsTemplateNotFoundError(PostgresException ex) =>
         ex.SqlState == "P0001" && ex.MessageText.StartsWith("Identifier not found:", StringComparison.Ordinal);
 
-    private static Contract<T> DeserializeContract<T>(string contractId, string payloadJson) where T : ITemplate
+    private Contract<T> DeserializeContract<T>(string contractId, string payloadJson) where T : ITemplate
     {
-        var payload = JsonSerializer.Deserialize<T>(payloadJson, PqsJsonOptions)
+        var payload = JsonSerializer.Deserialize<T>(payloadJson, _jsonOptions)
             ?? throw new InvalidOperationException(
                 $"Failed to deserialize PQS payload for contract '{contractId}' " +
                 $"as template '{typeof(T).FullName ?? typeof(T).Name}'.");
@@ -289,19 +313,19 @@ public sealed partial class PqsClient : IPqsClient
     // ──────────────────────────────────────────────────────────────
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Querying active contracts for template {TemplateId}")]
-    private partial void LogQueryStart(string templateId);
+    private static partial void LogQueryStart(ILogger logger, string templateId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Found {Count} active contracts for {TemplateId}")]
-    private partial void LogQueryResult(int count, string templateId);
+    private static partial void LogQueryResult(ILogger logger, int count, string templateId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Query for {TemplateId}: {Result}")]
-    private partial void LogQueryOneResult(string result, string templateId);
+    private static partial void LogQueryOneResult(ILogger logger, string result, string templateId);
 
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "Template {TemplateId} not registered in PQS — returning empty result. " +
                   "This may indicate the template has never been instantiated or PQS has not indexed it yet.")]
-    private partial void LogTemplateNotFound(string templateId);
+    private static partial void LogTemplateNotFound(ILogger logger, string templateId);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "PQS query failed for template {TemplateId}")]
-    private partial void LogQueryError(Exception ex, string templateId);
+    private static partial void LogQueryError(ILogger logger, Exception ex, string templateId);
 }

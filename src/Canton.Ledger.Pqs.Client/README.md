@@ -24,7 +24,7 @@ var options = new PqsClientOptions
     ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs"
 };
 
-var pqsClient = new PqsClient(options, logger);
+var pqsClient = new PqsClient(options);
 ```
 
 ### Querying All Active Contracts
@@ -72,13 +72,38 @@ var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 
 ### Dependency Injection
 
+The recommended DI lifetime is **Singleton** — `PqsClient` holds only configuration state and relies on Npgsql's built-in connection pooling for database connections.
+
 ```csharp
-services.Configure<PqsClientOptions>(options =>
+// Using the extension method (recommended)
+services.AddPqsClient(configuration.GetSection("Canton:Pqs"));
+
+// Or using an action delegate
+services.AddPqsClient(options =>
 {
-    options.ConnectionString = configuration.GetConnectionString("Pqs")!;
+    options.ConnectionString = "Host=localhost;Database=pqs";
 });
 
-services.AddSingleton<IPqsClient, PqsClient>();
+// Health check (uses the configured connection string)
+services.AddHealthChecks().AddPqsClient(tags: ["database", "ready"]);
+```
+
+### OpenTelemetry Tracing
+
+```csharp
+tracing.AddSource(PqsClient.ActivitySourceName);
+```
+
+### Custom JSON Serialization
+
+Override the default `JsonSerializerOptions` for contract payload deserialization using the action-based overload:
+
+```csharp
+services.AddPqsClient(options =>
+{
+    options.ConnectionString = "Host=localhost;Database=pqs";
+    options.JsonSerializerOptions = new JsonSerializerOptions { /* ... */ };
+});
 ```
 
 ## Related Packages

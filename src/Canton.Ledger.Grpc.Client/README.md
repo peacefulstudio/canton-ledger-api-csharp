@@ -85,16 +85,25 @@ var users = await adminClient.ListUsersAsync();
 
 ## Dependency Injection
 
-For ASP.NET Core applications:
+The recommended DI lifetime is **Singleton** — gRPC clients share the underlying `GrpcChannel` lifetime.
 
 ```csharp
-services.Configure<LedgerClientOptions>(options =>
-{
-    options.GrpcAddress = "https://localhost:5001";
-});
+// Using extension methods (recommended)
+services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
+services.AddAdminClient(configuration.GetSection("Canton:Ledger"));
 
-services.AddSingleton<ILedgerClient, LedgerClient>();
-services.AddSingleton<IAdminClient, AdminClient>();
+// Or using action delegates
+services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+
+// Health check — requires IAdminClient, calls GetParticipantIdAsync to verify connectivity
+services.AddHealthChecks().AddLedgerClient(tags: ["grpc", "ready"]);
+```
+
+### OpenTelemetry Tracing
+
+```csharp
+tracing.AddSource(LedgerClient.ActivitySourceName);
+tracing.AddSource(AdminClient.ActivitySourceName);
 ```
 
 ## Related Packages

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio. All rights reserved.
+// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using System.Diagnostics;
 using Com.Daml.Ledger.Api.V2.Admin;
@@ -14,7 +14,13 @@ namespace Canton.Ledger.Grpc.Client;
 /// </summary>
 public sealed partial class AdminClient : IAdminClient
 {
-    private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).AssemblyQualifiedName!);
+    /// <summary>
+    /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
+    /// Register with <c>tracing.AddSource(AdminClient.ActivitySourceName)</c>.
+    /// </summary>
+    public static string ActivitySourceName => typeof(AdminClient).FullName!;
+
+    private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).FullName!);
     private static readonly ILogger<AdminClient> Logger = LoggerFactory.Create<AdminClient>();
 
     private readonly GrpcChannel _channel;
