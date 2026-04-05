@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Canton.Ledger.Auth;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -57,6 +58,38 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers <see cref="ILedgerClient"/> as a singleton, binds <see cref="LedgerClientOptions"/>
+    /// from the provided configuration section, and auto-registers <see cref="ITokenProvider"/> as a
+    /// <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
+    /// If an <see cref="ITokenProvider"/> is already registered, the existing registration is kept.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">
+    /// A configuration section containing <see cref="LedgerClientOptions"/> values
+    /// (e.g., <c>configuration.GetSection("Canton:Ledger")</c>).
+    /// </param>
+    /// <param name="authConfiguration">
+    /// A configuration section containing <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsOptions"/> values
+    /// (e.g., <c>configuration.GetSection("Canton:Auth")</c>).
+    /// </param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddLedgerClient(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IConfiguration authConfiguration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(authConfiguration);
+
+        services.AddCantonAuth(authConfiguration);
+        AddLedgerOptions(services, configuration);
+        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers <see cref="IAdminClient"/> as a singleton and binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section. Options are validated at startup.
     /// </summary>
@@ -87,6 +120,38 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers <see cref="IAdminClient"/> as a singleton, binds <see cref="LedgerClientOptions"/>
+    /// from the provided configuration section, and auto-registers <see cref="ITokenProvider"/> as a
+    /// <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
+    /// If an <see cref="ITokenProvider"/> is already registered, the existing registration is kept.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">
+    /// A configuration section containing <see cref="LedgerClientOptions"/> values
+    /// (e.g., <c>configuration.GetSection("Canton:Ledger")</c>).
+    /// </param>
+    /// <param name="authConfiguration">
+    /// A configuration section containing <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsOptions"/> values
+    /// (e.g., <c>configuration.GetSection("Canton:Auth")</c>).
+    /// </param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddAdminClient(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IConfiguration authConfiguration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(authConfiguration);
+
+        services.AddCantonAuth(authConfiguration);
+        AddLedgerOptions(services, configuration);
+        services.TryAddSingleton<IAdminClient, AdminClient>();
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers <see cref="IAdminClient"/> as a singleton and configures <see cref="LedgerClientOptions"/>
     /// using the provided action delegate. Options are validated at startup.
     /// </summary>
@@ -110,6 +175,8 @@ public static class ServiceCollectionExtensions
             .Bind(configuration)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.TryAddSingleton(ITokenProvider.None);
     }
 
     private static void AddLedgerOptions(IServiceCollection services, Action<LedgerClientOptions> configure)
@@ -118,5 +185,7 @@ public static class ServiceCollectionExtensions
             .Configure(configure)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+
+        services.TryAddSingleton(ITokenProvider.None);
     }
 }

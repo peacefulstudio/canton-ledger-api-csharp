@@ -419,6 +419,34 @@ public class AdminClientTests
     }
 
     [Fact]
+    public async Task throws_when_token_provider_returns_empty_token()
+    {
+        var emptyProvider = Substitute.For<ITokenProvider>();
+        emptyProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("");
+
+        var client = new AdminClient(_options, _channel, _partyService, _userService, emptyProvider);
+
+        var act = () => client.GetParticipantIdAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*returned an empty token*");
+    }
+
+    [Fact]
+    public async Task throws_when_token_provider_returns_whitespace_token()
+    {
+        var whitespaceProvider = Substitute.For<ITokenProvider>();
+        whitespaceProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("   ");
+
+        var client = new AdminClient(_options, _channel, _partyService, _userService, whitespaceProvider);
+
+        var act = () => client.GetParticipantIdAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*returned an empty token*");
+    }
+
+    [Fact]
     public void dispose_does_not_throw()
     {
         var client = CreateClient();

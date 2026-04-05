@@ -2,32 +2,48 @@
 
 High-level gRPC client for the Canton Ledger API with integration to `Daml.Codegen.CSharp.Runtime` types.
 
-## Overview
+## Key Types
 
-This package provides a strongly-typed, easy-to-use client for interacting with Canton participant nodes. It wraps the low-level gRPC stubs from `Canton.Ledger.Grpc` and integrates with the Daml code generation runtime.
+| Type | Purpose |
+|------|---------|
+| `ILedgerClient` | Command operations: `CreateAsync`, `ExerciseAsync`, `SubmitAsync` |
+| `IAdminClient` | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
+| `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout` |
 
-## Installation
+## Authentication
 
-```bash
-dotnet add package Canton.Ledger.Grpc.Client
-```
+Clients receive an `ITokenProvider` from `Canton.Ledger.Auth`. Three modes:
 
-## Usage
-
-### Basic Setup
+### 1. Client credentials (OAuth2) — auto-registered from config
 
 ```csharp
-using Canton.Ledger.Grpc.Client;
-
-var options = new LedgerClientOptions
-{
-    GrpcAddress = "https://localhost:5001",
-    AccessToken = "your-jwt-token"  // Optional
-};
-
-using var ledgerClient = new LedgerClient(options);
-using var adminClient = new AdminClient(options);
+services.AddLedgerClient(
+    configuration.GetSection("Canton:Ledger"),
+    authConfiguration: configuration.GetSection("Canton:Auth"));
 ```
+
+This calls `AddCantonAuth(authConfiguration)` internally. The `ClientCredentialsProvider` handles token acquisition and caching.
+
+### 2. Static token — explicit registration
+
+```csharp
+services.AddCantonStaticAuth("eyJ...");
+services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
+```
+
+Explicit registrations use `TryAddSingleton` — they always take precedence over auto-registration.
+
+### 3. Unauthenticated — no auth configured
+
+```csharp
+services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
+// No ITokenProvider registered — defaults to ITokenProvider.None
+// Clients skip the Authorization header
+```
+
+Use for local development with unauthenticated Canton nodes.
+
+## Usage
 
 ### Creating Contracts
 
@@ -56,30 +72,21 @@ await ledgerClient.ExerciseAsync(
 ### Party Management
 
 ```csharp
-// Allocate a new party
 var party = await adminClient.AllocatePartyAsync("alice-hint");
-Console.WriteLine($"Allocated party: {party.Party}");
 
-// Create a user with rights
 var user = await adminClient.CreateUserAsync(
     userId: "alice-user",
     primaryParty: party.Party,
-    rights: new[]
-    {
-        new UserRight.ActAs(party.Party),
-        new UserRight.ReadAs(party.Party)
-    });
+    rights: [new UserRight.ActAs(party.Party), new UserRight.ReadAs(party.Party)]);
 ```
 
 ### User Management
 
 ```csharp
-// Grant additional rights
 await adminClient.GrantUserRightsAsync(
     "alice-user",
-    new[] { new UserRight.ReadAs("Bob::5678...") });
+    [new UserRight.ReadAs("Bob::5678...")]);
 
-// List all users
 var users = await adminClient.ListUsersAsync();
 ```
 
@@ -88,11 +95,16 @@ var users = await adminClient.ListUsersAsync();
 The recommended DI lifetime is **Singleton** — gRPC clients share the underlying `GrpcChannel` lifetime.
 
 ```csharp
-// Using extension methods (recommended)
+// Config-based (recommended)
 services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
 services.AddAdminClient(configuration.GetSection("Canton:Ledger"));
 
-// Or using action delegates
+// With auth configuration
+services.AddLedgerClient(
+    configuration.GetSection("Canton:Ledger"),
+    configuration.GetSection("Canton:Auth"));
+
+// Action-based
 services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
 
 // Health check — requires IAdminClient, calls GetParticipantIdAsync to verify connectivity
@@ -108,6 +120,7 @@ tracing.AddSource(AdminClient.ActivitySourceName);
 
 ## Related Packages
 
-- `Canton.Ledger.Grpc` - Low-level gRPC stubs
-- `Daml.Codegen.CSharp.Runtime` - Runtime types for generated Daml contracts
-- `Daml.Codegen.CSharp` - Code generator for Daml contracts
+- `Canton.Ledger.Auth` — Authentication providers (`ITokenProvider`)
+- `Canton.Ledger.Grpc` — Low-level gRPC stubs
+- `Canton.Ledger.Pqs.Client` — PQS query client
+- `Daml.Codegen.CSharp.Runtime` — Runtime types for generated Daml contracts

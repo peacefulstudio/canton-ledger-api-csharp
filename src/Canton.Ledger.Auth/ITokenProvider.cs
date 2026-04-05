@@ -8,6 +8,12 @@ namespace Canton.Ledger.Auth;
 public interface ITokenProvider
 {
     /// <summary>
+    /// A token provider that signals unauthenticated access. The built-in clients
+    /// detect this instance and skip the Authorization header entirely.
+    /// </summary>
+    static ITokenProvider None => NullTokenProvider.Instance;
+
+    /// <summary>
     /// Returns a valid bearer token. Implementations may cache and refresh tokens automatically.
     /// </summary>
     Task<string> GetTokenAsync(CancellationToken cancellationToken = default);

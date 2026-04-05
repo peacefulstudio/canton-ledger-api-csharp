@@ -525,6 +525,48 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public async Task throws_when_token_provider_returns_empty_token()
+    {
+        var emptyProvider = Substitute.For<ITokenProvider>();
+        emptyProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("");
+
+        var client = new LedgerClient(_options, _channel, _commandService, emptyProvider);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(
+                new RuntimeCommands.CreateCommand(
+                    new RuntimeIdentifier("pkg", "Module", "Template"),
+                    new DamlRecord(null, [])))
+            .WithActAs("party::alice")
+            .WithCommandId("test-cmd");
+
+        var act = () => client.SubmitAndWaitForTransactionAsync(submission);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*returned an empty token*");
+    }
+
+    [Fact]
+    public async Task throws_when_token_provider_returns_whitespace_token()
+    {
+        var whitespaceProvider = Substitute.For<ITokenProvider>();
+        whitespaceProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("   ");
+
+        var client = new LedgerClient(_options, _channel, _commandService, whitespaceProvider);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(
+                new RuntimeCommands.CreateCommand(
+                    new RuntimeIdentifier("pkg", "Module", "Template"),
+                    new DamlRecord(null, [])))
+            .WithActAs("party::alice")
+            .WithCommandId("test-cmd");
+
+        var act = () => client.SubmitAndWaitForTransactionAsync(submission);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*returned an empty token*");
+    }
+
+    [Fact]
     public void dispose_does_not_throw()
     {
         var client = CreateClient();
