@@ -21,7 +21,10 @@
     <PackageVersion Include="Daml.Codegen.CSharp.Runtime" Version="0.1.0-alpha.3" />
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="9.0.3" />
+    <!-- Auth -->
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.5" />
     <!-- Testing -->
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.1.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

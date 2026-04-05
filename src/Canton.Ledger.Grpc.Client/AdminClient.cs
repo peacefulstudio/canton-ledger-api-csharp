@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using System.Diagnostics;
+using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -27,21 +28,26 @@ public sealed partial class AdminClient : IAdminClient
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
     private readonly UserManagementService.UserManagementServiceClient _userService;
     private readonly LedgerClientOptions _options;
+    private readonly ITokenProvider? _tokenProvider;
 
     /// <summary>
-    /// Creates a new AdminClient with the specified options.
+    /// Creates a new AdminClient with the specified options and token provider.
     /// </summary>
-    public AdminClient(IOptions<LedgerClientOptions> options)
-        : this(options.Value)
+    public AdminClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider)
+        : this(options.Value, tokenProvider)
     {
     }
 
     /// <summary>
-    /// Creates a new AdminClient with the specified options.
+    /// Creates a new AdminClient with the specified options and token provider.
     /// </summary>
-    public AdminClient(LedgerClientOptions options)
+    public AdminClient(LedgerClientOptions options, ITokenProvider tokenProvider)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(tokenProvider);
+
         _options = options;
+        _tokenProvider = tokenProvider;
 
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
         {
@@ -56,8 +62,8 @@ public sealed partial class AdminClient : IAdminClient
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "AdminClient initialized with endpoint {Endpoint}")]
-
     private static partial void LogInitialized(ILogger logger, string endpoint);
+
     /// <summary>
     /// Creates a new AdminClient with injected gRPC channel and service clients.
     /// This constructor is intended for testing scenarios.
@@ -66,12 +72,14 @@ public sealed partial class AdminClient : IAdminClient
         LedgerClientOptions options,
         GrpcChannel channel,
         PartyManagementService.PartyManagementServiceClient partyService,
-        UserManagementService.UserManagementServiceClient userService)
+        UserManagementService.UserManagementServiceClient userService,
+        ITokenProvider? tokenProvider = null)
     {
         _options = options;
         _channel = channel;
         _partyService = partyService;
         _userService = userService;
+        _tokenProvider = tokenProvider;
     }
 
     /// <inheritdoc />
@@ -81,7 +89,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _partyService.GetParticipantIdAsync(
             new GetParticipantIdRequest(),
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -106,7 +114,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _partyService.AllocatePartyAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -135,7 +143,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _partyService.GetPartiesAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -160,7 +168,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _partyService.ListKnownPartiesAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -196,7 +204,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _userService.CreateUserAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -222,7 +230,7 @@ public sealed partial class AdminClient : IAdminClient
         {
             var response = await _userService.GetUserAsync(
                 new GetUserRequest { UserId = userId },
-                headers: GetHeaders(),
+                headers: await GetHeadersAsync(cancellationToken),
                 deadline: GetDeadline(),
                 cancellationToken: cancellationToken);
 
@@ -247,7 +255,7 @@ public sealed partial class AdminClient : IAdminClient
 
         await _userService.GrantUserRightsAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -270,7 +278,7 @@ public sealed partial class AdminClient : IAdminClient
 
         await _userService.RevokeUserRightsAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -296,7 +304,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var response = await _userService.ListUsersAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -315,14 +323,15 @@ public sealed partial class AdminClient : IAdminClient
     internal static UserDetails FromProtoUser(User user) =>
         new(user.Id, user.PrimaryParty, Array.Empty<UserRight>());
 
-    private Metadata? GetHeaders()
+    private async Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_options.AccessToken))
+        if (_tokenProvider is null)
             return null;
 
+        var token = await _tokenProvider.GetTokenAsync(cancellationToken);
         return new Metadata
         {
-            { "Authorization", $"Bearer {_options.AccessToken}" }
+            { "authorization", $"Bearer {token}" }
         };
     }
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using System.Diagnostics;
+using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Codegen.CSharp.Runtime.Contracts;
 using Daml.Codegen.CSharp.Runtime.Data;
@@ -31,21 +32,26 @@ public sealed partial class LedgerClient : ILedgerClient
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
     private readonly LedgerClientOptions _options;
+    private readonly ITokenProvider? _tokenProvider;
 
     /// <summary>
-    /// Creates a new LedgerClient with the specified options.
+    /// Creates a new LedgerClient with the specified options and token provider.
     /// </summary>
-    public LedgerClient(IOptions<LedgerClientOptions> options)
-        : this(options.Value)
+    public LedgerClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider)
+        : this(options.Value, tokenProvider)
     {
     }
 
     /// <summary>
-    /// Creates a new LedgerClient with the specified options.
+    /// Creates a new LedgerClient with the specified options and token provider.
     /// </summary>
-    public LedgerClient(LedgerClientOptions options)
+    public LedgerClient(LedgerClientOptions options, ITokenProvider tokenProvider)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(tokenProvider);
+
         _options = options;
+        _tokenProvider = tokenProvider;
 
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
         {
@@ -68,11 +74,13 @@ public sealed partial class LedgerClient : ILedgerClient
     internal LedgerClient(
         LedgerClientOptions options,
         GrpcChannel channel,
-        CommandService.CommandServiceClient commandService)
+        CommandService.CommandServiceClient commandService,
+        ITokenProvider? tokenProvider = null)
     {
         _options = options;
         _channel = channel;
         _commandService = commandService;
+        _tokenProvider = tokenProvider;
     }
 
     /// <inheritdoc />
@@ -178,7 +186,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         var response = await _commandService.SubmitAndWaitForTransactionAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
@@ -226,7 +234,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         return await _commandService.SubmitAndWaitAsync(
             request,
-            headers: GetHeaders(),
+            headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
     }
@@ -396,14 +404,15 @@ public sealed partial class LedgerClient : ILedgerClient
         return new Value { GenMap = protoMap };
     }
 
-    private Metadata? GetHeaders()
+    private async Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(_options.AccessToken))
+        if (_tokenProvider is null)
             return null;
 
+        var token = await _tokenProvider.GetTokenAsync(cancellationToken);
         return new Metadata
         {
-            { "Authorization", $"Bearer {_options.AccessToken}" }
+            { "authorization", $"Bearer {token}" }
         };
     }
 

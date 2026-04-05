@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Codegen.CSharp.Runtime.Data;
 using FluentAssertions;
@@ -19,13 +20,13 @@ public class LedgerClientTests
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
+    private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientTests()
     {
         _options = new LedgerClientOptions
         {
             GrpcAddress = "https://localhost:5001",
-            AccessToken = "test-token",
             UserId = "test-user"
         };
 
@@ -37,7 +38,7 @@ public class LedgerClientTests
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
     }
 
-    private LedgerClient CreateClient() => new(_options, _channel, _commandService);
+    private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
 
     [Fact]
     public void to_proto_identifier_converts_correctly()

@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Canton.Ledger.Auth;
 using Canton.Ledger.Grpc.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -134,5 +135,77 @@ public class ServiceCollectionExtensionsTests
         var result = services.AddAdminClient(config);
 
         result.Should().BeSameAs(services);
+    }
+
+    [Fact]
+    public void ledger_client_resolves_when_token_provider_registered()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonStaticAuth("test-token");
+        services.AddLedgerClient(config);
+
+        var provider = services.BuildServiceProvider();
+        var client = provider.GetService<ILedgerClient>();
+
+        client.Should().NotBeNull();
+        client.Should().BeOfType<LedgerClient>();
+    }
+
+    [Fact]
+    public void admin_client_resolves_when_token_provider_registered()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonStaticAuth("test-token");
+        services.AddAdminClient(config);
+
+        var provider = services.BuildServiceProvider();
+        var client = provider.GetService<IAdminClient>();
+
+        client.Should().NotBeNull();
+        client.Should().BeOfType<AdminClient>();
+    }
+
+    [Fact]
+    public void ledger_client_fails_without_token_provider()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddLedgerClient(config);
+
+        var provider = services.BuildServiceProvider();
+        var act = () => provider.GetRequiredService<ILedgerClient>();
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void admin_client_fails_without_token_provider()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddAdminClient(config);
+
+        var provider = services.BuildServiceProvider();
+        var act = () => provider.GetRequiredService<IAdminClient>();
+
+        act.Should().Throw<InvalidOperationException>();
     }
 }

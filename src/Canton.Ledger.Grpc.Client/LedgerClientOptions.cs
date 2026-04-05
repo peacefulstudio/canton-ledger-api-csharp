@@ -17,14 +17,8 @@ public class LedgerClientOptions
 
     /// <summary>
     /// The user ID for command submissions (Ledger API v2).
-    /// Required unless authentication is used with a user token.
     /// </summary>
     public string? UserId { get; set; }
-
-    /// <summary>
-    /// Optional access token for authentication.
-    /// </summary>
-    public string? AccessToken { get; set; }
 
     /// <summary>
     /// Maximum message size in bytes. Default is 100MB.

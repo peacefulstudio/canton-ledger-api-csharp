@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2.Admin;
 using FluentAssertions;
 using Grpc.Core;
@@ -15,13 +16,13 @@ public class AdminClientTests
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
     private readonly UserManagementService.UserManagementServiceClient _userService;
+    private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public AdminClientTests()
     {
         _options = new LedgerClientOptions
         {
-            GrpcAddress = "https://localhost:5001",
-            AccessToken = "test-token"
+            GrpcAddress = "https://localhost:5001"
         };
 
         // Create a real channel (won't be used since we mock service clients)
@@ -33,7 +34,7 @@ public class AdminClientTests
         _userService = Substitute.ForPartsOf<UserManagementService.UserManagementServiceClient>(callInvoker);
     }
 
-    private AdminClient CreateClient() => new(_options, _channel, _partyService, _userService);
+    private AdminClient CreateClient() => new(_options, _channel, _partyService, _userService, _tokenProvider);
 
     [Fact]
     public async Task get_participant_id_returns_id_from_response()

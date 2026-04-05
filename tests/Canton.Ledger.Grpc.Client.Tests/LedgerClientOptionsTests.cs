@@ -18,7 +18,6 @@ public class LedgerClientOptionsTests
         options.UserId.Should().BeNull();
         options.MaxMessageSize.Should().Be(100 * 1024 * 1024);
         options.Timeout.Should().Be(TimeSpan.FromSeconds(30));
-        options.AccessToken.Should().BeNull();
     }
 
     [Fact]
@@ -30,17 +29,5 @@ public class LedgerClientOptionsTests
         };
 
         options.GrpcAddress.Should().Be("https://participant.example.com:5001");
-    }
-
-    [Fact]
-    public void access_token_can_be_set()
-    {
-        var options = new LedgerClientOptions
-        {
-            GrpcAddress = "https://localhost:5001",
-            AccessToken = "test-token"
-        };
-
-        options.AccessToken.Should().Be("test-token");
     }
 }
