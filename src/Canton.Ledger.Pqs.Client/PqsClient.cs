@@ -3,7 +3,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Daml.Codegen.CSharp.Runtime.Contracts;
+using Daml.Runtime.Contracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;

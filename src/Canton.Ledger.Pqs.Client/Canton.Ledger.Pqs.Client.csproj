@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
+    <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

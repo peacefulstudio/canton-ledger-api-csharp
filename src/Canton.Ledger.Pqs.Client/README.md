@@ -109,5 +109,5 @@ services.AddPqsClient(options =>
 ## Related Packages
 
 - `Canton.Ledger.Grpc.Client` - gRPC client for command submission
-- `Daml.Codegen.CSharp.Runtime` - Runtime types for generated Daml contracts
+- `Daml.Runtime` - Runtime types for generated Daml contracts
 - `Daml.Codegen.CSharp` - Code generator for Daml contracts

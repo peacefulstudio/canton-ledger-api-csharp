@@ -2,15 +2,15 @@
 
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
-using Daml.Codegen.CSharp.Runtime.Contracts;
-using Daml.Codegen.CSharp.Runtime.Data;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using FluentAssertions;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
-using RuntimeCommands = Daml.Codegen.CSharp.Runtime.Commands;
-using RuntimeIdentifier = Daml.Codegen.CSharp.Runtime.Data.Identifier;
+using RuntimeCommands = Daml.Runtime.Commands;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;

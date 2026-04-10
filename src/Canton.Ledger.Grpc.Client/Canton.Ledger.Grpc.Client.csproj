@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Canton.Ledger.Grpc.Client</PackageId>
-    <Description>High-level gRPC client for the Canton Ledger API with integration to Daml.Codegen.CSharp.Runtime types.</Description>
+    <Description>High-level gRPC client for the Canton Ledger API with integration to Daml.Runtime types.</Description>
     <PackageTags>canton;daml;ledger;grpc;blockchain;smart-contracts;client</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
+    <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Microsoft.Extensions.Options" />

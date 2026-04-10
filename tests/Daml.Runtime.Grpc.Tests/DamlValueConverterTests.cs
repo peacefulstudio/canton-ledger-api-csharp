@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Com.Daml.Ledger.Api.V2;
-using Daml.Codegen.CSharp.Runtime.Contracts;
-using Daml.Codegen.CSharp.Runtime.Data;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using FluentAssertions;
 using Xunit;
-using RuntimeIdentifier = Daml.Codegen.CSharp.Runtime.Data.Identifier;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;

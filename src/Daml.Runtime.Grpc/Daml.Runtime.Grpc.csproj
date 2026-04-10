@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Daml.Runtime.Grpc</PackageId>
-    <Description>Bidirectional conversion between Daml.Codegen.CSharp.Runtime value types and Canton Ledger API v2 protobuf messages.</Description>
+    <Description>Bidirectional conversion between Daml.Runtime value types and Canton Ledger API v2 protobuf messages.</Description>
     <PackageTags>canton;daml;ledger;grpc;protobuf;serialization</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
+    <PackageReference Include="Daml.Runtime" />
   </ItemGroup>
 
   <ItemGroup>

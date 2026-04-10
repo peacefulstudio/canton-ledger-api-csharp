@@ -11,7 +11,7 @@ C# client libraries for interacting with Canton participant nodes via the Ledger
 | Package | Description |
 |---------|-------------|
 | [`Canton.Ledger.Grpc`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc) | Generated gRPC stubs from Canton Ledger API protos |
-| [`Canton.Ledger.Grpc.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc.Client) | High-level client with `Daml.Codegen.CSharp.Runtime` integration |
+| [`Canton.Ledger.Grpc.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc.Client) | High-level client with `Daml.Runtime` integration |
 | [`Canton.Ledger.Pqs.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Pqs.Client) | Type-safe query client for the Participant Query Store (PQS) |
 
 Packages are published to [GitHub Packages](https://github.com/orgs/peacefulstudio/packages?repo_name=canton-ledger-api-csharp).

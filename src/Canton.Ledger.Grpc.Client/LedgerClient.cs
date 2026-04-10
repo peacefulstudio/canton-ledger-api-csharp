@@ -3,14 +3,14 @@
 using System.Diagnostics;
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
-using Daml.Codegen.CSharp.Runtime.Contracts;
-using Daml.Codegen.CSharp.Runtime.Data;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using RuntimeCommands = Daml.Codegen.CSharp.Runtime.Commands;
+using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
 

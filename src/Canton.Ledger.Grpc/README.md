@@ -49,5 +49,5 @@ This package is generated from Canton Ledger API version specified in the projec
 
 ## Related Packages
 
-- `Canton.Ledger.Grpc.Client` - High-level client with integration to `Daml.Codegen.CSharp.Runtime`
-- `Daml.Codegen.CSharp.Runtime` - Runtime types for generated Daml contracts
+- `Canton.Ledger.Grpc.Client` - High-level client with integration to `Daml.Runtime`
+- `Daml.Runtime` - Runtime types for generated Daml contracts

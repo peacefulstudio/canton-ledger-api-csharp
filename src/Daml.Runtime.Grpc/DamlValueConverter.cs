@@ -2,9 +2,9 @@
 
 using System.Globalization;
 using Com.Daml.Ledger.Api.V2;
-using Daml.Codegen.CSharp.Runtime.Contracts;
-using Daml.Codegen.CSharp.Runtime.Data;
-using RuntimeIdentifier = Daml.Codegen.CSharp.Runtime.Data.Identifier;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 
 namespace Daml.Runtime.Grpc;

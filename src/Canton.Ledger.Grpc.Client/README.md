@@ -1,6 +1,6 @@
 # Canton.Ledger.Grpc.Client
 
-High-level gRPC client for the Canton Ledger API with integration to `Daml.Codegen.CSharp.Runtime` types.
+High-level gRPC client for the Canton Ledger API with integration to `Daml.Runtime` types.
 
 ## Key Types
 
@@ -123,4 +123,4 @@ tracing.AddSource(AdminClient.ActivitySourceName);
 - `Canton.Ledger.Auth` — Authentication providers (`ITokenProvider`)
 - `Canton.Ledger.Grpc` — Low-level gRPC stubs
 - `Canton.Ledger.Pqs.Client` — PQS query client
-- `Daml.Codegen.CSharp.Runtime` — Runtime types for generated Daml contracts
+- `Daml.Runtime` — Runtime types for generated Daml contracts

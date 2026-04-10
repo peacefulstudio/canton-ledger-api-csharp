@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Daml.Codegen.CSharp.Runtime.Contracts;
+using Daml.Runtime.Contracts;
 
 namespace Canton.Ledger.Pqs.Client;
 

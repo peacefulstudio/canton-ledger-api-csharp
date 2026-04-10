@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Canton.Ledger.Pqs.Client;
-using Daml.Codegen.CSharp.Runtime.Contracts;
-using Daml.Codegen.CSharp.Runtime.Data;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using FluentAssertions;
 using Npgsql;
 using Xunit;
