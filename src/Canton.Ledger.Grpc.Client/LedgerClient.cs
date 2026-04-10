@@ -173,7 +173,7 @@ public sealed partial class LedgerClient : ILedgerClient
                 $"ExercisedEvent for choice {command.Choice} on {command.ContractId} has no ExerciseResult.");
 
         var resultValue = DamlValueConverter.FromProtoValue(exerciseResult);
-        return DamlValueConverter.FromDamlValue<TResult>(resultValue);
+        return resultValue.FromDamlValue<TResult>()!;
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
