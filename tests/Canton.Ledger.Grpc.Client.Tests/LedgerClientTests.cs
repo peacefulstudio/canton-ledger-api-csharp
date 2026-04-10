@@ -2,6 +2,7 @@
 
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
+using Daml.Codegen.CSharp.Runtime.Contracts;
 using Daml.Codegen.CSharp.Runtime.Data;
 using FluentAssertions;
 using Grpc.Core;
@@ -12,6 +13,7 @@ using RuntimeCommands = Daml.Codegen.CSharp.Runtime.Commands;
 using RuntimeIdentifier = Daml.Codegen.CSharp.Runtime.Data.Identifier;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
+using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
@@ -40,253 +42,9 @@ public class LedgerClientTests
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
 
-    [Fact]
-    public void to_proto_identifier_converts_correctly()
-    {
-        var identifier = new RuntimeIdentifier("package-id", "Module.Name", "Entity");
-
-        var protoIdentifier = LedgerClient.ToProtoIdentifier(identifier);
-
-        protoIdentifier.PackageId.Should().Be("package-id");
-        protoIdentifier.ModuleName.Should().Be("Module.Name");
-        protoIdentifier.EntityName.Should().Be("Entity");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_unit()
-    {
-        var value = DamlUnit.Instance;
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Unit.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void to_proto_value_converts_bool()
-    {
-        var protoTrue = LedgerClient.ToProtoValue(new DamlBool(true));
-        var protoFalse = LedgerClient.ToProtoValue(new DamlBool(false));
-
-        protoTrue.Bool.Should().BeTrue();
-        protoFalse.Bool.Should().BeFalse();
-    }
-
-    [Fact]
-    public void to_proto_value_converts_int64()
-    {
-        var value = new DamlInt64(42);
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Int64.Should().Be(42);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_text()
-    {
-        var value = new DamlText("hello world");
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Text.Should().Be("hello world");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_party()
-    {
-        var value = new DamlParty("party::alice");
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Party.Should().Be("party::alice");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_numeric()
-    {
-        var value = new DamlNumeric(123.456m);
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Numeric.Should().Be("123.456");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_date()
-    {
-        var date = new DateOnly(2024, 1, 1);
-        var value = new DamlDate(date);
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Date.Should().Be(value.DaysSinceEpoch);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_timestamp()
-    {
-        var timestamp = DateTimeOffset.UnixEpoch.AddSeconds(1704067200);
-        var value = new DamlTimestamp(timestamp);
-
-        var protoValue = LedgerClient.ToProtoValue(value);
-
-        protoValue.Timestamp.Should().Be(value.MicrosecondsSinceEpoch);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_record()
-    {
-        var record = new DamlRecord(
-            new RuntimeIdentifier("pkg", "Module", "Record"),
-            [
-                new DamlField("name", new DamlText("Alice")),
-                new DamlField("age", new DamlInt64(30))
-            ]);
-
-        var protoValue = LedgerClient.ToProtoValue(record);
-
-        protoValue.Record.Should().NotBeNull();
-        protoValue.Record.RecordId.PackageId.Should().Be("pkg");
-        protoValue.Record.Fields.Should().HaveCount(2);
-        protoValue.Record.Fields[0].Label.Should().Be("name");
-        protoValue.Record.Fields[0].Value.Text.Should().Be("Alice");
-        protoValue.Record.Fields[1].Label.Should().Be("age");
-        protoValue.Record.Fields[1].Value.Int64.Should().Be(30);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_variant()
-    {
-        var variant = new DamlVariant(
-            new RuntimeIdentifier("pkg", "Module", "Variant"),
-            "Some",
-            new DamlText("value"));
-
-        var protoValue = LedgerClient.ToProtoValue(variant);
-
-        protoValue.Variant.Should().NotBeNull();
-        protoValue.Variant.Constructor.Should().Be("Some");
-        protoValue.Variant.Value.Text.Should().Be("value");
-        protoValue.Variant.VariantId.PackageId.Should().Be("pkg");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_list()
-    {
-        var list = new DamlList([
-            new DamlInt64(1),
-            new DamlInt64(2),
-            new DamlInt64(3)
-        ]);
-
-        var protoValue = LedgerClient.ToProtoValue(list);
-
-        protoValue.List.Should().NotBeNull();
-        protoValue.List.Elements.Should().HaveCount(3);
-        protoValue.List.Elements[0].Int64.Should().Be(1);
-        protoValue.List.Elements[1].Int64.Should().Be(2);
-        protoValue.List.Elements[2].Int64.Should().Be(3);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_optional_with_value()
-    {
-        var optional = new DamlOptional(new DamlText("present"));
-
-        var protoValue = LedgerClient.ToProtoValue(optional);
-
-        protoValue.Optional.Should().NotBeNull();
-        protoValue.Optional.Value.Text.Should().Be("present");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_optional_without_value()
-    {
-        var optional = new DamlOptional(null);
-
-        var protoValue = LedgerClient.ToProtoValue(optional);
-
-        protoValue.Optional.Should().NotBeNull();
-        protoValue.Optional.Value.Should().BeNull();
-    }
-
-    [Fact]
-    public void to_proto_value_converts_text_map()
-    {
-        var map = new DamlTextMap(new Dictionary<string, DamlValue>
-        {
-            ["key1"] = new DamlText("value1"),
-            ["key2"] = new DamlText("value2")
-        });
-
-        var protoValue = LedgerClient.ToProtoValue(map);
-
-        protoValue.TextMap.Should().NotBeNull();
-        protoValue.TextMap.Entries.Should().HaveCount(2);
-    }
-
-    [Fact]
-    public void to_proto_value_converts_gen_map()
-    {
-        var map = new DamlGenMap([
-            (new DamlInt64(1), new DamlText("one")),
-            (new DamlInt64(2), new DamlText("two"))
-        ]);
-
-        var protoValue = LedgerClient.ToProtoValue(map);
-
-        protoValue.GenMap.Should().NotBeNull();
-        protoValue.GenMap.Entries.Should().HaveCount(2);
-        protoValue.GenMap.Entries[0].Key.Int64.Should().Be(1);
-        protoValue.GenMap.Entries[0].Value.Text.Should().Be("one");
-    }
-
-    [Fact]
-    public void to_proto_value_converts_enum()
-    {
-        var enumValue = new DamlEnum(
-            new RuntimeIdentifier("pkg", "Module", "Color"),
-            "Red");
-
-        var protoValue = LedgerClient.ToProtoValue(enumValue);
-
-        protoValue.Enum.Should().NotBeNull();
-        protoValue.Enum.Constructor.Should().Be("Red");
-        protoValue.Enum.EnumId.PackageId.Should().Be("pkg");
-    }
-
-    [Fact]
-    public void to_proto_record_converts_correctly()
-    {
-        var record = new DamlRecord(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            [
-                new DamlField("owner", new DamlParty("party::alice")),
-                new DamlField("value", new DamlInt64(100))
-            ]);
-
-        var protoRecord = LedgerClient.ToProtoRecord(record);
-
-        protoRecord.RecordId.Should().NotBeNull();
-        protoRecord.RecordId.PackageId.Should().Be("pkg");
-        protoRecord.RecordId.ModuleName.Should().Be("Module");
-        protoRecord.RecordId.EntityName.Should().Be("Template");
-        protoRecord.Fields.Should().HaveCount(2);
-    }
-
-    [Fact]
-    public void to_proto_record_handles_null_record_id()
-    {
-        var record = new DamlRecord(null, [
-            new DamlField("field", new DamlText("value"))
-        ]);
-
-        var protoRecord = LedgerClient.ToProtoRecord(record);
-
-        protoRecord.RecordId.Should().BeNull();
-        protoRecord.Fields.Should().ContainSingle();
-    }
+    // ──────────────────────────────────────────────────────────────
+    // BuildCommands
+    // ──────────────────────────────────────────────────────────────
 
     [Fact]
     public void build_commands_sets_command_id_and_workflow_id()
@@ -296,7 +54,7 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("cmd-123")
             .WithWorkflowId("workflow-456");
 
@@ -317,7 +75,7 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice");
+            .WithActAs((Party)"party::alice");
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -336,7 +94,7 @@ public class LedgerClientTests
                 [new DamlField("owner", new DamlParty("party::alice"))]));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -358,7 +116,7 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -378,8 +136,8 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice")
-            .WithReadAs("party::observer1", "party::observer2")
+            .WithActAs((Party)"party::alice")
+            .WithReadAs((Party)"party::observer1", (Party)"party::observer2")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -389,6 +147,10 @@ public class LedgerClientTests
         commands.ReadAs.Should().Contain("party::observer1");
         commands.ReadAs.Should().Contain("party::observer2");
     }
+
+    // ──────────────────────────────────────────────────────────────
+    // SubmitAsync / SubmitAndWaitForTransactionAsync
+    // ──────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task submit_async_returns_update_id()
@@ -413,7 +175,7 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -432,7 +194,7 @@ public class LedgerClientTests
         };
         transaction.Events.Add(new Event
         {
-            Created = new CreatedEvent
+            Created = new Com.Daml.Ledger.Api.V2.CreatedEvent
             {
                 ContractId = "00contract789",
                 TemplateId = new ProtoIdentifier
@@ -465,7 +227,7 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -487,7 +249,7 @@ public class LedgerClientTests
         };
         transaction.Events.Add(new Event
         {
-            Archived = new ArchivedEvent
+            Archived = new Com.Daml.Ledger.Api.V2.ArchivedEvent
             {
                 ContractId = "00archived123"
             }
@@ -515,7 +277,7 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
@@ -536,7 +298,7 @@ public class LedgerClientTests
                 new RuntimeCommands.CreateCommand(
                     new RuntimeIdentifier("pkg", "Module", "Template"),
                     new DamlRecord(null, [])))
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var act = () => client.SubmitAndWaitForTransactionAsync(submission);
@@ -557,7 +319,7 @@ public class LedgerClientTests
                 new RuntimeCommands.CreateCommand(
                     new RuntimeIdentifier("pkg", "Module", "Template"),
                     new DamlRecord(null, [])))
-            .WithActAs("party::alice")
+            .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
         var act = () => client.SubmitAndWaitForTransactionAsync(submission);
@@ -574,5 +336,192 @@ public class LedgerClientTests
         var action = () => client.Dispose();
 
         action.Should().NotThrow();
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // ExerciseAsync integration tests
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task exercise_async_throws_when_no_matching_event()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        // No ExercisedEvent added — response has no matching event
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+
+        var action = () => client.ExerciseAsync<object>(exerciseCommand, "party::alice");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No ExercisedEvent found*Archive*00contract123*");
+    }
+
+    [Fact]
+    public async Task exercise_async_returns_contract_id_result()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Accept",
+                ExerciseResult = new ProtoValue { ContractId = "00newcontract456" }
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Accept",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+        var result = await client.ExerciseAsync<ContractId<TestTemplate>>(
+            exerciseCommand, "party::alice");
+
+        result.Value.Should().Be("00newcontract456");
+    }
+
+    [Fact]
+    public async Task exercise_async_returns_unit_for_void_choice()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Archive",
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+
+        // void overload should not throw
+        await client.ExerciseAsync(exerciseCommand, "party::alice");
+    }
+
+    [Fact]
+    public async Task exercise_async_uses_ledger_effects_shape()
+    {
+        SubmitAndWaitForTransactionRequest? capturedRequest = null;
+
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Archive",
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+        await client.ExerciseAsync(exerciseCommand, "party::alice");
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.TransactionFormat.Should().NotBeNull();
+        capturedRequest.TransactionFormat.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
+        capturedRequest.TransactionFormat.EventFormat.Should().NotBeNull();
+        capturedRequest.TransactionFormat.EventFormat.Verbose.Should().BeTrue();
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Test template — minimal ITemplate for unit tests
+    // ──────────────────────────────────────────────────────────────
+
+    internal sealed record TestTemplate(string Owner) : ITemplate
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static string PackageId => "pkg";
+        public static string PackageName => "test-package";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public DamlRecord ToRecord() => DamlRecord.Create(
+            DamlField.Create("owner", new DamlParty(Owner)));
     }
 }

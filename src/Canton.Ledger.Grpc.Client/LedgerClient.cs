@@ -5,13 +5,12 @@ using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Codegen.CSharp.Runtime.Contracts;
 using Daml.Codegen.CSharp.Runtime.Data;
+using Daml.Runtime.Grpc;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RuntimeCommands = Daml.Codegen.CSharp.Runtime.Commands;
-using RuntimeIdentifier = Daml.Codegen.CSharp.Runtime.Data.Identifier;
-using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -97,7 +96,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(actAs)
+            .WithActAs((Party)actAs)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"create-{typeof(T).Name.ToLowerInvariant()}");
 
@@ -132,18 +131,49 @@ public sealed partial class LedgerClient : ILedgerClient
         activity?.SetTag("contractId", command.ContractId);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithActAs(actAs)
+            .WithActAs((Party)actAs)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
 
         LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
-        var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
+        var commands = BuildCommands(submission);
+
+        var request = new SubmitAndWaitForTransactionRequest
+        {
+            Commands = commands,
+            TransactionFormat = new TransactionFormat
+            {
+                TransactionShape = TransactionShape.LedgerEffects,
+                EventFormat = new EventFormat { Verbose = true }
+            }
+        };
+
+        var response = await _commandService.SubmitAndWaitForTransactionAsync(
+            request,
+            headers: await GetHeadersAsync(cancellationToken),
+            deadline: GetDeadline(),
+            cancellationToken: cancellationToken);
+
+        var transaction = response.Transaction
+            ?? throw new InvalidOperationException(
+                "Server returned a successful response but no Transaction was present.");
+
+        var exercisedEvent = transaction.Events
+            .Where(e => e.EventCase == Event.EventOneofCase.Exercised)
+            .Select(e => e.Exercised)
+            .FirstOrDefault(e => e.ContractId == command.ContractId && e.Choice == command.Choice)
+            ?? throw new InvalidOperationException(
+                $"No ExercisedEvent found for choice {command.Choice} on {command.ContractId}");
 
         LogChoiceExercised(Logger, command.Choice, command.ContractId);
 
-        // TODO: Deserialize the choice result from transaction events
-        return default!;
+        var exerciseResult = exercisedEvent.ExerciseResult
+            ?? throw new InvalidOperationException(
+                $"ExercisedEvent for choice {command.Choice} on {command.ContractId} has no ExerciseResult.");
+
+        var resultValue = DamlValueConverter.FromProtoValue(exerciseResult);
+        return DamlValueConverter.FromDamlValue<TResult>(resultValue);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
@@ -190,7 +220,9 @@ public sealed partial class LedgerClient : ILedgerClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        var transaction = response.Transaction;
+        var transaction = response.Transaction
+            ?? throw new InvalidOperationException(
+                "Server returned a successful response but no Transaction was present.");
 
         var createdContracts = new List<CreatedContract>();
         var archivedContractIds = new List<string>();
@@ -254,12 +286,12 @@ public sealed partial class LedgerClient : ILedgerClient
 
         if (submission.ActAs is not null)
         {
-            commands.ActAs.AddRange(submission.ActAs);
+            commands.ActAs.AddRange(submission.ActAs.Select(p => p.Id));
         }
 
         if (submission.ReadAs is not null)
         {
-            commands.ReadAs.AddRange(submission.ReadAs);
+            commands.ReadAs.AddRange(submission.ReadAs.Select(p => p.Id));
         }
 
         foreach (var cmd in submission.Commands)
@@ -270,18 +302,18 @@ public sealed partial class LedgerClient : ILedgerClient
                 {
                     Create = new CreateCommand
                     {
-                        TemplateId = ToProtoIdentifier(create.TemplateId),
-                        CreateArguments = ToProtoRecord(create.CreateArguments)
+                        TemplateId = DamlValueConverter.ToProtoIdentifier(create.TemplateId),
+                        CreateArguments = DamlValueConverter.ToProtoRecord(create.CreateArguments)
                     }
                 },
                 RuntimeCommands.ExerciseCommand exercise => new Command
                 {
                     Exercise = new ExerciseCommand
                     {
-                        TemplateId = ToProtoIdentifier(exercise.TemplateId),
+                        TemplateId = DamlValueConverter.ToProtoIdentifier(exercise.TemplateId),
                         ContractId = exercise.ContractId,
                         Choice = exercise.Choice,
-                        ChoiceArgument = ToProtoValue(exercise.ChoiceArgument)
+                        ChoiceArgument = DamlValueConverter.ToProtoValue(exercise.ChoiceArgument)
                     }
                 },
                 _ => throw new NotSupportedException($"Command type {cmd.GetType().Name} is not supported")
@@ -291,117 +323,6 @@ public sealed partial class LedgerClient : ILedgerClient
         }
 
         return commands;
-    }
-
-    internal static ProtoIdentifier ToProtoIdentifier(RuntimeIdentifier identifier)
-    {
-        return new ProtoIdentifier
-        {
-            PackageId = identifier.PackageId,
-            ModuleName = identifier.ModuleName,
-            EntityName = identifier.EntityName
-        };
-    }
-
-    internal static Record ToProtoRecord(DamlRecord record)
-    {
-        var protoRecord = new Record();
-
-        if (record.RecordId is not null)
-        {
-            protoRecord.RecordId = ToProtoIdentifier(record.RecordId);
-        }
-
-        foreach (var field in record.Fields)
-        {
-            protoRecord.Fields.Add(new RecordField
-            {
-                Label = field.Label ?? string.Empty,
-                Value = ToProtoValue(field.Value)
-            });
-        }
-
-        return protoRecord;
-    }
-
-    internal static Value ToProtoValue(DamlValue value)
-    {
-        return value switch
-        {
-            DamlUnit => new Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
-            DamlBool b => new Value { Bool = b.Value },
-            DamlInt64 i => new Value { Int64 = i.Value },
-            DamlText t => new Value { Text = t.Value },
-            DamlParty p => new Value { Party = p.Value },
-            DamlNumeric n => new Value { Numeric = n.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) },
-            DamlDate d => new Value { Date = d.DaysSinceEpoch },
-            DamlTimestamp ts => new Value { Timestamp = ts.MicrosecondsSinceEpoch },
-            DamlContractId c => new Value { ContractId = c.Value },
-            DamlRecord r => new Value { Record = ToProtoRecord(r) },
-            DamlVariant v => new Value
-            {
-                Variant = new Variant
-                {
-                    Constructor = v.Constructor,
-                    Value = ToProtoValue(v.Value),
-                    VariantId = v.VariantId is not null ? ToProtoIdentifier(v.VariantId) : null
-                }
-            },
-            DamlList l => ToProtoListValue(l),
-            DamlOptional o => new Value
-            {
-                Optional = new Optional { Value = o.Value is not null ? ToProtoValue(o.Value) : null }
-            },
-            DamlTextMap m => ToProtoTextMapValue(m),
-            DamlGenMap g => ToProtoGenMapValue(g),
-            DamlEnum e => new Value
-            {
-                Enum = new Com.Daml.Ledger.Api.V2.Enum
-                {
-                    Constructor = e.Constructor,
-                    EnumId = e.EnumId is not null ? ToProtoIdentifier(e.EnumId) : null
-                }
-            },
-            _ => throw new NotSupportedException($"DamlValue type {value.GetType().Name} is not supported")
-        };
-    }
-
-    private static Value ToProtoListValue(DamlList list)
-    {
-        var protoList = new List();
-        foreach (var item in list.Values)
-        {
-            protoList.Elements.Add(ToProtoValue(item));
-        }
-        return new Value { List = protoList };
-    }
-
-    private static Value ToProtoTextMapValue(DamlTextMap map)
-    {
-        var protoMap = new TextMap();
-        foreach (var kvp in map.Values)
-        {
-            protoMap.Entries.Add(new TextMap.Types.Entry
-            {
-                Key = kvp.Key,
-                Value = ToProtoValue(kvp.Value)
-            });
-        }
-        return new Value { TextMap = protoMap };
-    }
-
-    private static Value ToProtoGenMapValue(DamlGenMap map)
-    {
-        var protoMap = new GenMap();
-        foreach (var entry in map.Entries)
-        {
-            protoMap.Entries.Add(new GenMap.Types.Entry
-            {
-                Key = ToProtoValue(entry.Key),
-                Value = ToProtoValue(entry.Value)
-            });
-        }
-        return new Value { GenMap = protoMap };
     }
 
     private async Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken)

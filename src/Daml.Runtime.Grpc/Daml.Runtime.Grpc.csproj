@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Daml.Runtime.Grpc</PackageId>
+    <Description>Bidirectional conversion between Daml.Codegen.CSharp.Runtime value types and Canton Ledger API v2 protobuf messages.</Description>
+    <PackageTags>canton;daml;ledger;grpc;protobuf;serialization</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Daml.Runtime.Grpc.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Daml.Codegen.CSharp.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Grpc\Canton.Ledger.Grpc.csproj" />
+  </ItemGroup>
+
+</Project>
