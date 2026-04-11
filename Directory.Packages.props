@@ -18,7 +18,7 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.5" />
     <!-- Integration with Daml codegen runtime -->
-    <PackageVersion Include="Daml.Runtime" Version="0.1.1-8-dev-664daae" />
+    <PackageVersion Include="Daml.Runtime" Version="0.1.2-dev.11.c61a066" />
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="9.0.3" />
     <!-- Auth -->
