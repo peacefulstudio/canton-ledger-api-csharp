@@ -7,6 +7,7 @@ using Daml.Runtime.Contracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Pqs.Client;
 
@@ -45,7 +46,7 @@ public sealed partial class PqsClient : IPqsClient
         return options;
     }
 
-    private static readonly ILogger<PqsClient> Logger = LoggerFactory.Create<PqsClient>();
+    private static readonly ILogger<PqsClient> Logger = StaticLoggerFactory.Create<PqsClient>();
 
     private readonly PqsClientOptions _options;
     private readonly JsonSerializerOptions _jsonOptions;

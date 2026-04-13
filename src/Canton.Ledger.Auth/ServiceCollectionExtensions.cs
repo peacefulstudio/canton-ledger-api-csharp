@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Auth;
 
@@ -108,6 +109,6 @@ public static class ServiceCollectionExtensions
     {
         var loggerFactory = sp.GetService<ILoggerFactory>();
         if (loggerFactory is not null)
-            LoggerFactory.Configure(loggerFactory);
+            StaticLoggerFactory.Configure(loggerFactory);
     }
 }

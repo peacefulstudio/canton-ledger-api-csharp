@@ -3,6 +3,7 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Auth.TokenGeneration;
 
@@ -11,7 +12,7 @@ namespace Canton.Ledger.Auth.TokenGeneration;
 /// </summary>
 public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposable
 {
-    private static readonly ILogger<ClientCredentialsProvider> Logger = LoggerFactory.Create<ClientCredentialsProvider>();
+    private static readonly ILogger<ClientCredentialsProvider> Logger = StaticLoggerFactory.Create<ClientCredentialsProvider>();
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ClientCredentialsOptions _options;

@@ -21,6 +21,8 @@
     <PackageVersion Include="Daml.Runtime" Version="0.1.2-dev.11.c61a066" />
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="9.0.3" />
+    <!-- Peaceful Extensions -->
+    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.1.0-dev.1.a1959c8" />
     <!-- Auth -->
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.5" />
     <!-- Testing -->

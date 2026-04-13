@@ -7,6 +7,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -22,7 +23,7 @@ public sealed partial class AdminClient : IAdminClient
     public static string ActivitySourceName => typeof(AdminClient).FullName!;
 
     private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).FullName!);
-    private static readonly ILogger<AdminClient> Logger = LoggerFactory.Create<AdminClient>();
+    private static readonly ILogger<AdminClient> Logger = StaticLoggerFactory.Create<AdminClient>();
 
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;

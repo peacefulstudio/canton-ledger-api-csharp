@@ -2,6 +2,7 @@
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -11,7 +12,7 @@ namespace Canton.Ledger.Grpc.Client;
 /// </summary>
 internal sealed partial class LedgerHealthCheck : IHealthCheck
 {
-    private static readonly ILogger<LedgerHealthCheck> Logger = LoggerFactory.Create<LedgerHealthCheck>();
+    private static readonly ILogger<LedgerHealthCheck> Logger = StaticLoggerFactory.Create<LedgerHealthCheck>();
 
     private readonly IAdminClient _adminClient;
 

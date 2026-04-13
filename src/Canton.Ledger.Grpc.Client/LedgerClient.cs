@@ -10,6 +10,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Peaceful.Extensions.Logging;
 using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -26,7 +27,7 @@ public sealed partial class LedgerClient : ILedgerClient
     public static string ActivitySourceName => typeof(LedgerClient).FullName!;
 
     private static readonly ActivitySource ActivitySource = new(typeof(LedgerClient).FullName!);
-    private static readonly ILogger<LedgerClient> Logger = LoggerFactory.Create<LedgerClient>();
+    private static readonly ILogger<LedgerClient> Logger = StaticLoggerFactory.Create<LedgerClient>();
 
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;

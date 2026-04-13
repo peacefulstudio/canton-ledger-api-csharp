@@ -4,6 +4,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Pqs.Client;
 
@@ -12,7 +13,7 @@ namespace Canton.Ledger.Pqs.Client;
 /// </summary>
 internal sealed partial class PqsHealthCheck : IHealthCheck
 {
-    private static readonly ILogger<PqsHealthCheck> Logger = LoggerFactory.Create<PqsHealthCheck>();
+    private static readonly ILogger<PqsHealthCheck> Logger = StaticLoggerFactory.Create<PqsHealthCheck>();
 
     private readonly PqsClientOptions _options;
 
