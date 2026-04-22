@@ -12,9 +12,17 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 
 ## Authentication
 
-Clients receive an `ITokenProvider` from `Canton.Ledger.Auth`. Three modes:
+Clients receive an `ITokenProvider` from `Canton.Ledger.Auth`. Four modes:
 
-### 1. Client credentials (OAuth2) — auto-registered from config
+### 1. Convention-based (recommended) — `AddCantonLedger`
+
+```csharp
+services.AddCantonLedger(configuration);
+```
+
+Reads `Canton:Ledger` for client options, and registers a client-credentials `ITokenProvider` from `Canton:Auth` whenever that section has any populated value. Half-configured auth (e.g. `ClientSecret` without `ClientId`) then fails loudly at startup rather than silently falling back to unauthenticated. `Canton:Auth` keys mirror `ClientCredentialsOptions` (`ClientId`, `ClientSecret`, `Audience`, `Domain` or `TokenEndpoint`); in environment variables they appear as `Canton__Auth__ClientId` and so on.
+
+### 2. Client credentials (OAuth2) — explicit sections
 
 ```csharp
 services.AddLedgerClient(
@@ -24,16 +32,16 @@ services.AddLedgerClient(
 
 This calls `AddCantonAuth(authConfiguration)` internally. The `ClientCredentialsProvider` handles token acquisition and caching.
 
-### 2. Static token — explicit registration
+### 3. Static token — explicit registration
 
 ```csharp
 services.AddCantonStaticAuth("eyJ...");
 services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
 ```
 
-Explicit registrations use `TryAddSingleton` — they always take precedence over auto-registration.
+Explicit registrations use `TryAddSingleton`, so they take precedence over auto-registration only when the explicit auth is registered first. Register `AddCantonStaticAuth(...)` (or any other explicit `ITokenProvider`) before `AddCantonLedger(...)` or `AddLedgerClient(...)`.
 
-### 3. Unauthenticated — no auth configured
+### 4. Unauthenticated — no auth configured
 
 ```csharp
 services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));

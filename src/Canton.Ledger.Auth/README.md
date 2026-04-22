@@ -24,7 +24,7 @@ services.AddCantonAuth(configuration.GetSection("Canton:Auth"));
 {
   "Canton": {
     "Auth": {
-      "Domain": "https://auth.example.com",
+      "Domain": "dev-peaceful.eu.auth0.com",
       "ClientId": "my-client-id",
       "ClientSecret": "my-client-secret",
       "Audience": "https://canton.network/"
@@ -33,9 +33,9 @@ services.AddCantonAuth(configuration.GetSection("Canton:Auth"));
 }
 ```
 
-`ClientCredentialsProvider` acquires tokens from `{Domain}/oauth/token` and caches them until `expires_in - SafetyMargin` (default 30s). Concurrent callers share a single HTTP request during refresh.
+`Domain` accepts either a bare hostname (e.g. `dev-peaceful.eu.auth0.com`) or an absolute http/https URL (e.g. `https://auth.example.com`, or `https://auth.example.com/tenant-a` for per-tenant subpaths). If `Domain` is a bare hostname, it is treated as `https://{hostname}`. If it is an absolute http/https URL, that URL is used as the base. In both cases, `/oauth/token` is appended, preserving any existing path (`https://auth.example.com/tenant-a` → `https://auth.example.com/tenant-a/oauth/token`). Userinfo, query, and fragments are rejected. `ClientCredentialsProvider` caches tokens until `expires_in - SafetyMargin` (default 30s) and concurrent callers share a single HTTP request during refresh.
 
-To override the token endpoint (e.g., non-standard OAuth2 servers):
+To override the token endpoint (e.g., non-standard OAuth2 servers like Keycloak's `/realms/{realm}/protocol/openid-connect/token`):
 
 ```json
 {

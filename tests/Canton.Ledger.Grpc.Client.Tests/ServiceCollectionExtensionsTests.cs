@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Canton.Ledger.Auth;
+using Canton.Ledger.Auth.TokenGeneration;
 using Canton.Ledger.Grpc.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -311,5 +313,183 @@ public class ServiceCollectionExtensionsTests
 
         client.Should().NotBeNull();
         tokenProvider.Should().BeSameAs(ITokenProvider.None);
+    }
+
+    [Fact]
+    public void add_canton_ledger_registers_ledger_and_admin_clients()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ILedgerClient>().Should().BeOfType<LedgerClient>();
+        provider.GetRequiredService<IAdminClient>().Should().BeOfType<AdminClient>();
+    }
+
+    [Fact]
+    public void add_canton_ledger_binds_options_from_canton_ledger_section()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://participant.example:5001",
+            ["Canton:Ledger:UserId"] = "ledger-user"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<LedgerClientOptions>>();
+        options.Value.GrpcAddress.Should().Be("https://participant.example:5001");
+        options.Value.UserId.Should().Be("ledger-user");
+    }
+
+    [Fact]
+    public void add_canton_ledger_registers_client_credentials_when_canton_auth_populated()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientId"] = "my-client",
+            ["Canton:Auth:ClientSecret"] = "my-secret",
+            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().NotBeSameAs(ITokenProvider.None);
+
+        var authOptions = provider.GetRequiredService<IOptions<ClientCredentialsOptions>>().Value;
+        authOptions.ClientId.Should().Be("my-client");
+        authOptions.ClientSecret.Should().Be("my-secret");
+        authOptions.Domain.Should().Be("dev-peaceful.eu.auth0.com");
+        authOptions.TokenGenerationEndpoint
+            .Should().Be(new Uri("https://dev-peaceful.eu.auth0.com/oauth/token"));
+    }
+
+    [Fact]
+    public void add_canton_ledger_skips_auth_when_canton_auth_section_absent()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeSameAs(ITokenProvider.None);
+    }
+
+    [Fact]
+    public void add_canton_ledger_skips_auth_when_canton_auth_values_are_whitespace()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientId"] = "   "
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeSameAs(ITokenProvider.None);
+    }
+
+    [Fact]
+    public void add_canton_ledger_fails_at_startup_when_auth_half_configured()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientSecret"] = "my-secret",
+            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        var act = () => provider.GetRequiredService<IOptions<ClientCredentialsOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>();
+    }
+
+    [Fact]
+    public void add_canton_ledger_skips_auth_options_binding_when_explicit_provider_registered()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientSecret"] = "leftover-secret"
+        }).Build();
+
+        services.AddCantonStaticAuth("explicit-token");
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<StaticTokenProvider>();
+    }
+
+    [Fact]
+    public void add_canton_ledger_preserves_explicit_static_auth_registered_before()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientId"] = "my-client",
+            ["Canton:Auth:ClientSecret"] = "my-secret",
+            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+        }).Build();
+
+        services.AddCantonStaticAuth("explicit-token");
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<StaticTokenProvider>();
+    }
+
+    [Fact]
+    public void add_canton_ledger_throws_for_null_services()
+    {
+        IServiceCollection services = null!;
+        var config = new ConfigurationBuilder().Build();
+
+        var act = () => services.AddCantonLedger(config);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("services");
+    }
+
+    [Fact]
+    public void add_canton_ledger_throws_for_null_configuration()
+    {
+        var services = new ServiceCollection();
+
+        var act = () => services.AddCantonLedger(null!);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("configuration");
+    }
+
+    [Fact]
+    public void add_canton_ledger_returns_services_for_chaining()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonLedger(config).Should().BeSameAs(services);
     }
 }

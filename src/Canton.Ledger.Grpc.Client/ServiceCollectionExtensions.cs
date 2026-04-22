@@ -13,6 +13,59 @@ namespace Canton.Ledger.Grpc.Client;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// Convention-based registration for both <see cref="ILedgerClient"/> and <see cref="IAdminClient"/>
+    /// using canonical <c>Canton:Ledger</c> and <c>Canton:Auth</c> configuration sections.
+    /// </summary>
+    /// <remarks>
+    /// Reads <c>Canton:Ledger</c> for <see cref="LedgerClientOptions"/>. Auth registration
+    /// is triggered when the <c>Canton:Auth</c> section has any populated child value: a
+    /// client-credentials <see cref="ITokenProvider"/> is registered and its options are
+    /// validated at startup, so half-configured auth (e.g. <c>ClientSecret</c> set without
+    /// <c>ClientId</c>) fails loudly instead of silently falling back to unauthenticated.
+    /// When no auth values are present the clients run unauthenticated via
+    /// <see cref="ITokenProvider.None"/>. Any pre-existing <see cref="ITokenProvider"/>
+    /// registration (e.g. from <c>AddCantonStaticAuth</c>) wins and suppresses
+    /// <c>Canton:Auth</c> binding entirely, so leftover auth config cannot fail startup
+    /// when an explicit provider has been chosen. Prefer this over the per-client overloads
+    /// so consumers and their deployment config (env vars, Helm charts, appsettings) agree
+    /// on a single canonical wiring.
+    /// </remarks>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The root configuration (sections read by convention).</param>
+    /// <returns>The service collection for chaining.</returns>
+    public static IServiceCollection AddCantonLedger(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var auth = configuration.GetSection("Canton:Auth");
+        if (HasAnyConfiguredValue(auth) && !services.Any(d => d.ServiceType == typeof(ITokenProvider)))
+            services.AddCantonAuth(auth);
+
+        AddLedgerOptions(services, configuration.GetSection("Canton:Ledger"));
+        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+        services.TryAddSingleton<IAdminClient, AdminClient>();
+
+        return services;
+    }
+
+    private static bool HasAnyConfiguredValue(IConfiguration section)
+    {
+        if (section is IConfigurationSection { Value: { } value } && !string.IsNullOrWhiteSpace(value))
+            return true;
+
+        foreach (var child in section.GetChildren())
+        {
+            if (HasAnyConfiguredValue(child))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Registers <see cref="ILedgerClient"/> as a singleton and binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section. Options are validated at startup.
     /// </summary>
