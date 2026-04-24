@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Canton.Ledger.Grpc.Client;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -11,7 +10,7 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 public class HealthCheckBuilderExtensionsTests
 {
     [Fact]
-    public void add_ledger_client_registers_health_check_with_default_name()
+    public void AddLedgerClient_registers_health_check_with_default_name()
     {
         var services = new ServiceCollection();
         services.AddHealthChecks().AddLedgerClient();
@@ -23,7 +22,7 @@ public class HealthCheckBuilderExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_registers_health_check_with_custom_name_and_tags()
+    public void AddLedgerClient_registers_health_check_with_custom_name_and_tags()
     {
         var services = new ServiceCollection();
         services.AddHealthChecks().AddLedgerClient(
@@ -38,7 +37,7 @@ public class HealthCheckBuilderExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_throws_for_null_builder()
+    public void AddLedgerClient_throws_for_null_builder()
     {
         IHealthChecksBuilder builder = null!;
 

@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Canton.Ledger.Grpc.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using NSubstitute;
@@ -18,7 +17,7 @@ public class LedgerHealthCheckTests
         };
 
     [Fact]
-    public async Task check_health_returns_healthy_with_participant_id()
+    public async Task CheckHealth_returns_healthy_with_participant_id()
     {
         var adminClient = Substitute.For<IAdminClient>();
         adminClient.GetParticipantIdAsync(Arg.Any<CancellationToken>())
@@ -34,7 +33,7 @@ public class LedgerHealthCheckTests
     }
 
     [Fact]
-    public async Task check_health_returns_failure_status_when_admin_client_throws()
+    public async Task CheckHealth_returns_failure_status_when_admin_client_throws()
     {
         var adminClient = Substitute.For<IAdminClient>();
         adminClient.GetParticipantIdAsync(Arg.Any<CancellationToken>())
@@ -49,7 +48,7 @@ public class LedgerHealthCheckTests
     }
 
     [Fact]
-    public async Task check_health_propagates_operation_canceled_exception()
+    public async Task CheckHealth_propagates_operation_canceled_exception()
     {
         var adminClient = Substitute.For<IAdminClient>();
         adminClient.GetParticipantIdAsync(Arg.Any<CancellationToken>())
@@ -63,7 +62,7 @@ public class LedgerHealthCheckTests
     }
 
     [Fact]
-    public void constructor_throws_for_null_admin_client()
+    public void Constructor_throws_for_null_admin_client()
     {
         var act = () => new LedgerHealthCheck(null!);
 

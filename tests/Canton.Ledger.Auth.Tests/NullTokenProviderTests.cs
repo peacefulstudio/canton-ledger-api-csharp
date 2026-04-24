@@ -8,7 +8,7 @@ namespace Canton.Ledger.Auth.Tests;
 public class NullTokenProviderTests
 {
     [Fact]
-    public void none_returns_singleton_instance()
+    public void None_returns_singleton_instance()
     {
         var a = ITokenProvider.None;
         var b = ITokenProvider.None;
@@ -17,7 +17,7 @@ public class NullTokenProviderTests
     }
 
     [Fact]
-    public void none_implements_itokenprovider()
+    public void None_implements_ITokenProvider()
     {
         ITokenProvider provider = ITokenProvider.None;
 
@@ -25,7 +25,7 @@ public class NullTokenProviderTests
     }
 
     [Fact]
-    public async Task get_token_returns_empty_string()
+    public async Task GetTokenAsync_returns_empty_string()
     {
         var token = await ITokenProvider.None.GetTokenAsync();
 

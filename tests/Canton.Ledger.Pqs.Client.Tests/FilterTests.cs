@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Canton.Ledger.Pqs.Client;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using FluentAssertions;
@@ -11,12 +10,8 @@ namespace Canton.Ledger.Pqs.Client.Tests;
 
 public class FilterTests
 {
-    // ──────────────────────────────────────────────────────────────
-    // Filter.Field — type-safe field equality
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void field_generates_correct_sql()
+    public void Field_generates_correct_sql()
     {
         var filter = Filter.Field<SampleTemplate>(t => t.Initiator, "party::123");
 
@@ -30,7 +25,7 @@ public class FilterTests
     }
 
     [Fact]
-    public void field_value_type_generates_correct_sql()
+    public void Field_value_type_generates_correct_sql()
     {
         var filter = Filter.Field<SampleTemplate>(t => t.NumSwaps, "5");
 
@@ -42,12 +37,8 @@ public class FilterTests
         cmd.Parameters["@p0"].Value.Should().Be("5");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Filter.Or
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void or_two_filters_generates_correct_sql()
+    public void Or_two_filters_generates_correct_sql()
     {
         var filter = Filter.Or(
             Filter.Field<SampleTemplate>(t => t.Initiator, "alice"),
@@ -64,7 +55,7 @@ public class FilterTests
     }
 
     [Fact]
-    public void or_single_filter_returns_that_filter()
+    public void Or_single_filter_returns_that_filter()
     {
         var inner = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
         var result = Filter.Or(inner);
@@ -72,25 +63,21 @@ public class FilterTests
     }
 
     [Fact]
-    public void or_empty_throws()
+    public void Or_empty_throws()
     {
         var act = () => Filter.Or();
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
-    public void or_null_throws()
+    public void Or_null_throws()
     {
         var act = () => Filter.Or(null!);
         act.Should().Throw<ArgumentNullException>();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Filter.And
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void and_two_filters_generates_correct_sql()
+    public void And_two_filters_generates_correct_sql()
     {
         var filter = Filter.And(
             Filter.Field<SampleTemplate>(t => t.Initiator, "alice"),
@@ -106,7 +93,7 @@ public class FilterTests
     }
 
     [Fact]
-    public void and_single_filter_returns_that_filter()
+    public void And_single_filter_returns_that_filter()
     {
         var inner = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
         var result = Filter.And(inner);
@@ -114,25 +101,21 @@ public class FilterTests
     }
 
     [Fact]
-    public void and_empty_throws()
+    public void And_empty_throws()
     {
         var act = () => Filter.And();
         act.Should().Throw<ArgumentException>();
     }
 
     [Fact]
-    public void and_null_throws()
+    public void And_null_throws()
     {
         var act = () => Filter.And(null!);
         act.Should().Throw<ArgumentNullException>();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Three-filter composition
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void or_three_filters_generates_correct_sql()
+    public void Or_three_filters_generates_correct_sql()
     {
         var filter = Filter.Or(
             Filter.Field<SampleTemplate>(t => t.Initiator, "alice"),
@@ -147,12 +130,8 @@ public class FilterTests
         paramIndex.Should().Be(3);
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Nested composition
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void nested_or_in_and_generates_correct_sql()
+    public void And_nested_or_generates_correct_sql()
     {
         var filter = Filter.And(
             Filter.Or(
@@ -169,7 +148,7 @@ public class FilterTests
     }
 
     [Fact]
-    public void nested_and_in_or_generates_correct_sql()
+    public void Or_nested_and_generates_correct_sql()
     {
         var filter = Filter.Or(
             Filter.And(
@@ -185,12 +164,8 @@ public class FilterTests
         paramIndex.Should().Be(3);
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // BuildFilteredQuery (integration with PqsClient)
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void build_filtered_query_generates_full_query()
+    public void BuildFilteredQuery_generates_full_query()
     {
         var filter = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
@@ -199,10 +174,6 @@ public class FilterTests
         parameters.Should().ContainSingle()
             .Which.Should().Be(("@p0", "alice"));
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Test template — minimal ITemplate for unit tests
-    // ──────────────────────────────────────────────────────────────
 
     internal sealed record SampleTemplate(
         string Initiator,

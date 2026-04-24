@@ -11,7 +11,7 @@ namespace Canton.Ledger.Auth.Tests;
 public class ServiceCollectionExtensionsTests
 {
     [Fact]
-    public void add_canton_auth_registers_token_provider_as_singleton()
+    public void AddCantonAuth_registers_token_provider_as_singleton()
     {
         var services = new ServiceCollection();
         var config = BuildConfig();
@@ -25,7 +25,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_auth_binds_options_from_configuration()
+    public void AddCantonAuth_binds_options_from_configuration()
     {
         var services = new ServiceCollection();
         var config = BuildConfig();
@@ -40,7 +40,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_auth_registers_http_client()
+    public void AddCantonAuth_registers_http_client()
     {
         var services = new ServiceCollection();
         var config = BuildConfig();
@@ -53,7 +53,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_static_auth_registers_static_provider()
+    public void AddCantonStaticAuth_registers_static_provider()
     {
         var services = new ServiceCollection();
 
@@ -65,7 +65,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_auth_with_action_configures_options()
+    public void AddCantonAuth_with_action_configures_options()
     {
         var services = new ServiceCollection();
 

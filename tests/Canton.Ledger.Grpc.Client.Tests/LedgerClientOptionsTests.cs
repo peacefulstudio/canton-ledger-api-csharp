@@ -8,7 +8,7 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 public class LedgerClientOptionsTests
 {
     [Fact]
-    public void default_values_are_set_correctly()
+    public void Default_values_are_set_correctly()
     {
         var options = new LedgerClientOptions
         {
@@ -21,7 +21,7 @@ public class LedgerClientOptionsTests
     }
 
     [Fact]
-    public void grpc_address_is_required()
+    public void GrpcAddress_is_required()
     {
         var options = new LedgerClientOptions
         {

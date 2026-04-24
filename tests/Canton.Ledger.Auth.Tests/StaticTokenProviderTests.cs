@@ -8,7 +8,7 @@ namespace Canton.Ledger.Auth.Tests;
 public class StaticTokenProviderTests
 {
     [Fact]
-    public async Task returns_configured_token()
+    public async Task GetTokenAsync_returns_configured_token()
     {
         var provider = new StaticTokenProvider("my-test-token");
 
@@ -18,7 +18,7 @@ public class StaticTokenProviderTests
     }
 
     [Fact]
-    public async Task returns_same_token_on_multiple_calls()
+    public async Task GetTokenAsync_returns_same_token_on_multiple_calls()
     {
         var provider = new StaticTokenProvider("stable-token");
 
@@ -30,7 +30,7 @@ public class StaticTokenProviderTests
     }
 
     [Fact]
-    public void throws_on_null_token()
+    public void Constructor_throws_on_null_token()
     {
         var act = () => new StaticTokenProvider(null!);
 
@@ -38,7 +38,7 @@ public class StaticTokenProviderTests
     }
 
     [Fact]
-    public void throws_on_empty_token()
+    public void Constructor_throws_on_empty_token()
     {
         var act = () => new StaticTokenProvider("");
 
@@ -46,7 +46,7 @@ public class StaticTokenProviderTests
     }
 
     [Fact]
-    public void throws_on_whitespace_token()
+    public void Constructor_throws_on_whitespace_token()
     {
         var act = () => new StaticTokenProvider("   ");
 

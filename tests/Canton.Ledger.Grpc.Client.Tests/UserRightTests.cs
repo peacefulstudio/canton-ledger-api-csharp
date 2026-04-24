@@ -8,7 +8,7 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 public class UserRightTests
 {
     [Fact]
-    public void act_as_right_contains_party()
+    public void ActAs_right_contains_party()
     {
         var right = new UserRight.ActAs("Alice::1234");
 
@@ -16,7 +16,7 @@ public class UserRightTests
     }
 
     [Fact]
-    public void read_as_right_contains_party()
+    public void ReadAs_right_contains_party()
     {
         var right = new UserRight.ReadAs("Bob::5678");
 
@@ -24,7 +24,7 @@ public class UserRightTests
     }
 
     [Fact]
-    public void participant_admin_right_can_be_created()
+    public void ParticipantAdmin_right_can_be_created()
     {
         var right = new UserRight.ParticipantAdmin();
 
@@ -32,7 +32,7 @@ public class UserRightTests
     }
 
     [Fact]
-    public void identity_provider_admin_right_can_be_created()
+    public void IdentityProviderAdmin_right_can_be_created()
     {
         var right = new UserRight.IdentityProviderAdmin();
 
@@ -40,7 +40,7 @@ public class UserRightTests
     }
 
     [Fact]
-    public void rights_support_equality()
+    public void UserRight_supports_equality()
     {
         var right1 = new UserRight.ActAs("Alice::1234");
         var right2 = new UserRight.ActAs("Alice::1234");

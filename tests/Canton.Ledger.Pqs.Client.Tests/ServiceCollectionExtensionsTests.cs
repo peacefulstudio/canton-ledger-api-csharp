@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Canton.Ledger.Pqs.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +10,7 @@ namespace Canton.Ledger.Pqs.Client.Tests;
 public class ServiceCollectionExtensionsTests
 {
     [Fact]
-    public void add_pqs_client_registers_ipqs_client_as_singleton()
+    public void AddPqsClient_registers_IPqsClient_as_singleton()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder()
@@ -29,7 +28,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_pqs_client_binds_options_from_configuration()
+    public void AddPqsClient_binds_options_from_configuration()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder()
@@ -47,7 +46,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_pqs_client_returns_services_for_chaining()
+    public void AddPqsClient_returns_services_for_chaining()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().Build();
@@ -58,7 +57,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_pqs_client_throws_for_null_services()
+    public void AddPqsClient_throws_for_null_services()
     {
         IServiceCollection services = null!;
         var config = new ConfigurationBuilder().Build();
@@ -69,7 +68,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_pqs_client_throws_for_null_configuration()
+    public void AddPqsClient_throws_for_null_configuration()
     {
         var services = new ServiceCollection();
 

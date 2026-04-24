@@ -14,12 +14,8 @@ namespace Daml.Runtime.Grpc.Tests;
 
 public class DamlValueConverterTests
 {
-    // ──────────────────────────────────────────────────────────────
-    // ToProtoIdentifier
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void to_proto_identifier_converts_correctly()
+    public void ToProtoIdentifier_converts_correctly()
     {
         var identifier = new RuntimeIdentifier("package-id", "Module.Name", "Entity");
 
@@ -30,12 +26,8 @@ public class DamlValueConverterTests
         protoIdentifier.EntityName.Should().Be("Entity");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // ToProtoValue
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void to_proto_value_converts_unit()
+    public void ToProtoValue_converts_unit()
     {
         var protoValue = DamlValueConverter.ToProtoValue(DamlUnit.Instance);
 
@@ -43,7 +35,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_bool()
+    public void ToProtoValue_converts_bool()
     {
         var protoTrue = DamlValueConverter.ToProtoValue(new DamlBool(true));
         var protoFalse = DamlValueConverter.ToProtoValue(new DamlBool(false));
@@ -53,7 +45,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_int64()
+    public void ToProtoValue_converts_int64()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlInt64(42));
 
@@ -61,7 +53,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_int64_boundaries()
+    public void ToProtoValue_converts_int64_boundaries()
     {
         DamlValueConverter.ToProtoValue(new DamlInt64(0)).Int64.Should().Be(0);
         DamlValueConverter.ToProtoValue(new DamlInt64(long.MinValue)).Int64.Should().Be(long.MinValue);
@@ -69,7 +61,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_text()
+    public void ToProtoValue_converts_text()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlText("hello world"));
 
@@ -77,7 +69,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_party()
+    public void ToProtoValue_converts_party()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlParty("party::alice"));
 
@@ -85,7 +77,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_numeric()
+    public void ToProtoValue_converts_numeric()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlNumeric(123.456m));
 
@@ -93,13 +85,13 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_numeric_zero()
+    public void ToProtoValue_converts_numeric_zero()
     {
         DamlValueConverter.ToProtoValue(new DamlNumeric(0m)).Numeric.Should().Be("0");
     }
 
     [Fact]
-    public void to_proto_value_converts_date()
+    public void ToProtoValue_converts_date()
     {
         var date = new DateOnly(2024, 1, 1);
         var value = new DamlDate(date);
@@ -110,7 +102,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_timestamp()
+    public void ToProtoValue_converts_timestamp()
     {
         var timestamp = DateTimeOffset.UnixEpoch.AddSeconds(1704067200);
         var value = new DamlTimestamp(timestamp);
@@ -121,7 +113,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_record()
+    public void ToProtoValue_converts_record()
     {
         var record = new DamlRecord(
             new RuntimeIdentifier("pkg", "Module", "Record"),
@@ -142,7 +134,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_variant()
+    public void ToProtoValue_converts_variant()
     {
         var variant = new DamlVariant(
             new RuntimeIdentifier("pkg", "Module", "Variant"),
@@ -158,7 +150,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_variant_without_id()
+    public void ToProtoValue_converts_variant_without_id()
     {
         var variant = new DamlVariant(null, "Left", new DamlText("value"));
 
@@ -169,7 +161,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_list()
+    public void ToProtoValue_converts_list()
     {
         var list = new DamlList([
             new DamlInt64(1),
@@ -187,7 +179,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_empty_list()
+    public void ToProtoValue_converts_empty_list()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlList([]));
 
@@ -195,7 +187,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_optional_with_value()
+    public void ToProtoValue_converts_optional_with_value()
     {
         var optional = new DamlOptional(new DamlText("present"));
 
@@ -206,7 +198,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_optional_without_value()
+    public void ToProtoValue_converts_optional_without_value()
     {
         var optional = new DamlOptional(null);
 
@@ -217,7 +209,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_text_map()
+    public void ToProtoValue_converts_text_map()
     {
         var map = new DamlTextMap(new Dictionary<string, DamlValue>
         {
@@ -232,7 +224,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_empty_text_map()
+    public void ToProtoValue_converts_empty_text_map()
     {
         var protoValue = DamlValueConverter.ToProtoValue(
             new DamlTextMap(new Dictionary<string, DamlValue>()));
@@ -241,7 +233,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_gen_map()
+    public void ToProtoValue_converts_gen_map()
     {
         var map = new DamlGenMap([
             (new DamlInt64(1), new DamlText("one")),
@@ -257,7 +249,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_empty_gen_map()
+    public void ToProtoValue_converts_empty_gen_map()
     {
         var protoValue = DamlValueConverter.ToProtoValue(new DamlGenMap([]));
 
@@ -265,7 +257,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_enum()
+    public void ToProtoValue_converts_enum()
     {
         var enumValue = new DamlEnum(
             new RuntimeIdentifier("pkg", "Module", "Color"),
@@ -279,7 +271,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_converts_enum_without_id()
+    public void ToProtoValue_converts_enum_without_id()
     {
         var enumValue = new DamlEnum(null, "Green");
 
@@ -290,7 +282,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_value_throws_for_unsupported_daml_value()
+    public void ToProtoValue_throws_for_unsupported_daml_value()
     {
         var action = () => DamlValueConverter.ToProtoValue(new UnsupportedDamlValue());
 
@@ -298,12 +290,8 @@ public class DamlValueConverterTests
             .WithMessage("*UnsupportedDamlValue*");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // ToProtoRecord
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void to_proto_record_converts_correctly()
+    public void ToProtoRecord_converts_correctly()
     {
         var record = new DamlRecord(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -322,7 +310,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_record_handles_null_record_id()
+    public void ToProtoRecord_handles_null_record_id()
     {
         var record = new DamlRecord(null, [
             new DamlField("field", new DamlText("value"))
@@ -335,7 +323,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void to_proto_record_handles_empty_fields()
+    public void ToProtoRecord_handles_empty_fields()
     {
         var record = new DamlRecord(
             new RuntimeIdentifier("pkg", "Module", "Empty"), []);
@@ -346,12 +334,8 @@ public class DamlValueConverterTests
         protoRecord.Fields.Should().BeEmpty();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // FromProtoIdentifier
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void from_proto_identifier_converts_correctly()
+    public void FromProtoIdentifier_converts_correctly()
     {
         var proto = new ProtoIdentifier
         {
@@ -367,12 +351,8 @@ public class DamlValueConverterTests
         result.EntityName.Should().Be("Entity");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // FromProtoValue
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void from_proto_value_converts_unit()
+    public void FromProtoValue_converts_unit()
     {
         var proto = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() };
 
@@ -382,14 +362,14 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_bool()
+    public void FromProtoValue_converts_bool()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Bool = true }).Should().Be(new DamlBool(true));
         DamlValueConverter.FromProtoValue(new ProtoValue { Bool = false }).Should().Be(new DamlBool(false));
     }
 
     [Fact]
-    public void from_proto_value_converts_int64()
+    public void FromProtoValue_converts_int64()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { Int64 = 42 });
 
@@ -397,7 +377,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_int64_boundaries()
+    public void FromProtoValue_converts_int64_boundaries()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Int64 = 0 }).Should().Be(new DamlInt64(0));
         DamlValueConverter.FromProtoValue(new ProtoValue { Int64 = long.MinValue }).Should().Be(new DamlInt64(long.MinValue));
@@ -405,7 +385,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_text()
+    public void FromProtoValue_converts_text()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { Text = "hello world" });
 
@@ -413,13 +393,13 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_empty_text()
+    public void FromProtoValue_converts_empty_text()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Text = "" }).Should().Be(new DamlText(""));
     }
 
     [Fact]
-    public void from_proto_value_converts_party()
+    public void FromProtoValue_converts_party()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { Party = "party::alice" });
 
@@ -427,7 +407,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_numeric()
+    public void FromProtoValue_converts_numeric()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = "123.456" });
 
@@ -436,21 +416,21 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_numeric_zero()
+    public void FromProtoValue_converts_numeric_zero()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = "0" })
             .As<DamlNumeric>().Value.Should().Be(0m);
     }
 
     [Fact]
-    public void from_proto_value_converts_negative_numeric()
+    public void FromProtoValue_converts_negative_numeric()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = "-1.23" })
             .As<DamlNumeric>().Value.Should().Be(-1.23m);
     }
 
     [Fact]
-    public void from_proto_value_throws_for_malformed_numeric()
+    public void FromProtoValue_throws_for_malformed_numeric()
     {
         var action = () => DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = "NaN" });
 
@@ -459,7 +439,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_date()
+    public void FromProtoValue_converts_date()
     {
         var original = new DamlDate(new DateOnly(2024, 1, 1));
         var proto = new ProtoValue { Date = original.DaysSinceEpoch };
@@ -471,14 +451,14 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_date_at_epoch()
+    public void FromProtoValue_converts_date_at_epoch()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Date = 0 })
             .As<DamlDate>().Value.Should().Be(new DateOnly(1970, 1, 1));
     }
 
     [Fact]
-    public void from_proto_value_converts_timestamp()
+    public void FromProtoValue_converts_timestamp()
     {
         var original = new DamlTimestamp(DateTimeOffset.UnixEpoch.AddSeconds(1704067200));
         var proto = new ProtoValue { Timestamp = original.MicrosecondsSinceEpoch };
@@ -490,14 +470,14 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_timestamp_at_epoch()
+    public void FromProtoValue_converts_timestamp_at_epoch()
     {
         DamlValueConverter.FromProtoValue(new ProtoValue { Timestamp = 0 })
             .As<DamlTimestamp>().Value.Should().Be(DateTimeOffset.UnixEpoch);
     }
 
     [Fact]
-    public void from_proto_value_converts_contract_id()
+    public void FromProtoValue_converts_contract_id()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { ContractId = "00abc123" });
 
@@ -506,7 +486,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_record()
+    public void FromProtoValue_converts_record()
     {
         var protoRecord = new ProtoRecord();
         protoRecord.RecordId = new ProtoIdentifier
@@ -529,7 +509,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_variant()
+    public void FromProtoValue_converts_variant()
     {
         var proto = new ProtoValue
         {
@@ -551,7 +531,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_variant_without_id()
+    public void FromProtoValue_converts_variant_without_id()
     {
         var proto = new ProtoValue
         {
@@ -565,7 +545,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_list()
+    public void FromProtoValue_converts_list()
     {
         var protoList = new List();
         protoList.Elements.Add(new ProtoValue { Int64 = 1 });
@@ -583,7 +563,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_empty_list()
+    public void FromProtoValue_converts_empty_list()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { List = new List() });
 
@@ -591,7 +571,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_optional_with_value()
+    public void FromProtoValue_converts_optional_with_value()
     {
         var proto = new ProtoValue
         {
@@ -605,7 +585,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_optional_without_value()
+    public void FromProtoValue_converts_optional_without_value()
     {
         var proto = new ProtoValue
         {
@@ -619,7 +599,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_text_map()
+    public void FromProtoValue_converts_text_map()
     {
         var protoMap = new TextMap();
         protoMap.Entries.Add(new TextMap.Types.Entry { Key = "key1", Value = new ProtoValue { Text = "value1" } });
@@ -635,7 +615,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_empty_text_map()
+    public void FromProtoValue_converts_empty_text_map()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { TextMap = new TextMap() });
 
@@ -643,7 +623,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_gen_map()
+    public void FromProtoValue_converts_gen_map()
     {
         var protoMap = new GenMap();
         protoMap.Entries.Add(new GenMap.Types.Entry { Key = new ProtoValue { Int64 = 1 }, Value = new ProtoValue { Text = "one" } });
@@ -659,7 +639,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_empty_gen_map()
+    public void FromProtoValue_converts_empty_gen_map()
     {
         var result = DamlValueConverter.FromProtoValue(new ProtoValue { GenMap = new GenMap() });
 
@@ -667,7 +647,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_enum()
+    public void FromProtoValue_converts_enum()
     {
         var proto = new ProtoValue
         {
@@ -687,7 +667,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_converts_enum_without_id()
+    public void FromProtoValue_converts_enum_without_id()
     {
         var proto = new ProtoValue
         {
@@ -701,7 +681,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_unset_sum_case()
+    public void FromProtoValue_throws_for_unset_sum_case()
     {
         var action = () => DamlValueConverter.FromProtoValue(new ProtoValue());
 
@@ -710,7 +690,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_variant_with_null_value()
+    public void FromProtoValue_throws_for_variant_with_null_value()
     {
         var proto = new ProtoValue
         {
@@ -724,7 +704,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_text_map_entry_with_null_value()
+    public void FromProtoValue_throws_for_text_map_entry_with_null_value()
     {
         var protoMap = new TextMap();
         protoMap.Entries.Add(new TextMap.Types.Entry { Key = "bad_key" });
@@ -736,7 +716,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_text_map_with_duplicate_keys()
+    public void FromProtoValue_throws_for_text_map_with_duplicate_keys()
     {
         var protoMap = new TextMap();
         protoMap.Entries.Add(new TextMap.Types.Entry { Key = "dup", Value = new ProtoValue { Text = "first" } });
@@ -749,7 +729,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_gen_map_entry_with_null_key()
+    public void FromProtoValue_throws_for_gen_map_entry_with_null_key()
     {
         var protoMap = new GenMap();
         protoMap.Entries.Add(new GenMap.Types.Entry { Value = new ProtoValue { Text = "v" } });
@@ -761,7 +741,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_value_throws_for_gen_map_entry_with_null_value()
+    public void FromProtoValue_throws_for_gen_map_entry_with_null_value()
     {
         var protoMap = new GenMap();
         protoMap.Entries.Add(new GenMap.Types.Entry { Key = new ProtoValue { Int64 = 1 } });
@@ -772,12 +752,8 @@ public class DamlValueConverterTests
             .WithMessage("*GenMap*no Value*");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // FromProtoRecord
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void from_proto_record_converts_correctly()
+    public void FromProtoRecord_converts_correctly()
     {
         var protoRecord = new ProtoRecord();
         protoRecord.RecordId = new ProtoIdentifier
@@ -797,7 +773,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_record_handles_null_record_id()
+    public void FromProtoRecord_handles_null_record_id()
     {
         var protoRecord = new ProtoRecord();
         protoRecord.Fields.Add(new RecordField { Label = "field", Value = new ProtoValue { Text = "value" } });
@@ -809,7 +785,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_record_handles_empty_fields()
+    public void FromProtoRecord_handles_empty_fields()
     {
         var protoRecord = new ProtoRecord();
         protoRecord.RecordId = new ProtoIdentifier
@@ -824,7 +800,7 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void from_proto_record_throws_for_null_field_value()
+    public void FromProtoRecord_throws_for_null_field_value()
     {
         var protoRecord = new ProtoRecord();
         protoRecord.Fields.Add(new RecordField { Label = "bad_field" });
@@ -835,13 +811,9 @@ public class DamlValueConverterTests
             .WithMessage("*'bad_field'*no Value*");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Round-trip tests (ToProto → FromProto)
-    // ──────────────────────────────────────────────────────────────
-
     [Theory]
     [MemberData(nameof(RoundTripValues))]
-    public void proto_value_round_trips(DamlValue original)
+    public void ToProtoValue_and_FromProtoValue_round_trip(DamlValue original)
     {
         var proto = DamlValueConverter.ToProtoValue(original);
         var result = DamlValueConverter.FromProtoValue(proto);
@@ -894,10 +866,5 @@ public class DamlValueConverterTests
         new DamlEnum(new RuntimeIdentifier("pkg", "Mod", "E"), "Ctor"),
         new DamlEnum(null, "Ctor"),
     };
-
-    // ──────────────────────────────────────────────────────────────
-    // Helpers
-    // ──────────────────────────────────────────────────────────────
-
     private sealed record UnsupportedDamlValue : DamlValue;
 }

@@ -2,7 +2,6 @@
 
 using Canton.Ledger.Auth;
 using Canton.Ledger.Auth.TokenGeneration;
-using Canton.Ledger.Grpc.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,7 +13,7 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 public class ServiceCollectionExtensionsTests
 {
     [Fact]
-    public void add_ledger_client_registers_iledger_client_as_singleton()
+    public void AddLedgerClient_registers_ILedgerClient_as_singleton()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder()
@@ -32,7 +31,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_admin_client_registers_iadmin_client_as_singleton()
+    public void AddAdminClient_registers_IAdminClient_as_singleton()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder()
@@ -50,7 +49,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_binds_options_from_configuration()
+    public void AddLedgerClient_binds_options_from_configuration()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder()
@@ -70,7 +69,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_throws_for_null_services()
+    public void AddLedgerClient_throws_for_null_services()
     {
         IServiceCollection services = null!;
         var config = new ConfigurationBuilder().Build();
@@ -81,7 +80,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_throws_for_null_configuration()
+    public void AddLedgerClient_throws_for_null_configuration()
     {
         var services = new ServiceCollection();
 
@@ -91,7 +90,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_admin_client_throws_for_null_services()
+    public void AddAdminClient_throws_for_null_services()
     {
         IServiceCollection services = null!;
         var config = new ConfigurationBuilder().Build();
@@ -102,7 +101,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_admin_client_throws_for_null_configuration()
+    public void AddAdminClient_throws_for_null_configuration()
     {
         var services = new ServiceCollection();
 
@@ -112,7 +111,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_ledger_client_returns_services_for_chaining()
+    public void AddLedgerClient_returns_services_for_chaining()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -126,7 +125,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_admin_client_returns_services_for_chaining()
+    public void AddAdminClient_returns_services_for_chaining()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -140,7 +139,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void ledger_client_resolves_when_token_provider_registered()
+    public void AddLedgerClient_resolves_when_token_provider_registered()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -159,7 +158,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void admin_client_resolves_when_token_provider_registered()
+    public void AddAdminClient_resolves_when_token_provider_registered()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -178,7 +177,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void auto_registers_client_credentials_from_auth_section()
+    public void AddLedgerClient_auto_registers_client_credentials_from_auth_section()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -201,7 +200,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void auto_registers_client_credentials_for_admin_client()
+    public void AddAdminClient_auto_registers_client_credentials_from_auth_section()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -224,7 +223,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void explicit_token_provider_takes_precedence_over_auth_section()
+    public void AddLedgerClient_explicit_token_provider_takes_precedence_over_auth_section()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -248,7 +247,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void ledger_client_resolves_without_auth_for_unauthenticated_access()
+    public void AddLedgerClient_resolves_without_auth_for_unauthenticated_access()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -267,7 +266,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void admin_client_resolves_without_auth_for_unauthenticated_access()
+    public void AddAdminClient_resolves_without_auth_for_unauthenticated_access()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -286,7 +285,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void ledger_client_resolves_with_action_overload_without_auth()
+    public void AddLedgerClient_resolves_with_action_overload_without_auth()
     {
         var services = new ServiceCollection();
 
@@ -301,7 +300,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void admin_client_resolves_with_action_overload_without_auth()
+    public void AddAdminClient_resolves_with_action_overload_without_auth()
     {
         var services = new ServiceCollection();
 
@@ -316,7 +315,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_registers_ledger_and_admin_clients()
+    public void AddCantonLedger_registers_ledger_and_admin_clients()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -332,7 +331,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_binds_options_from_canton_ledger_section()
+    public void AddCantonLedger_binds_options_from_canton_ledger_section()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -350,7 +349,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_registers_client_credentials_when_canton_auth_populated()
+    public void AddCantonLedger_registers_client_credentials_when_canton_auth_populated()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -375,7 +374,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_skips_auth_when_canton_auth_section_absent()
+    public void AddCantonLedger_skips_auth_when_canton_auth_section_absent()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -390,7 +389,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_skips_auth_when_canton_auth_values_are_whitespace()
+    public void AddCantonLedger_skips_auth_when_canton_auth_values_are_whitespace()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -406,7 +405,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_fails_at_startup_when_auth_half_configured()
+    public void AddCantonLedger_fails_at_startup_when_auth_half_configured()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -425,7 +424,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_skips_auth_options_binding_when_explicit_provider_registered()
+    public void AddCantonLedger_skips_auth_options_binding_when_explicit_provider_registered()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -442,7 +441,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_preserves_explicit_static_auth_registered_before()
+    public void AddCantonLedger_preserves_explicit_static_auth_registered_before()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -461,7 +460,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_throws_for_null_services()
+    public void AddCantonLedger_throws_for_null_services()
     {
         IServiceCollection services = null!;
         var config = new ConfigurationBuilder().Build();
@@ -472,7 +471,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_throws_for_null_configuration()
+    public void AddCantonLedger_throws_for_null_configuration()
     {
         var services = new ServiceCollection();
 
@@ -482,7 +481,7 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void add_canton_ledger_returns_services_for_chaining()
+    public void AddCantonLedger_returns_services_for_chaining()
     {
         var services = new ServiceCollection();
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

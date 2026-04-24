@@ -10,7 +10,7 @@ namespace Canton.Ledger.Auth.Tests;
 public class ClientCredentialsOptionsTests
 {
     [Fact]
-    public void default_safety_margin_is_30_seconds()
+    public void SafetyMargin_default_is_30_seconds()
     {
         var options = new ClientCredentialsOptions
         {
@@ -23,7 +23,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void token_generation_endpoint_derived_from_domain()
+    public void TokenGenerationEndpoint_derived_from_Domain()
     {
         var options = new ClientCredentialsOptions
         {
@@ -36,7 +36,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void explicit_token_endpoint_takes_precedence()
+    public void TokenEndpoint_explicit_value_takes_precedence()
     {
         var options = new ClientCredentialsOptions
         {
@@ -50,7 +50,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_no_domain_and_no_token_endpoint()
+    public void Validate_fails_when_no_Domain_and_no_TokenEndpoint()
     {
         var options = new ClientCredentialsOptions
         {
@@ -66,7 +66,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_client_id_missing()
+    public void Validate_fails_when_ClientId_missing()
     {
         var options = new ClientCredentialsOptions
         {
@@ -81,7 +81,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_client_id_is_whitespace()
+    public void Validate_fails_when_ClientId_is_whitespace()
     {
         var options = new ClientCredentialsOptions
         {
@@ -96,7 +96,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_client_secret_is_whitespace()
+    public void Validate_fails_when_ClientSecret_is_whitespace()
     {
         var options = new ClientCredentialsOptions
         {
@@ -111,7 +111,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_client_secret_missing()
+    public void Validate_fails_when_ClientSecret_missing()
     {
         var options = new ClientCredentialsOptions
         {
@@ -126,7 +126,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_safety_margin_is_negative()
+    public void Validate_fails_when_SafetyMargin_is_negative()
     {
         var options = new ClientCredentialsOptions
         {
@@ -142,7 +142,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void token_generation_endpoint_throws_when_neither_domain_nor_endpoint_set()
+    public void TokenGenerationEndpoint_throws_when_neither_Domain_nor_endpoint_set()
     {
         var options = new ClientCredentialsOptions
         {
@@ -157,7 +157,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_domain_is_empty()
+    public void Validate_fails_when_Domain_is_empty()
     {
         var options = new ClientCredentialsOptions
         {
@@ -174,7 +174,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_domain_has_invalid_hostname()
+    public void Validate_fails_when_Domain_has_invalid_hostname()
     {
         var options = new ClientCredentialsOptions
         {
@@ -189,7 +189,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void token_generation_endpoint_derived_from_bare_hostname()
+    public void TokenGenerationEndpoint_derived_from_bare_hostname()
     {
         var options = new ClientCredentialsOptions
         {
@@ -203,7 +203,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void bare_hostname_passes_validation()
+    public void Validate_passes_for_bare_hostname()
     {
         var options = new ClientCredentialsOptions
         {
@@ -227,7 +227,7 @@ public class ClientCredentialsOptionsTests
     [InlineData("https://auth.example.com/tenant-a", "https://auth.example.com/tenant-a/oauth/token")]
     [InlineData("https://auth.example.com/tenant-a/", "https://auth.example.com/tenant-a/oauth/token")]
     [InlineData("  dev-peaceful.eu.auth0.com  ", "https://dev-peaceful.eu.auth0.com/oauth/token")]
-    public void token_generation_endpoint_composes_from_domain(string domain, string expected)
+    public void TokenGenerationEndpoint_composes_from_Domain(string domain, string expected)
     {
         var options = new ClientCredentialsOptions
         {
@@ -252,7 +252,7 @@ public class ClientCredentialsOptionsTests
     [InlineData("auth.example.com/oauth/token")]
     [InlineData("auth.example.com/tenant-a")]
     [InlineData("auth.example.com\\tenant-a")]
-    public void invalid_domain_values_fail_validation(string domain)
+    public void Validate_fails_for_invalid_Domain_values(string domain)
     {
         var options = new ClientCredentialsOptions
         {
@@ -267,7 +267,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void domain_ending_in_oauth_token_suggests_token_endpoint()
+    public void Validate_fails_when_Domain_ending_in_oauth_token_suggests_TokenEndpoint()
     {
         var options = new ClientCredentialsOptions
         {
@@ -284,7 +284,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void token_generation_endpoint_throws_actionable_message_for_oauth_token_suffix()
+    public void TokenGenerationEndpoint_throws_actionable_message_for_oauth_token_suffix()
     {
         var options = new ClientCredentialsOptions
         {
@@ -300,7 +300,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_passes_when_only_token_endpoint_set()
+    public void Validate_passes_when_only_TokenEndpoint_set()
     {
         var options = new ClientCredentialsOptions
         {
@@ -317,7 +317,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void token_generation_endpoint_returns_token_endpoint_when_domain_absent()
+    public void TokenGenerationEndpoint_returns_TokenEndpoint_when_Domain_absent()
     {
         var options = new ClientCredentialsOptions
         {
@@ -330,7 +330,7 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
-    public void validation_fails_when_token_endpoint_is_relative()
+    public void Validate_fails_when_TokenEndpoint_is_relative()
     {
         var options = new ClientCredentialsOptions
         {

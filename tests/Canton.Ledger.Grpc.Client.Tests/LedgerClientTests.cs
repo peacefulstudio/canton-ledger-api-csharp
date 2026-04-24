@@ -41,13 +41,8 @@ public class LedgerClientTests
     }
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
-
-    // ──────────────────────────────────────────────────────────────
-    // BuildCommands
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public void build_commands_sets_command_id_and_workflow_id()
+    public void BuildCommands_sets_command_id_and_workflow_id()
     {
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -68,7 +63,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public void build_commands_generates_command_id_when_not_provided()
+    public void BuildCommands_generates_command_id_when_not_provided()
     {
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -85,7 +80,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public void build_commands_adds_create_command()
+    public void BuildCommands_adds_create_command()
     {
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -107,7 +102,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public void build_commands_adds_exercise_command()
+    public void BuildCommands_adds_exercise_command()
     {
         var exerciseCommand = new RuntimeCommands.ExerciseCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -129,7 +124,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public void build_commands_includes_read_as_parties()
+    public void BuildCommands_includes_read_as_parties()
     {
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -148,12 +143,8 @@ public class LedgerClientTests
         commands.ReadAs.Should().Contain("party::observer2");
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // SubmitAsync / SubmitAndWaitForTransactionAsync
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public async Task submit_async_returns_update_id()
+    public async Task SubmitAsync_returns_update_id()
     {
         var response = new SubmitAndWaitResponse { UpdateId = "update-123" };
 
@@ -185,7 +176,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task submit_and_wait_for_transaction_returns_created_contracts()
+    public async Task SubmitAndWaitForTransaction_returns_created_contracts()
     {
         var transaction = new Transaction
         {
@@ -240,7 +231,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task submit_and_wait_for_transaction_returns_archived_contracts()
+    public async Task SubmitAndWaitForTransaction_returns_archived_contracts()
     {
         var transaction = new Transaction
         {
@@ -287,7 +278,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task throws_when_token_provider_returns_empty_token()
+    public async Task SubmitAndWaitForTransaction_throws_when_token_provider_returns_empty_token()
     {
         var emptyProvider = Substitute.For<ITokenProvider>();
         emptyProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("");
@@ -308,7 +299,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task throws_when_token_provider_returns_whitespace_token()
+    public async Task SubmitAndWaitForTransaction_throws_when_token_provider_returns_whitespace_token()
     {
         var whitespaceProvider = Substitute.For<ITokenProvider>();
         whitespaceProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("   ");
@@ -329,7 +320,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public void dispose_does_not_throw()
+    public void Dispose_does_not_throw()
     {
         var client = CreateClient();
 
@@ -338,12 +329,8 @@ public class LedgerClientTests
         action.Should().NotThrow();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // ExerciseAsync integration tests
-    // ──────────────────────────────────────────────────────────────
-
     [Fact]
-    public async Task exercise_async_throws_when_no_matching_event()
+    public async Task ExerciseAsync_throws_when_no_matching_event()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         // No ExercisedEvent added — response has no matching event
@@ -378,7 +365,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task exercise_async_returns_contract_id_result()
+    public async Task ExerciseAsync_returns_contract_id_result()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -421,7 +408,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task exercise_async_returns_unit_for_void_choice()
+    public async Task ExerciseAsync_returns_unit_for_void_choice()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -463,7 +450,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task exercise_async_uses_ledger_effects_shape()
+    public async Task ExerciseAsync_uses_ledger_effects_shape()
     {
         SubmitAndWaitForTransactionRequest? capturedRequest = null;
 
@@ -509,10 +496,6 @@ public class LedgerClientTests
         capturedRequest.TransactionFormat.EventFormat.Should().NotBeNull();
         capturedRequest.TransactionFormat.EventFormat.Verbose.Should().BeTrue();
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Test template — minimal ITemplate for unit tests
-    // ──────────────────────────────────────────────────────────────
 
     internal sealed record TestTemplate(string Owner) : ITemplate
     {

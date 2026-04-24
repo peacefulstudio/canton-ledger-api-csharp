@@ -168,10 +168,6 @@ public sealed partial class PqsClient : IPqsClient
         }
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // SQL generation
-    // ──────────────────────────────────────────────────────────────
-
     /// <summary>
     /// Builds the full SQL query and captures filter parameters in a single pass.
     /// </summary>
@@ -195,10 +191,6 @@ public sealed partial class PqsClient : IPqsClient
         foreach (var (name, value) in parameters)
             cmd.Parameters.AddWithValue(name, value);
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Query execution
-    // ──────────────────────────────────────────────────────────────
 
     private async Task<IReadOnlyList<Contract<T>>> ExecuteQueryManyAsync<T>(
         string sql,
@@ -308,10 +300,6 @@ public sealed partial class PqsClient : IPqsClient
 
         return new Contract<T>(new ContractId<T>(contractId), payload);
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Source-generated logging
-    // ──────────────────────────────────────────────────────────────
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Querying active contracts for template {TemplateId}")]
     private static partial void LogQueryStart(ILogger logger, string templateId);

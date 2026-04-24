@@ -1,6 +1,5 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-using Canton.Ledger.Pqs.Client;
 using FluentAssertions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -18,7 +17,7 @@ public class PqsHealthCheckTests
         };
 
     [Fact]
-    public async Task check_health_returns_failure_when_connection_fails()
+    public async Task CheckHealth_returns_failure_when_connection_fails()
     {
         var options = Options.Create(new PqsClientOptions
         {
@@ -34,7 +33,7 @@ public class PqsHealthCheckTests
     }
 
     [Fact]
-    public void constructor_throws_for_null_options()
+    public void Constructor_throws_for_null_options()
     {
         var act = () => new PqsHealthCheck(null!);
 

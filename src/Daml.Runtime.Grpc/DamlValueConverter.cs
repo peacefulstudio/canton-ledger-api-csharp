@@ -15,10 +15,6 @@ namespace Daml.Runtime.Grpc;
 /// </summary>
 public static class DamlValueConverter
 {
-    // ──────────────────────────────────────────────────────────────
-    // ToProto*
-    // ──────────────────────────────────────────────────────────────
-
     public static ProtoIdentifier ToProtoIdentifier(RuntimeIdentifier identifier)
     {
         ArgumentNullException.ThrowIfNull(identifier);
@@ -98,10 +94,6 @@ public static class DamlValueConverter
         };
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // FromProto*
-    // ──────────────────────────────────────────────────────────────
-
     public static RuntimeIdentifier FromProtoIdentifier(ProtoIdentifier identifier)
     {
         ArgumentNullException.ThrowIfNull(identifier);
@@ -169,10 +161,6 @@ public static class DamlValueConverter
             _ => throw new NotSupportedException($"Proto Value case {value.SumCase} is not supported")
         };
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Private helpers
-    // ──────────────────────────────────────────────────────────────
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>
         message ?? throw new InvalidOperationException(

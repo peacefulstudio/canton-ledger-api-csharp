@@ -37,7 +37,7 @@ public class AdminClientTests
     private AdminClient CreateClient() => new(_options, _channel, _partyService, _userService, _tokenProvider);
 
     [Fact]
-    public async Task get_participant_id_returns_id_from_response()
+    public async Task GetParticipantId_returns_id_from_response()
     {
         var expectedId = "participant::test-participant";
         var response = new GetParticipantIdResponse { ParticipantId = expectedId };
@@ -62,7 +62,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task allocate_party_returns_party_details()
+    public async Task AllocateParty_returns_PartyDetails()
     {
         var partyId = "party::alice";
         var response = new AllocatePartyResponse
@@ -95,7 +95,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task get_parties_returns_list_of_party_details()
+    public async Task GetParties_returns_list_of_PartyDetails()
     {
         var response = new GetPartiesResponse();
         response.PartyDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PartyDetails
@@ -133,7 +133,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task list_known_parties_returns_paginated_results()
+    public async Task ListKnownParties_returns_paginated_results()
     {
         var response = new ListKnownPartiesResponse();
         response.PartyDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PartyDetails
@@ -163,7 +163,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task create_user_returns_user_details()
+    public async Task CreateUser_returns_UserDetails()
     {
         var response = new CreateUserResponse
         {
@@ -195,7 +195,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task create_user_with_rights_sends_rights_in_request()
+    public async Task CreateUser_with_rights_sends_rights_in_request()
     {
         var response = new CreateUserResponse
         {
@@ -235,7 +235,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task get_user_returns_user_when_found()
+    public async Task GetUser_returns_user_when_found()
     {
         var response = new GetUserResponse
         {
@@ -267,7 +267,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task get_user_returns_null_when_not_found()
+    public async Task GetUser_returns_null_when_not_found()
     {
         _userService
             .GetUserAsync(
@@ -285,7 +285,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task grant_user_rights_calls_service()
+    public async Task GrantUserRights_calls_service()
     {
         var response = new GrantUserRightsResponse();
 
@@ -312,7 +312,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task revoke_user_rights_calls_service()
+    public async Task RevokeUserRights_calls_service()
     {
         var response = new RevokeUserRightsResponse();
 
@@ -339,7 +339,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task list_users_returns_paginated_results()
+    public async Task ListUsers_returns_paginated_results()
     {
         var response = new ListUsersResponse();
         response.Users.Add(new User { Id = "user1", PrimaryParty = "party::alice" });
@@ -367,7 +367,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void to_proto_right_converts_act_as()
+    public void ToProtoRight_converts_act_as()
     {
         var right = new UserRight.ActAs("party::alice");
         var protoRight = AdminClient.ToProtoRight(right);
@@ -377,7 +377,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void to_proto_right_converts_read_as()
+    public void ToProtoRight_converts_read_as()
     {
         var right = new UserRight.ReadAs("party::bob");
         var protoRight = AdminClient.ToProtoRight(right);
@@ -387,7 +387,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void to_proto_right_converts_participant_admin()
+    public void ToProtoRight_converts_participant_admin()
     {
         var protoRight = AdminClient.ToProtoRight(new UserRight.ParticipantAdmin());
 
@@ -395,7 +395,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void to_proto_right_converts_identity_provider_admin()
+    public void ToProtoRight_converts_identity_provider_admin()
     {
         var protoRight = AdminClient.ToProtoRight(new UserRight.IdentityProviderAdmin());
 
@@ -403,7 +403,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void from_proto_user_converts_correctly()
+    public void FromProtoUser_converts_correctly()
     {
         var protoUser = new User
         {
@@ -419,7 +419,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task throws_when_token_provider_returns_empty_token()
+    public async Task GetParticipantId_throws_when_token_provider_returns_empty_token()
     {
         var emptyProvider = Substitute.For<ITokenProvider>();
         emptyProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("");
@@ -433,7 +433,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task throws_when_token_provider_returns_whitespace_token()
+    public async Task GetParticipantId_throws_when_token_provider_returns_whitespace_token()
     {
         var whitespaceProvider = Substitute.For<ITokenProvider>();
         whitespaceProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("   ");
@@ -447,7 +447,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void dispose_does_not_throw()
+    public void Dispose_does_not_throw()
     {
         var client = CreateClient();
 

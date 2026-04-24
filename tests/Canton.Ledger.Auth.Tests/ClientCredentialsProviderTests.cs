@@ -34,7 +34,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task sends_correct_form_data_to_token_endpoint()
+    public async Task GetTokenAsync_sends_correct_form_data_to_TokenEndpoint()
     {
         var handler = new FakeHttpHandler();
         var options = CreateOptions();
@@ -50,7 +50,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task includes_audience_when_configured()
+    public async Task GetTokenAsync_includes_Audience_when_configured()
     {
         var handler = new FakeHttpHandler();
         var options = CreateOptions(audience: "https://canton.network/");
@@ -62,7 +62,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task returns_access_token_from_response()
+    public async Task GetTokenAsync_returns_access_token_from_response()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -75,7 +75,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_http_error()
+    public async Task GetTokenAsync_throws_on_http_error()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.Unauthorized,
@@ -88,7 +88,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_malformed_response()
+    public async Task GetTokenAsync_throws_on_malformed_response()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -101,7 +101,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task returns_cached_token_when_not_expired()
+    public async Task GetTokenAsync_returns_cached_token_when_not_expired()
     {
         var handler = new FakeHttpHandler();
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
@@ -115,7 +115,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task refreshes_token_when_within_safety_margin()
+    public async Task GetTokenAsync_refreshes_token_when_within_SafetyMargin()
     {
         var handler = new FakeHttpHandler();
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
@@ -134,7 +134,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task concurrent_callers_share_single_refresh()
+    public async Task GetTokenAsync_concurrent_callers_share_single_refresh()
     {
         var handler = new FakeHttpHandler();
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
@@ -158,7 +158,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task refreshed_token_is_never_paired_with_stale_value()
+    public async Task GetTokenAsync_refreshed_token_is_never_paired_with_stale_value()
     {
         // Verifies that after a token refresh, callers always see the new token —
         // never the old token extended by the new expiry. This would happen if
@@ -186,7 +186,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_zero_expires_in()
+    public async Task GetTokenAsync_throws_on_zero_expires_in()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -200,7 +200,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_negative_expires_in()
+    public async Task GetTokenAsync_throws_on_negative_expires_in()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -214,7 +214,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_empty_access_token_in_response()
+    public async Task GetTokenAsync_throws_on_empty_access_token_in_response()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -228,7 +228,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task throws_on_null_access_token_in_response()
+    public async Task GetTokenAsync_throws_on_null_access_token_in_response()
     {
         var handler = new FakeHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -242,7 +242,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task propagates_cancellation()
+    public async Task GetTokenAsync_propagates_cancellation()
     {
         var handler = new FakeHttpHandler();
         using var provider = CreateProvider(CreateOptions(), handler);
