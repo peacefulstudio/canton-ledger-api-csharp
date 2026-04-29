@@ -1,5 +1,9 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+// These tests intentionally exercise the [Obsolete] throwing API to round-trip its
+// behaviour during the deprecation cycle; suppress the obsolete warning here.
+#pragma warning disable CS0618
+
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;

@@ -9,6 +9,20 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Added
+
+- **Outcome-typed exercise API** in `Canton.Ledger.Grpc.Client`: `TrySubmitAndWaitForTransactionAsync`, `TryCreateAsync<X>`, and `TryExerciseForCreatedAsync<X>` return a single discriminated `ExerciseOutcome<T>` record instead of throwing. The outcome variants — `Created`, `NoCreated`, `TooMany`, `DamlError`, `InfraError` — distinguish success (carrying a `T` payload), structured Canton/Daml errors (`DamlError` with a `DamlErrorCategory` enum, error ID, message, and `ErrorInfo.metadata`), and infrastructure failures (`InfraError` with `Grpc.Core.StatusCode`). Errors are decoded from the gRPC `grpc-status-details-bin` trailer's rich error model; missing/unparseable trailers fall back to `DamlErrorCategory.Unknown` without losing information. Lets consumers `switch` on outcomes instead of catching exceptions and parsing trailers manually. (#47)
+- `ExerciseOutcome<T>` is unconstrained on `T`: success can carry a typed `ContractId<X>`, a raw `TransactionResult`, a composite Daml choice-result record, or any scalar — whatever shape the caller's API surface needs. Template-typed projection out of a transaction lives on `TransactionResultExtensions` (`Single<X>()`, `TrySingle<X>()`, `All<X>()` extension methods over `TransactionResult`, each constrained `where X : ITemplate`). (#47, #48)
+- New types in `Canton.Ledger.Grpc.Client`: `ExerciseOutcome<T>`, `TransactionResultExtensions`, `DamlErrorCategory` (closed enum mirroring Canton 3.5 documented error categories with `Unknown` as the safe fallback). (#47)
+
+### Changed
+
+- **BREAKING:** `CreatedContract.TemplateId` is now `Daml.Runtime.Data.Identifier` (was `string`). Surfaces the parsed package/module/entity directly so `ExerciseTransactionOutcome.Success.Single<T>()` etc. can match by qualified name. (#47)
+
+### Deprecated
+
+- `ILedgerClient.SubmitAndWaitForTransactionAsync` and `ILedgerClient.CreateAsync<T>` are marked `[Obsolete]` in favour of `TrySubmitAndWaitForTransactionAsync` and `TryCreateAsync<T>`. The throwing API still works for one minor cycle and will be removed in the next major release. (#47)
+
 ## [0.1.1] - 2026-04-24
 
 ### Added

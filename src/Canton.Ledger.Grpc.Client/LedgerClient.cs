@@ -11,7 +11,9 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
+using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -84,6 +86,7 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     /// <inheritdoc />
+    [Obsolete("Use TryCreateAsync — see issue #47. Throwing API removed in next major.")]
     public async Task<ContractId<T>> CreateAsync<T>(
         T payload,
         string actAs,
@@ -103,7 +106,9 @@ public sealed partial class LedgerClient : ILedgerClient
 
         LogCreatingContract(Logger, typeof(T).Name);
 
+#pragma warning disable CS0618 // Internal call to obsolete throwing API kept for one minor cycle.
         var result = await SubmitAndWaitForTransactionAsync(submission, cancellationToken);
+#pragma warning restore CS0618
 
         var createdContract = result.CreatedContracts.Count > 0
             ? result.CreatedContracts[0]
@@ -203,6 +208,7 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     /// <inheritdoc />
+    [Obsolete("Use TrySubmitAndWaitForTransactionAsync — see issue #47. Throwing API removed in next major.")]
     public async Task<TransactionResult> SubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         CancellationToken cancellationToken = default)
@@ -221,6 +227,133 @@ public sealed partial class LedgerClient : ILedgerClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
+        return ProjectTransaction(response);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
+        RuntimeCommands.CommandsSubmission submission,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
+
+        var commands = BuildCommands(submission);
+        var request = new SubmitAndWaitForTransactionRequest { Commands = commands };
+
+        LogSubmittingCommands(Logger, submission.Commands.Count);
+
+        try
+        {
+            var response = await _commandService.SubmitAndWaitForTransactionAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
+
+            return new ExerciseOutcome<TransactionResult>.Created(ProjectTransaction(response));
+        }
+        catch (RpcException ex)
+        {
+            // Distinguish structured Daml errors (rich error model) from infra failures.
+            // If the trailer carries an ErrorInfo we treat it as a Daml error, even on
+            // status codes that aren't intrinsically Canton (server choice).
+            var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
+            if (errorId.Length > 0)
+            {
+                return new ExerciseOutcome<TransactionResult>.DamlError(category, errorId, message, metadata);
+            }
+
+            return new ExerciseOutcome<TransactionResult>.InfraError(ex.StatusCode, ex.Status.Detail ?? ex.Message);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
+        TTemplate payload,
+        string actAs,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
+        where TTemplate : ITemplate
+    {
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
+        activity?.SetTag("template.type", typeof(TTemplate).Name);
+        activity?.SetTag("actAs", actAs);
+
+        var createCommand = RuntimeCommands.CreateCommand.For(payload);
+        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
+            .WithActAs((Party)actAs)
+            .WithCommandId(Guid.NewGuid().ToString())
+            .WithWorkflowId(workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
+
+        LogCreatingContract(Logger, typeof(TTemplate).Name);
+
+        var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
+        return ProjectToContractId<TTemplate>(outcome);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
+        RuntimeCommands.ExerciseCommand command,
+        string actAs,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
+        where TTemplate : ITemplate
+    {
+        using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
+        activity?.SetTag("choice", command.Choice);
+        activity?.SetTag("contractId", command.ContractId);
+        activity?.SetTag("template.type", typeof(TTemplate).Name);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(command)
+            .WithActAs((Party)actAs)
+            .WithCommandId(Guid.NewGuid().ToString())
+            .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
+
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+
+        var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
+        return ProjectToContractId<TTemplate>(outcome);
+    }
+
+    private static ExerciseOutcome<ContractId<TTemplate>> ProjectToContractId<TTemplate>(
+        ExerciseOutcome<TransactionResult> outcome)
+        where TTemplate : ITemplate
+    {
+        return outcome switch
+        {
+            ExerciseOutcome<TransactionResult>.Created success => ProjectSuccess<TTemplate>(success.Result),
+            ExerciseOutcome<TransactionResult>.DamlError damlError => new ExerciseOutcome<ContractId<TTemplate>>.DamlError(
+                damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata),
+            ExerciseOutcome<TransactionResult>.InfraError infraError => new ExerciseOutcome<ContractId<TTemplate>>.InfraError(
+                infraError.StatusCode, infraError.Message),
+            _ => throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}"),
+        };
+    }
+
+    private static ExerciseOutcome<ContractId<TTemplate>> ProjectSuccess<TTemplate>(TransactionResult tx)
+        where TTemplate : ITemplate
+    {
+        var matches = new List<string>();
+        var expected = TTemplate.TemplateId;
+        foreach (var c in tx.CreatedContracts)
+        {
+            if (string.Equals(c.TemplateId.ModuleName, expected.ModuleName, StringComparison.Ordinal)
+                && string.Equals(c.TemplateId.EntityName, expected.EntityName, StringComparison.Ordinal))
+            {
+                matches.Add(c.ContractId);
+            }
+        }
+
+        return matches.Count switch
+        {
+            0 => new ExerciseOutcome<ContractId<TTemplate>>.NoCreated(),
+            1 => new ExerciseOutcome<ContractId<TTemplate>>.Created(new ContractId<TTemplate>(matches[0])),
+            _ => new ExerciseOutcome<ContractId<TTemplate>>.TooMany(matches.Count, matches),
+        };
+    }
+
+    private static TransactionResult ProjectTransaction(SubmitAndWaitForTransactionResponse response)
+    {
         var transaction = response.Transaction
             ?? throw new InvalidOperationException(
                 "Server returned a successful response but no Transaction was present.");
@@ -234,7 +367,7 @@ public sealed partial class LedgerClient : ILedgerClient
             {
                 createdContracts.Add(new CreatedContract(
                     evt.Created.ContractId,
-                    evt.Created.TemplateId.ToString(),
+                    ToRuntimeIdentifier(evt.Created.TemplateId),
                     evt.Created.CreateArguments.ToString()));
             }
             else if (evt.EventCase == Event.EventOneofCase.Archived)
@@ -251,6 +384,9 @@ public sealed partial class LedgerClient : ILedgerClient
             createdContracts,
             archivedContractIds);
     }
+
+    private static RuntimeIdentifier ToRuntimeIdentifier(ProtoIdentifier proto) =>
+        new(proto.PackageId, proto.ModuleName, proto.EntityName);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Submitting {CommandCount} commands")]
     private static partial void LogSubmittingCommands(ILogger logger, int commandCount);
