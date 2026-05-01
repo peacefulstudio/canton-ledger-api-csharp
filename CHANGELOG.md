@@ -9,6 +9,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-01
+
 ### Added
 
 - **Typed subscription streams** in `Canton.Ledger.Grpc.Client`: `ILedgerClient.SubscribeAsync<T>(actAs, fromOffset, ct)` and `ILedgerClient.SubscribeActiveAsync<T>(actAs, ct)` wrap `UpdateService.GetUpdates` and `StateService.GetActiveContracts` with template-id filtering and project results to a typed `ContractStreamEvent<T>` discriminated record (`Created` with full payload + offset, `Archived`, `Exercised` with choice argument/result, `StreamError` for in-band gRPC failure). `IAsyncEnumerable<>` honours consumer backpressure; cancellation tears down the gRPC stream cleanly; mid-stream gRPC errors surface as a `StreamError` event rather than throwing — mirroring the outcome-typing discipline of `ExerciseOutcome<T>`. Caller-driven offset checkpointing only — the library does not persist `fromOffset`. (#55)
@@ -53,5 +55,6 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 - CI prerelease version strings now use dot-separated SemVer 2.0 identifiers (`${BASE}-${BRANCH}.${RUN}.${SHA}`) so `run_number` compares numerically; prevents `NU1605` downgrade warnings when consuming prereleases. (#24)
 
-[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.0-preview.2...v0.1.1
