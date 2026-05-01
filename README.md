@@ -2,7 +2,8 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![.NET](https://img.shields.io/badge/.NET-10.0-white.svg)](https://dotnet.microsoft.com/)
-[![GitHub release](https://img.shields.io/github/v/release/peacefulstudio/canton-ledger-api-csharp)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases)
+<!-- Static badge — repo is private, so shields.io's `github/v/release/...` dynamic endpoint can't read it. Bump on each release. -->
+[![Release](https://img.shields.io/badge/Release-v0.1.1-blue.svg)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases/latest)
 
 C# client libraries for interacting with Canton participant nodes via the Ledger API (gRPC) and Participant Query Store (PQS).
 
