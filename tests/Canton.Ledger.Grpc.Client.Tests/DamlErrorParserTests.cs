@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Outcomes;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;

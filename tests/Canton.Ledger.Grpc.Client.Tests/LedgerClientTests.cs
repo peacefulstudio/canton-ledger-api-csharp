@@ -1,13 +1,10 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
-// These tests intentionally exercise the [Obsolete] throwing API to round-trip its
-// behaviour during the deprecation cycle; suppress the obsolete warning here.
-#pragma warning disable CS0618
-
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 using FluentAssertions;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -180,7 +177,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task SubmitAndWaitForTransaction_returns_created_contracts()
+    public async Task TrySubmitAndWaitForTransaction_projects_created_contracts()
     {
         var transaction = new Transaction
         {
@@ -226,16 +223,17 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var result = await client.SubmitAndWaitForTransactionAsync(submission);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
 
-        result.UpdateId.Should().Be("update-123");
-        result.CompletionOffset.Should().Be(456L);
-        result.CreatedContracts.Should().ContainSingle();
-        result.CreatedContracts[0].ContractId.Should().Be("00contract789");
+        var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
+        success.Result.UpdateId.Should().Be("update-123");
+        success.Result.CompletionOffset.Should().Be(456L);
+        success.Result.CreatedContracts.Should().ContainSingle();
+        success.Result.CreatedContracts[0].ContractId.Should().Be("00contract789");
     }
 
     [Fact]
-    public async Task SubmitAndWaitForTransaction_returns_archived_contracts()
+    public async Task TrySubmitAndWaitForTransaction_projects_archived_contracts()
     {
         var transaction = new Transaction
         {
@@ -276,13 +274,14 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var result = await client.SubmitAndWaitForTransactionAsync(submission);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
 
-        result.ArchivedContractIds.Should().ContainSingle().Which.Should().Be("00archived123");
+        var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
+        success.Result.ArchivedContractIds.Should().ContainSingle().Which.Should().Be("00archived123");
     }
 
     [Fact]
-    public async Task SubmitAndWaitForTransaction_throws_when_token_provider_returns_empty_token()
+    public async Task TrySubmitAndWaitForTransaction_throws_when_token_provider_returns_empty_token()
     {
         var emptyProvider = Substitute.For<ITokenProvider>();
         emptyProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("");
@@ -296,14 +295,14 @@ public class LedgerClientTests
             .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
-        var act = () => client.SubmitAndWaitForTransactionAsync(submission);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
     }
 
     [Fact]
-    public async Task SubmitAndWaitForTransaction_throws_when_token_provider_returns_whitespace_token()
+    public async Task TrySubmitAndWaitForTransaction_throws_when_token_provider_returns_whitespace_token()
     {
         var whitespaceProvider = Substitute.For<ITokenProvider>();
         whitespaceProvider.GetTokenAsync(Arg.Any<CancellationToken>()).Returns("   ");
@@ -317,7 +316,7 @@ public class LedgerClientTests
             .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
-        var act = () => client.SubmitAndWaitForTransactionAsync(submission);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");

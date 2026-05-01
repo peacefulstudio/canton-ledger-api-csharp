@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Daml.Runtime.Outcomes;
 using Google.Protobuf;
 using Google.Rpc;
 using Grpc.Core;

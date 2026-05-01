@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Canton.Ledger.Auth;
+using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

@@ -6,7 +6,7 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 
 | Type | Purpose |
 |------|---------|
-| `ILedgerClient` | Command operations: `CreateAsync`, `ExerciseAsync`, `SubmitAsync` |
+| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `ExerciseAsync`, `SubmitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
 | `IAdminClient` | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
 | `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout` |
 
@@ -59,10 +59,18 @@ Use for local development with unauthenticated Canton nodes.
 // Using generated template types from Daml.Codegen.CSharp
 var asset = new Asset("Alice", "My Asset", 100m);
 
-var contractId = await ledgerClient.CreateAsync(
+var outcome = await ledgerClient.TryCreateAsync(
     asset,
     actAs: "Alice::1234...",
     workflowId: "create-asset");
+
+// Outcome is a discriminated union: One / None / Many / DamlError / InfraError.
+var contractId = outcome switch
+{
+    ExerciseOutcome<ContractId<Asset>>.One ok => ok.Result,
+    ExerciseOutcome<ContractId<Asset>>.DamlError err => throw new InvalidOperationException(err.ErrorId),
+    _ => throw new InvalidOperationException(outcome.GetType().Name),
+};
 ```
 
 ### Exercising Choices

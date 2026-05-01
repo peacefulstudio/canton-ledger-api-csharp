@@ -2,6 +2,7 @@
 
 using Canton.Ledger.Auth;
 using Canton.Ledger.Auth.TokenGeneration;
+using Daml.Ledger.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

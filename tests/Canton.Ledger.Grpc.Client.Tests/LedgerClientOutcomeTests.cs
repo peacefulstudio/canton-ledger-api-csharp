@@ -4,6 +4,7 @@ using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 using FluentAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -61,8 +62,8 @@ public class LedgerClientOutcomeTests
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate());
 
-        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.Created>();
-        var success = (ExerciseOutcome<TransactionResult>.Created)outcome;
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>();
+        var success = (ExerciseOutcome<TransactionResult>.One)outcome;
         success.Result.UpdateId.Should().Be("u-1");
         success.Result.Single<FooBar>().Value.Should().Be("00abc");
     }
@@ -98,7 +99,7 @@ public class LedgerClientOutcomeTests
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>();
         var infra = (ExerciseOutcome<TransactionResult>.InfraError)outcome;
-        infra.StatusCode.Should().Be(StatusCode.Unavailable);
+        infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
         infra.Message.Should().Be("network down");
     }
 
@@ -120,13 +121,13 @@ public class LedgerClientOutcomeTests
         var client = CreateClient();
         var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice");
 
-        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.Created>();
-        var created = (ExerciseOutcome<ContractId<FooBar>>.Created)outcome;
+        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.One>();
+        var created = (ExerciseOutcome<ContractId<FooBar>>.One)outcome;
         created.Result.Value.Should().Be("00xyz");
     }
 
     [Fact]
-    public async Task TryCreateAsync_returns_NoCreated_when_no_matching_template()
+    public async Task TryCreateAsync_returns_None_when_no_matching_template()
     {
         // Server returns a transaction but no Created event (rare but representable).
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
@@ -135,7 +136,7 @@ public class LedgerClientOutcomeTests
         var client = CreateClient();
         var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice");
 
-        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.NoCreated>();
+        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.None>();
     }
 
     [Fact]
@@ -157,7 +158,7 @@ public class LedgerClientOutcomeTests
     }
 
     [Fact]
-    public async Task TryExerciseForCreatedAsync_returns_TooMany_when_multiple_matching_creates()
+    public async Task TryExerciseForCreatedAsync_returns_Many_when_multiple_matching_creates()
     {
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
         var tid = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Murmures.Foo", EntityName = "FooBar" };
@@ -174,10 +175,10 @@ public class LedgerClientOutcomeTests
         var client = CreateClient();
         var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, "party::alice");
 
-        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.TooMany>();
-        var tooMany = (ExerciseOutcome<ContractId<FooBar>>.TooMany)outcome;
-        tooMany.Count.Should().Be(2);
-        tooMany.ContractIds.Should().Equal("00a", "00b");
+        outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.Many>();
+        var many = (ExerciseOutcome<ContractId<FooBar>>.Many)outcome;
+        many.Count.Should().Be(2);
+        many.ContractIds.Should().Equal("00a", "00b");
     }
 
     private void StubCommandService(SubmitAndWaitForTransactionResponse response)
