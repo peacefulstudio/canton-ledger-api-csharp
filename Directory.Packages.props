@@ -18,8 +18,8 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.7" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.7" />
     <!-- Integration with Daml codegen runtime -->
-    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.1.4" />
-    <PackageVersion Include="Daml.Runtime" Version="0.1.4" />
+    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.1.5" />
+    <PackageVersion Include="Daml.Runtime" Version="0.1.5" />
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="10.0.2" />
     <!-- Peaceful Extensions -->

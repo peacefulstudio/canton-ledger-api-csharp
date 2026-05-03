@@ -9,6 +9,17 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-party submitter overloads** on `Canton.Ledger.Grpc.Client.LedgerClient` for `ExerciseAsync`, `TryCreateAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, and `SubscribeActiveAsync`. Each method now also accepts a `Daml.Runtime.Commands.SubmitterInfo`, populating `Commands.act_as` / `Commands.read_as` (and, on subscriptions, `EventFormat.FiltersByParty` for every `actAs` and `readAs` party). The existing `string actAs` overloads delegate to the new path via the `string -> SubmitterInfo` implicit conversion, so single-party callers keep working unchanged.
+- **`TransactionResult.ExercisedEvents`** is now populated from `Canton.Ledger.Grpc.Client`. Each `Exercised` event in the gRPC `Transaction` is projected to `Daml.Runtime.Contracts.ExercisedEvent` carrying `ContractId`, `TemplateId`, optional `InterfaceId`, `ChoiceName`, `ChoiceArgument`, `ExerciseResult`, `Consuming`, `ActingParties`, and `WitnessParties`. Required by the typed non-CID exerciser wrappers emitted by `Daml.Codegen.Csharp` 0.1.5+.
+
+### Changed
+
+- **Bumped `Daml.Runtime` and `Daml.Ledger.Abstractions` to `0.1.5`.** Picks up the typed submission surface (`SubmitterInfo`, `IDamlType`, interface-marker exercisers), typed choice-result projection, and the post-create `ExercisedEvents` slot on `TransactionResult`. See the `daml-codegen-csharp` 0.1.5 release notes for the upstream surface.
+- **BREAKING — `ContractStreamEvent<T>.WitnessParties` is now `IReadOnlyList<Party>`** (was `IReadOnlyList<string>`). The gRPC bridge in `Canton.Ledger.Grpc.Client` now wraps the wire-format party strings into `Daml.Runtime.Data.Party` before constructing each event variant. Consumers reading `WitnessParties[i]` as a string need `.Id` (or rely on the implicit `Party -> string` conversion). Sourced from upstream `Daml.Runtime` 0.1.5 (#88).
+- **BREAKING — `ContractStreamEvent<T>.Assigned.Source` / `Target` and `Unassigned.Source` / `Target` are now `Daml.Runtime.Data.SynchronizerId`** (were `string`). Tolerant of the 3.4 (`name::fingerprint`) → 3.5 (`name::fingerprint::protocol-version`) wire-format change. Wrap incoming wire strings with `new SynchronizerId(s)`; round-trip back through `ToString()`. Sourced from upstream `Daml.Runtime` 0.1.5 (#87, #89).
+
 ## [0.1.2] - 2026-05-01
 
 ### Added

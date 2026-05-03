@@ -175,6 +175,43 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
+    public async Task SubscribeAsync_expands_SubmitterInfo_actAs_and_readAs_into_FiltersByParty()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var submitter = new Daml.Runtime.Commands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice", (Party)"bob" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter));
+
+        captured.Should().NotBeNull();
+        var filtersByParty = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
+        filtersByParty.Keys.Should().BeEquivalentTo(["alice", "bob", "observer"]);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_dedupes_party_appearing_in_both_actAs_and_readAs()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var alice = (Party)"alice";
+        var submitter = new Daml.Runtime.Commands.SubmitterInfo(
+            new HashSet<Party> { alice },
+            new HashSet<Party> { alice });
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter));
+
+        captured.Should().NotBeNull();
+        var filtersByParty = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
+        filtersByParty.Keys.Should().BeEquivalentTo(["alice"]);
+    }
+
+    [Fact]
     public async Task SubscribeAsync_surfaces_RpcException_as_StreamError_event()
     {
         var ex = new RpcException(new Status(StatusCode.Unavailable, "transient down"));
@@ -315,8 +352,8 @@ public class LedgerClientSubscribeTests
         var assigned = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Assigned>().Subject;
         assigned.ContractId.Value.Should().Be("00abc");
-        assigned.Source.Should().Be("sync-a");
-        assigned.Target.Should().Be("sync-b");
+        assigned.Source.Should().Be(new SynchronizerId("sync-a"));
+        assigned.Target.Should().Be(new SynchronizerId("sync-b"));
         assigned.Offset.Should().Be(200L);
     }
 
@@ -344,7 +381,7 @@ public class LedgerClientSubscribeTests
         var unassigned = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>().Subject;
         unassigned.ContractId.Value.Should().Be("00abc");
-        unassigned.Source.Should().Be("sync-a");
+        unassigned.Source.Should().Be(new SynchronizerId("sync-a"));
         unassigned.Offset.Should().Be(201L);
     }
 

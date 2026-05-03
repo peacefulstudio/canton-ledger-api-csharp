@@ -12,6 +12,7 @@ using NSubstitute;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
@@ -281,6 +282,66 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public async Task TrySubmitAndWaitForTransaction_projects_exercised_events()
+    {
+        var transaction = new Transaction { UpdateId = "update-789", Offset = 999L };
+        var templateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00contract999",
+                TemplateId = templateId,
+                Choice = "Transfer",
+                ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new ProtoValue { ContractId = "00new999" },
+                Consuming = true,
+                ActingParties = { "party::alice" },
+                WitnessParties = { "party::alice", "party::bob" },
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract999",
+            "Transfer",
+            DamlUnit.Instance);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
+            .WithActAs((Party)"party::alice")
+            .WithCommandId("test-cmd");
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
+
+        var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
+        var ev = success.Result.ExercisedEvents.Should().ContainSingle().Subject;
+        ev.ContractId.Should().Be("00contract999");
+        ev.ChoiceName.Should().Be("Transfer");
+        ev.Consuming.Should().BeTrue();
+        ev.InterfaceId.Should().BeNull();
+        ev.ActingParties.Should().BeEquivalentTo([(Party)"party::alice"]);
+        ev.WitnessParties.Should().BeEquivalentTo([(Party)"party::alice", (Party)"party::bob"]);
+        ev.TemplateId.ModuleName.Should().Be("Module");
+        ev.TemplateId.EntityName.Should().Be("Template");
+    }
+
+    [Fact]
     public async Task TrySubmitAndWaitForTransaction_throws_when_token_provider_returns_empty_token()
     {
         var emptyProvider = Substitute.For<ITokenProvider>();
@@ -373,7 +434,7 @@ public class LedgerClientTests
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
         {
-            Exercised = new ExercisedEvent
+            Exercised = new ProtoExercisedEvent
             {
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
@@ -416,7 +477,7 @@ public class LedgerClientTests
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
         {
-            Exercised = new ExercisedEvent
+            Exercised = new ProtoExercisedEvent
             {
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
@@ -460,7 +521,7 @@ public class LedgerClientTests
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
         {
-            Exercised = new ExercisedEvent
+            Exercised = new ProtoExercisedEvent
             {
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },

@@ -16,8 +16,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
+using RuntimeExercisedEvent = Daml.Runtime.Contracts.ExercisedEvent;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -126,18 +128,27 @@ public sealed partial class LedgerClient : ILedgerClient
     private static partial void LogCreatingContract(ILogger logger, string templateType);
 
     /// <inheritdoc />
-    public async Task<TResult> ExerciseAsync<TResult>(
+    public Task<TResult> ExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         string actAs,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
+        => ExerciseAsync<TResult>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<TResult> ExerciseAsync<TResult>(
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("choice", command.Choice);
         activity?.SetTag("contractId", command.ContractId);
+        SetSubmitterTags(activity, submitter);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithActAs((Party)actAs)
+            .WithSubmitter(submitter)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
 
@@ -189,13 +200,21 @@ public sealed partial class LedgerClient : ILedgerClient
     private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
 
     /// <inheritdoc />
-    public async Task ExerciseAsync(
+    public Task ExerciseAsync(
         RuntimeCommands.ExerciseCommand command,
         string actAs,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
+        => ExerciseAsync(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task ExerciseAsync(
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
     {
-        await ExerciseAsync<object>(command, actAs, workflowId, cancellationToken);
+        await ExerciseAsync<object>(command, submitter, workflowId, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -245,20 +264,29 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     /// <inheritdoc />
-    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
+    public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         string actAs,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
+        where TTemplate : ITemplate
+        => TryCreateAsync(payload, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
+        TTemplate payload,
+        RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
         where TTemplate : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("template.type", typeof(TTemplate).Name);
-        activity?.SetTag("actAs", actAs);
+        SetSubmitterTags(activity, submitter);
 
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)actAs)
+            .WithSubmitter(submitter)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
 
@@ -269,9 +297,18 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     /// <inheritdoc />
-    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
+    public Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
         RuntimeCommands.ExerciseCommand command,
         string actAs,
+        string? workflowId = null,
+        CancellationToken cancellationToken = default)
+        where TTemplate : ITemplate
+        => TryExerciseForCreatedAsync<TTemplate>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
         where TTemplate : ITemplate
@@ -280,9 +317,10 @@ public sealed partial class LedgerClient : ILedgerClient
         activity?.SetTag("choice", command.Choice);
         activity?.SetTag("contractId", command.ContractId);
         activity?.SetTag("template.type", typeof(TTemplate).Name);
+        SetSubmitterTags(activity, submitter);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithActAs((Party)actAs)
+            .WithSubmitter(submitter)
             .WithCommandId(Guid.NewGuid().ToString())
             .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
 
@@ -337,19 +375,24 @@ public sealed partial class LedgerClient : ILedgerClient
 
         var createdContracts = new List<CreatedContract>();
         var archivedContractIds = new List<string>();
+        var exercisedEvents = new List<RuntimeExercisedEvent>();
 
         foreach (var evt in transaction.Events)
         {
-            if (evt.EventCase == Event.EventOneofCase.Created)
+            switch (evt.EventCase)
             {
-                createdContracts.Add(new CreatedContract(
-                    evt.Created.ContractId,
-                    ToRuntimeIdentifier(evt.Created.TemplateId),
-                    evt.Created.CreateArguments.ToString()));
-            }
-            else if (evt.EventCase == Event.EventOneofCase.Archived)
-            {
-                archivedContractIds.Add(evt.Archived.ContractId);
+                case Event.EventOneofCase.Created:
+                    createdContracts.Add(new CreatedContract(
+                        evt.Created.ContractId,
+                        ToRuntimeIdentifier(evt.Created.TemplateId),
+                        evt.Created.CreateArguments.ToString()));
+                    break;
+                case Event.EventOneofCase.Archived:
+                    archivedContractIds.Add(evt.Archived.ContractId);
+                    break;
+                case Event.EventOneofCase.Exercised:
+                    exercisedEvents.Add(ToRuntimeExercisedEvent(evt.Exercised));
+                    break;
             }
         }
 
@@ -359,7 +402,33 @@ public sealed partial class LedgerClient : ILedgerClient
             transaction.UpdateId,
             transaction.Offset,
             createdContracts,
-            archivedContractIds);
+            archivedContractIds)
+        {
+            ExercisedEvents = exercisedEvents,
+        };
+    }
+
+    private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)
+    {
+        var argument = exercised.ChoiceArgument is null
+            ? DamlUnit.Instance
+            : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
+        var result = exercised.ExerciseResult is null
+            ? DamlUnit.Instance
+            : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
+        var interfaceId = exercised.InterfaceId is null
+            ? null
+            : ToRuntimeIdentifier(exercised.InterfaceId);
+        return new RuntimeExercisedEvent(
+            exercised.ContractId,
+            ToRuntimeIdentifier(exercised.TemplateId),
+            interfaceId,
+            exercised.Choice,
+            argument,
+            result,
+            exercised.Consuming,
+            ToPartyList(exercised.ActingParties),
+            ToPartyList(exercised.WitnessParties));
     }
 
     private static RuntimeIdentifier ToRuntimeIdentifier(ProtoIdentifier proto) =>
@@ -471,33 +540,33 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        return SubscribeAsyncCore<T>(actAs, fromOffset, cancellationToken);
+        return SubscribeAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, fromOffset, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsync<T>(
+        RuntimeCommands.SubmitterInfo submitter,
+        long? fromOffset = null,
+        CancellationToken cancellationToken = default)
+        where T : ITemplate
+        => SubscribeAsyncCore<T>(submitter, fromOffset, cancellationToken);
+
     private async IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsyncCore<T>(
-        string actAs,
+        RuntimeCommands.SubmitterInfo submitter,
         long? fromOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
         where T : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("template.type", typeof(T).Name);
-        activity?.SetTag("actAs", actAs);
         activity?.SetTag("fromOffset", fromOffset);
+        SetSubmitterTags(activity, submitter);
 
         var templateId = T.TemplateId;
         var protoTemplateId = DamlValueConverter.ToProtoIdentifier(templateId);
 
-        var filters = new Filters();
-        filters.Cumulative.Add(new CumulativeFilter
-        {
-            TemplateFilter = new TemplateFilter
-            {
-                TemplateId = protoTemplateId,
-            },
-        });
         var eventFormat = new EventFormat { Verbose = true };
-        eventFormat.FiltersByParty.Add(actAs, filters);
+        AddTemplateFiltersForSubmitter(eventFormat, submitter, protoTemplateId);
 
         var request = new GetUpdatesRequest
         {
@@ -602,8 +671,15 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        return SubscribeActiveAsyncCore<T>(actAs, cancellationToken);
+        return SubscribeActiveAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public IAsyncEnumerable<ContractStreamEvent<T>.Created> SubscribeActiveAsync<T>(
+        RuntimeCommands.SubmitterInfo submitter,
+        CancellationToken cancellationToken = default)
+        where T : ITemplate
+        => SubscribeActiveAsyncCore<T>(submitter, cancellationToken);
 
     /// <inheritdoc />
     public async Task<long> GetLedgerEndAsync(CancellationToken cancellationToken = default)
@@ -619,13 +695,13 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     private async IAsyncEnumerable<ContractStreamEvent<T>.Created> SubscribeActiveAsyncCore<T>(
-        string actAs,
+        RuntimeCommands.SubmitterInfo submitter,
         [EnumeratorCancellation] CancellationToken cancellationToken)
         where T : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag("template.type", typeof(T).Name);
-        activity?.SetTag("actAs", actAs);
+        SetSubmitterTags(activity, submitter);
 
         var templateId = T.TemplateId;
         var protoTemplateId = DamlValueConverter.ToProtoIdentifier(templateId);
@@ -642,16 +718,8 @@ public sealed partial class LedgerClient : ILedgerClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        var filters = new Filters();
-        filters.Cumulative.Add(new CumulativeFilter
-        {
-            TemplateFilter = new TemplateFilter
-            {
-                TemplateId = protoTemplateId,
-            },
-        });
         var eventFormat = new EventFormat { Verbose = true };
-        eventFormat.FiltersByParty.Add(actAs, filters);
+        AddTemplateFiltersForSubmitter(eventFormat, submitter, protoTemplateId);
 
         var request = new GetActiveContractsRequest
         {
@@ -744,7 +812,7 @@ public sealed partial class LedgerClient : ILedgerClient
                         yield return new ContractStreamEvent<T>.Archived(
                             new ContractId<T>(archived.ContractId),
                             archived.Offset,
-                            archived.WitnessParties.ToList());
+                            ToPartyList(archived.WitnessParties));
                         break;
                     }
                 case Event.EventOneofCase.Exercised:
@@ -765,7 +833,7 @@ public sealed partial class LedgerClient : ILedgerClient
                             result,
                             exercised.Consuming,
                             exercised.Offset,
-                            exercised.WitnessParties.ToList());
+                            ToPartyList(exercised.WitnessParties));
                         break;
                     }
             }
@@ -795,9 +863,9 @@ public sealed partial class LedgerClient : ILedgerClient
                             new ContractId<T>(created.ContractId),
                             payload,
                             created.Offset,
-                            assigned.Source,
-                            assigned.Target,
-                            created.WitnessParties.ToList());
+                            new SynchronizerId(assigned.Source),
+                            new SynchronizerId(assigned.Target),
+                            ToPartyList(created.WitnessParties));
                         break;
                     }
                 case ReassignmentEvent.EventOneofCase.Unassigned:
@@ -808,9 +876,9 @@ public sealed partial class LedgerClient : ILedgerClient
                         yield return new ContractStreamEvent<T>.Unassigned(
                             new ContractId<T>(unassigned.ContractId),
                             unassigned.Offset,
-                            unassigned.Source,
-                            unassigned.Target,
-                            unassigned.WitnessParties.ToList());
+                            new SynchronizerId(unassigned.Source),
+                            new SynchronizerId(unassigned.Target),
+                            ToPartyList(unassigned.WitnessParties));
                         break;
                     }
             }
@@ -827,7 +895,54 @@ public sealed partial class LedgerClient : ILedgerClient
             new ContractId<T>(created.ContractId),
             payload,
             created.Offset,
-            created.WitnessParties.ToList());
+            ToPartyList(created.WitnessParties));
+    }
+
+    private static void SetSubmitterTags(Activity? activity, RuntimeCommands.SubmitterInfo submitter)
+    {
+        if (activity is null) return;
+        activity.SetTag("submitter.actAs", string.Join(",", submitter.ActAs.Select(p => p.Id)));
+        if (submitter.ReadAs.Count > 0)
+        {
+            activity.SetTag("submitter.readAs", string.Join(",", submitter.ReadAs.Select(p => p.Id)));
+        }
+    }
+
+    private static IReadOnlyList<Party> ToPartyList(IEnumerable<string> wireParties)
+    {
+        var result = new List<Party>();
+        foreach (var p in wireParties)
+        {
+            result.Add((Party)p);
+        }
+        return result;
+    }
+
+    private static void AddTemplateFiltersForSubmitter(
+        EventFormat eventFormat,
+        RuntimeCommands.SubmitterInfo submitter,
+        ProtoIdentifier protoTemplateId)
+    {
+        var filters = new Filters();
+        filters.Cumulative.Add(new CumulativeFilter
+        {
+            TemplateFilter = new TemplateFilter
+            {
+                TemplateId = protoTemplateId,
+            },
+        });
+
+        foreach (var party in submitter.ActAs)
+        {
+            eventFormat.FiltersByParty.Add(party.Id, filters);
+        }
+        foreach (var party in submitter.ReadAs)
+        {
+            if (!eventFormat.FiltersByParty.ContainsKey(party.Id))
+            {
+                eventFormat.FiltersByParty.Add(party.Id, filters);
+            }
+        }
     }
 
     private static bool IsTemplateMatch(ProtoIdentifier? proto, RuntimeIdentifier expected)
