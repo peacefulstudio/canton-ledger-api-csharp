@@ -15,11 +15,7 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
-using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
-using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
-using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
-using RuntimeExercisedEvent = Daml.Runtime.Contracts.ExercisedEvent;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -143,8 +139,8 @@ public sealed partial class LedgerClient : ILedgerClient
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag("choice", command.Choice);
-        activity?.SetTag("contractId", command.ContractId);
+        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice);
+        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId);
         SetSubmitterTags(activity, submitter);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(command)
@@ -246,7 +242,13 @@ public sealed partial class LedgerClient : ILedgerClient
                 deadline: GetDeadline(),
                 cancellationToken: cancellationToken);
 
-            return new ExerciseOutcome<TransactionResult>.One(ProjectTransaction(response));
+            var transactionResult = TransactionResultProjector.Project(response);
+            LogTransactionCompleted(
+                Logger,
+                transactionResult.UpdateId,
+                transactionResult.CreatedContracts.Count,
+                transactionResult.ArchivedContractIds.Count);
+            return new ExerciseOutcome<TransactionResult>.One(transactionResult);
         }
         catch (RpcException ex)
         {
@@ -281,7 +283,7 @@ public sealed partial class LedgerClient : ILedgerClient
         where TTemplate : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag("template.type", typeof(TTemplate).Name);
+        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TTemplate).Name);
         SetSubmitterTags(activity, submitter);
 
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
@@ -293,7 +295,7 @@ public sealed partial class LedgerClient : ILedgerClient
         LogCreatingContract(Logger, typeof(TTemplate).Name);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
-        return ProjectToContractId<TTemplate>(outcome);
+        return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
     }
 
     /// <inheritdoc />
@@ -314,9 +316,9 @@ public sealed partial class LedgerClient : ILedgerClient
         where TTemplate : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag("choice", command.Choice);
-        activity?.SetTag("contractId", command.ContractId);
-        activity?.SetTag("template.type", typeof(TTemplate).Name);
+        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice);
+        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId);
+        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TTemplate).Name);
         SetSubmitterTags(activity, submitter);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(command)
@@ -327,112 +329,8 @@ public sealed partial class LedgerClient : ILedgerClient
         LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
-        return ProjectToContractId<TTemplate>(outcome);
+        return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
     }
-
-    private static ExerciseOutcome<ContractId<TTemplate>> ProjectToContractId<TTemplate>(
-        ExerciseOutcome<TransactionResult> outcome)
-        where TTemplate : ITemplate
-    {
-        return outcome switch
-        {
-            ExerciseOutcome<TransactionResult>.One success => ProjectSuccess<TTemplate>(success.Result),
-            ExerciseOutcome<TransactionResult>.DamlError damlError => new ExerciseOutcome<ContractId<TTemplate>>.DamlError(
-                damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata),
-            ExerciseOutcome<TransactionResult>.InfraError infraError => new ExerciseOutcome<ContractId<TTemplate>>.InfraError(
-                infraError.StatusCode, infraError.Message),
-            _ => throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}"),
-        };
-    }
-
-    private static ExerciseOutcome<ContractId<TTemplate>> ProjectSuccess<TTemplate>(TransactionResult result)
-        where TTemplate : ITemplate
-    {
-        var matches = new List<string>();
-        var expected = TTemplate.TemplateId;
-        foreach (var c in result.CreatedContracts)
-        {
-            if (string.Equals(c.TemplateId.ModuleName, expected.ModuleName, StringComparison.Ordinal)
-                && string.Equals(c.TemplateId.EntityName, expected.EntityName, StringComparison.Ordinal))
-            {
-                matches.Add(c.ContractId);
-            }
-        }
-
-        return matches.Count switch
-        {
-            0 => new ExerciseOutcome<ContractId<TTemplate>>.None(),
-            1 => new ExerciseOutcome<ContractId<TTemplate>>.One(new ContractId<TTemplate>(matches[0])),
-            _ => new ExerciseOutcome<ContractId<TTemplate>>.Many(matches.Count, matches),
-        };
-    }
-
-    private static TransactionResult ProjectTransaction(SubmitAndWaitForTransactionResponse response)
-    {
-        var transaction = response.Transaction
-            ?? throw new InvalidOperationException(
-                "Server returned a successful response but no Transaction was present.");
-
-        var createdContracts = new List<CreatedContract>();
-        var archivedContractIds = new List<string>();
-        var exercisedEvents = new List<RuntimeExercisedEvent>();
-
-        foreach (var evt in transaction.Events)
-        {
-            switch (evt.EventCase)
-            {
-                case Event.EventOneofCase.Created:
-                    createdContracts.Add(new CreatedContract(
-                        evt.Created.ContractId,
-                        ToRuntimeIdentifier(evt.Created.TemplateId),
-                        evt.Created.CreateArguments.ToString()));
-                    break;
-                case Event.EventOneofCase.Archived:
-                    archivedContractIds.Add(evt.Archived.ContractId);
-                    break;
-                case Event.EventOneofCase.Exercised:
-                    exercisedEvents.Add(ToRuntimeExercisedEvent(evt.Exercised));
-                    break;
-            }
-        }
-
-        LogTransactionCompleted(Logger, transaction.UpdateId, createdContracts.Count, archivedContractIds.Count);
-
-        return new TransactionResult(
-            transaction.UpdateId,
-            transaction.Offset,
-            createdContracts,
-            archivedContractIds)
-        {
-            ExercisedEvents = exercisedEvents,
-        };
-    }
-
-    private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)
-    {
-        var argument = exercised.ChoiceArgument is null
-            ? DamlUnit.Instance
-            : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
-        var result = exercised.ExerciseResult is null
-            ? DamlUnit.Instance
-            : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
-        var interfaceId = exercised.InterfaceId is null
-            ? null
-            : ToRuntimeIdentifier(exercised.InterfaceId);
-        return new RuntimeExercisedEvent(
-            exercised.ContractId,
-            ToRuntimeIdentifier(exercised.TemplateId),
-            interfaceId,
-            exercised.Choice,
-            argument,
-            result,
-            exercised.Consuming,
-            ToPartyList(exercised.ActingParties),
-            ToPartyList(exercised.WitnessParties));
-    }
-
-    private static RuntimeIdentifier ToRuntimeIdentifier(ProtoIdentifier proto) =>
-        new(proto.PackageId, proto.ModuleName, proto.EntityName);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Submitting {CommandCount} commands")]
     private static partial void LogSubmittingCommands(ILogger logger, int commandCount);
@@ -558,28 +456,15 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag("template.type", typeof(T).Name);
-        activity?.SetTag("fromOffset", fromOffset);
+        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(T).Name);
+        activity?.SetTag(LedgerClientActivityTags.FromOffset, fromOffset);
         SetSubmitterTags(activity, submitter);
 
         var templateId = T.TemplateId;
-        var protoTemplateId = DamlValueConverter.ToProtoIdentifier(templateId);
-
-        var eventFormat = new EventFormat { Verbose = true };
-        AddTemplateFiltersForSubmitter(eventFormat, submitter, protoTemplateId);
-
-        var request = new GetUpdatesRequest
-        {
-            BeginExclusive = fromOffset ?? 0L,
-            UpdateFormat = new UpdateFormat
-            {
-                IncludeTransactions = new TransactionFormat
-                {
-                    EventFormat = eventFormat,
-                    TransactionShape = TransactionShape.LedgerEffects,
-                },
-            },
-        };
+        var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
+            submitter,
+            DamlValueConverter.ToProtoIdentifier(templateId),
+            fromOffset);
 
         LogSubscribeStarted(Logger, typeof(T).Name, fromOffset ?? 0L);
 
@@ -593,7 +478,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         while (true)
         {
-            var step = await TryMoveNextAsync(stream, cancellationToken);
+            var step = await StreamMoveResult.NextAsync(stream, cancellationToken);
             if (step.Faulted is { } fault)
             {
                 LogSubscribeStreamError(Logger, typeof(T).Name, fault.StatusCode, fault.Status.Detail);
@@ -603,66 +488,42 @@ public sealed partial class LedgerClient : ILedgerClient
                 yield break;
             }
 
-            if (!step.Moved)
-            {
-                yield break;
-            }
+            if (!step.Moved) yield break;
 
-            var current = stream.Current;
-            switch (current.UpdateCase)
+            foreach (var typedEvent in ProjectUpdate<T>(stream.Current, templateId))
             {
-                case GetUpdatesResponse.UpdateOneofCase.Transaction:
-                    foreach (var typedEvent in ProjectTransactionEvents<T>(current.Transaction, templateId))
-                    {
-                        yield return typedEvent;
-                    }
-                    break;
-                case GetUpdatesResponse.UpdateOneofCase.OffsetCheckpoint:
-                    // Always yield — checkpoints are filter-independent and consumers
-                    // need them to advance the resume offset during quiet periods.
-                    yield return new ContractStreamEvent<T>.Checkpoint(current.OffsetCheckpoint.Offset);
-                    break;
-                case GetUpdatesResponse.UpdateOneofCase.Reassignment:
-                    foreach (var typedEvent in ProjectReassignmentEvents<T>(current.Reassignment, templateId))
-                    {
-                        yield return typedEvent;
-                    }
-                    break;
-                default:
-                    // TopologyTransaction and any future variants — metadata about
-                    // party hosting / participant topology, not T-shaped events.
-                    LogStreamVariantSkipped(Logger, typeof(T).Name, current.UpdateCase);
-                    break;
+                yield return typedEvent;
             }
         }
     }
 
-    /// <summary>
-    /// Wraps <see cref="IAsyncStreamReader{T}.MoveNext"/> so the iterator can
-    /// distinguish completion (<c>moved == false</c>), cancellation (rethrown),
-    /// and gRPC failure (returned as <c>Faulted</c>) — yielding from a catch
-    /// block is illegal, so the fault is captured and yielded by the caller.
-    /// </summary>
-    private static async Task<MoveNextStep> TryMoveNextAsync<TResponse>(
-        IAsyncStreamReader<TResponse> stream,
-        CancellationToken cancellationToken)
+    private static IEnumerable<ContractStreamEvent<T>> ProjectUpdate<T>(
+        GetUpdatesResponse response,
+        RuntimeIdentifier templateId)
+        where T : ITemplate
     {
-        try
+        switch (response.UpdateCase)
         {
-            var moved = await stream.MoveNext(cancellationToken);
-            return new MoveNextStep(moved, null);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (RpcException ex)
-        {
-            return new MoveNextStep(false, ex);
+            case GetUpdatesResponse.UpdateOneofCase.Transaction:
+                foreach (var typedEvent in ContractStreamProjector.ProjectTransactionEvents<T>(response.Transaction, templateId))
+                {
+                    yield return typedEvent;
+                }
+                break;
+            case GetUpdatesResponse.UpdateOneofCase.OffsetCheckpoint:
+                yield return new ContractStreamEvent<T>.Checkpoint(response.OffsetCheckpoint.Offset);
+                break;
+            case GetUpdatesResponse.UpdateOneofCase.Reassignment:
+                foreach (var typedEvent in ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment, templateId))
+                {
+                    yield return typedEvent;
+                }
+                break;
+            default:
+                LogStreamVariantSkipped(Logger, typeof(T).Name, response.UpdateCase);
+                break;
         }
     }
-
-    private readonly record struct MoveNextStep(bool Moved, RpcException? Faulted);
 
     /// <inheritdoc />
     public IAsyncEnumerable<ContractStreamEvent<T>.Created> SubscribeActiveAsync<T>(
@@ -690,7 +551,7 @@ public sealed partial class LedgerClient : ILedgerClient
             headers: await GetHeadersAsync(cancellationToken),
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
-        activity?.SetTag("offset", response.Offset);
+        activity?.SetTag(LedgerClientActivityTags.Offset, response.Offset);
         return response.Offset;
     }
 
@@ -700,38 +561,28 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag("template.type", typeof(T).Name);
+        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(T).Name);
         SetSubmitterTags(activity, submitter);
 
         var templateId = T.TemplateId;
-        var protoTemplateId = DamlValueConverter.ToProtoIdentifier(templateId);
 
-        // Capture headers once and reuse across both gRPC calls to avoid two
-        // token fetches per snapshot.
-        var headers = await GetHeadersAsync(cancellationToken);
-
-        // Snapshot at current ledger end. Callers can chain SubscribeAsync from
-        // this offset to stay current after the snapshot completes.
+        var sharedHeaders = await GetHeadersAsync(cancellationToken);
         var ledgerEnd = await _stateService.GetLedgerEndAsync(
             new GetLedgerEndRequest(),
-            headers: headers,
+            headers: sharedHeaders,
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        var eventFormat = new EventFormat { Verbose = true };
-        AddTemplateFiltersForSubmitter(eventFormat, submitter, protoTemplateId);
-
-        var request = new GetActiveContractsRequest
-        {
-            ActiveAtOffset = ledgerEnd.Offset,
-            EventFormat = eventFormat,
-        };
+        var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(
+            submitter,
+            DamlValueConverter.ToProtoIdentifier(templateId),
+            ledgerEnd.Offset);
 
         LogSubscribeActiveStarted(Logger, typeof(T).Name, ledgerEnd.Offset);
 
         using var call = _stateService.GetActiveContracts(
             request,
-            headers: headers,
+            headers: sharedHeaders,
             deadline: null,
             cancellationToken: cancellationToken);
 
@@ -739,219 +590,37 @@ public sealed partial class LedgerClient : ILedgerClient
 
         while (true)
         {
-            var step = await TryMoveNextAsync(stream, cancellationToken);
+            var step = await StreamMoveResult.NextAsync(stream, cancellationToken);
             if (step.Faulted is { } fault)
             {
-                // Active-contract snapshots project to Created only; surface
-                // mid-stream failures as a thrown RpcException rather than
-                // in-band, since the StreamError variant isn't part of this
-                // method's public type. Callers needing tolerance can wrap
-                // this in try/catch, or use SubscribeAsync directly.
-                LogSubscribeStreamError(Logger, typeof(T).Name, fault.StatusCode, fault.Status.Detail);
-                throw fault;
+                RethrowActiveContractsStreamFault<T>(fault);
             }
 
-            if (!step.Moved)
-            {
-                yield break;
-            }
+            if (!step.Moved) yield break;
 
-            var response = stream.Current;
-            // Project active contracts AND in-flight reassignment entries — both
-            // carry CreatedEvent payloads that belong in the snapshot. Dropping
-            // IncompleteAssigned / IncompleteUnassigned silently would yield an
-            // ACS view that's missing contracts mid-reassignment in
-            // multi-synchronizer deployments.
-            ProtoCreatedEvent? created = response.ContractEntryCase switch
-            {
-                GetActiveContractsResponse.ContractEntryOneofCase.ActiveContract
-                    => response.ActiveContract?.CreatedEvent,
-                GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned
-                    => response.IncompleteUnassigned?.CreatedEvent,
-                GetActiveContractsResponse.ContractEntryOneofCase.IncompleteAssigned
-                    => response.IncompleteAssigned?.AssignedEvent?.CreatedEvent,
-                _ => null,
-            };
+            var created = ContractStreamProjector.ExtractCreatedEvent(stream.Current);
+            if (created is null) continue;
+            if (!ContractStreamProjector.IsTemplateMatch(created.TemplateId, templateId)) continue;
 
-            if (created is null)
-            {
-                continue;
-            }
-
-            if (!IsTemplateMatch(created.TemplateId, templateId))
-            {
-                continue;
-            }
-
-            yield return CreatedFromProto<T>(created);
+            yield return ContractStreamProjector.CreatedFromProto<T>(created);
         }
-    }
-
-    private static IEnumerable<ContractStreamEvent<T>> ProjectTransactionEvents<T>(
-        Transaction transaction,
-        RuntimeIdentifier templateId)
-        where T : ITemplate
-    {
-        foreach (var evt in transaction.Events)
-        {
-            switch (evt.EventCase)
-            {
-                case Event.EventOneofCase.Created:
-                    {
-                        var created = evt.Created;
-                        if (!IsTemplateMatch(created.TemplateId, templateId))
-                            continue;
-                        yield return CreatedFromProto<T>(created);
-                        break;
-                    }
-                case Event.EventOneofCase.Archived:
-                    {
-                        var archived = evt.Archived;
-                        if (!IsTemplateMatch(archived.TemplateId, templateId))
-                            continue;
-                        yield return new ContractStreamEvent<T>.Archived(
-                            new ContractId<T>(archived.ContractId),
-                            archived.Offset,
-                            ToPartyList(archived.WitnessParties));
-                        break;
-                    }
-                case Event.EventOneofCase.Exercised:
-                    {
-                        var exercised = evt.Exercised;
-                        if (!IsTemplateMatch(exercised.TemplateId, templateId))
-                            continue;
-                        var argument = exercised.ChoiceArgument is null
-                            ? DamlUnit.Instance
-                            : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
-                        var result = exercised.ExerciseResult is null
-                            ? DamlUnit.Instance
-                            : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
-                        yield return new ContractStreamEvent<T>.Exercised(
-                            new ContractId<T>(exercised.ContractId),
-                            exercised.Choice,
-                            argument,
-                            result,
-                            exercised.Consuming,
-                            exercised.Offset,
-                            ToPartyList(exercised.WitnessParties));
-                        break;
-                    }
-            }
-        }
-    }
-
-    private static IEnumerable<ContractStreamEvent<T>> ProjectReassignmentEvents<T>(
-        Reassignment reassignment,
-        RuntimeIdentifier templateId)
-        where T : ITemplate
-    {
-        foreach (var evt in reassignment.Events)
-        {
-            switch (evt.EventCase)
-            {
-                case ReassignmentEvent.EventOneofCase.Assigned:
-                    {
-                        var assigned = evt.Assigned;
-                        var created = assigned.CreatedEvent;
-                        if (created is null) continue;
-                        if (!IsTemplateMatch(created.TemplateId, templateId))
-                            continue;
-                        var payload = created.CreateArguments is null
-                            ? new DamlRecord(null, [])
-                            : DamlValueConverter.FromProtoRecord(created.CreateArguments);
-                        yield return new ContractStreamEvent<T>.Assigned(
-                            new ContractId<T>(created.ContractId),
-                            payload,
-                            created.Offset,
-                            new SynchronizerId(assigned.Source),
-                            new SynchronizerId(assigned.Target),
-                            ToPartyList(created.WitnessParties));
-                        break;
-                    }
-                case ReassignmentEvent.EventOneofCase.Unassigned:
-                    {
-                        var unassigned = evt.Unassigned;
-                        if (!IsTemplateMatch(unassigned.TemplateId, templateId))
-                            continue;
-                        yield return new ContractStreamEvent<T>.Unassigned(
-                            new ContractId<T>(unassigned.ContractId),
-                            unassigned.Offset,
-                            new SynchronizerId(unassigned.Source),
-                            new SynchronizerId(unassigned.Target),
-                            ToPartyList(unassigned.WitnessParties));
-                        break;
-                    }
-            }
-        }
-    }
-
-    private static ContractStreamEvent<T>.Created CreatedFromProto<T>(ProtoCreatedEvent created)
-        where T : ITemplate
-    {
-        var payload = created.CreateArguments is null
-            ? new DamlRecord(null, [])
-            : DamlValueConverter.FromProtoRecord(created.CreateArguments);
-        return new ContractStreamEvent<T>.Created(
-            new ContractId<T>(created.ContractId),
-            payload,
-            created.Offset,
-            ToPartyList(created.WitnessParties));
     }
 
     private static void SetSubmitterTags(Activity? activity, RuntimeCommands.SubmitterInfo submitter)
     {
         if (activity is null) return;
-        activity.SetTag("submitter.actAs", string.Join(",", submitter.ActAs.Select(p => p.Id)));
+        activity.SetTag(LedgerClientActivityTags.SubmitterActAs, string.Join(",", submitter.ActAs.Select(p => p.Id)));
         if (submitter.ReadAs.Count > 0)
         {
-            activity.SetTag("submitter.readAs", string.Join(",", submitter.ReadAs.Select(p => p.Id)));
+            activity.SetTag(LedgerClientActivityTags.SubmitterReadAs, string.Join(",", submitter.ReadAs.Select(p => p.Id)));
         }
     }
 
-    private static IReadOnlyList<Party> ToPartyList(IEnumerable<string> wireParties)
+    private static void RethrowActiveContractsStreamFault<T>(RpcException fault)
+        where T : ITemplate
     {
-        var result = new List<Party>();
-        foreach (var p in wireParties)
-        {
-            result.Add((Party)p);
-        }
-        return result;
-    }
-
-    private static void AddTemplateFiltersForSubmitter(
-        EventFormat eventFormat,
-        RuntimeCommands.SubmitterInfo submitter,
-        ProtoIdentifier protoTemplateId)
-    {
-        var filters = new Filters();
-        filters.Cumulative.Add(new CumulativeFilter
-        {
-            TemplateFilter = new TemplateFilter
-            {
-                TemplateId = protoTemplateId,
-            },
-        });
-
-        foreach (var party in submitter.ActAs)
-        {
-            eventFormat.FiltersByParty.Add(party.Id, filters);
-        }
-        foreach (var party in submitter.ReadAs)
-        {
-            if (!eventFormat.FiltersByParty.ContainsKey(party.Id))
-            {
-                eventFormat.FiltersByParty.Add(party.Id, filters);
-            }
-        }
-    }
-
-    private static bool IsTemplateMatch(ProtoIdentifier? proto, RuntimeIdentifier expected)
-    {
-        if (proto is null) return false;
-        // Match on module + entity to tolerate package upgrades. This mirrors
-        // the projection logic in ProjectSuccess<TTemplate>.
-        return string.Equals(proto.ModuleName, expected.ModuleName, StringComparison.Ordinal)
-            && string.Equals(proto.EntityName, expected.EntityName, StringComparison.Ordinal);
+        LogSubscribeStreamError(Logger, typeof(T).Name, fault.StatusCode, fault.Status.Detail);
+        throw fault;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Subscribing to {TemplateType} updates from offset {FromOffset}")]
@@ -966,6 +635,9 @@ public sealed partial class LedgerClient : ILedgerClient
     [LoggerMessage(Level = LogLevel.Debug, Message = "Subscribe stream for {TemplateType} skipped variant {Variant}")]
     private static partial void LogStreamVariantSkipped(ILogger logger, string templateType, GetUpdatesResponse.UpdateOneofCase variant);
 
+    /// <summary>
+    /// Releases the underlying gRPC channel.
+    /// </summary>
     public void Dispose()
     {
         _channel?.Dispose();

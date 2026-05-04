@@ -254,6 +254,23 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
+    public async Task SubscribeActiveAsync_rethrows_RpcException_when_stream_faults()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        var rpcException = new RpcException(new Status(StatusCode.Unavailable, "transient down"));
+        StubGetActiveContractsFailure(rpcException);
+
+        var client = CreateClient();
+        var act = async () =>
+        {
+            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs)) { }
+        };
+
+        await act.Should().ThrowAsync<RpcException>()
+            .Where(e => e.StatusCode == StatusCode.Unavailable);
+    }
+
+    [Fact]
     public async Task SubscribeActiveAsync_yields_only_typed_Created_for_matching_template()
     {
         StubGetLedgerEnd(offset: 10L);
@@ -628,6 +645,22 @@ public class LedgerClientSubscribeTests
     private void StubGetActiveContracts(
         params GetActiveContractsResponse[] responses)
         => StubGetActiveContracts(captureRequest: null, responses);
+
+    private void StubGetActiveContractsFailure(RpcException afterItemsException)
+    {
+        var reader = new FakeStreamReader<GetActiveContractsResponse>(
+            Array.Empty<GetActiveContractsResponse>(),
+            afterItemsException);
+        var call = MakeServerStreamingCall(reader);
+
+        _stateService
+            .GetActiveContracts(
+                Arg.Any<GetActiveContractsRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call);
+    }
 
     private void StubGetActiveContracts(
         Action<GetActiveContractsRequest>? captureRequest,

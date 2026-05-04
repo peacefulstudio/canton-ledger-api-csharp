@@ -348,6 +348,9 @@ public sealed partial class AdminClient : IAdminClient
         return DateTime.UtcNow.Add(_options.Timeout.Value);
     }
 
+    /// <summary>
+    /// Releases the underlying gRPC channel.
+    /// </summary>
     public void Dispose()
     {
         _channel.Dispose();

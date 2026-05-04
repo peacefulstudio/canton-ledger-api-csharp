@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <NoWarn>$(NoWarn);CA1062;CA1852;CA1859;CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CA1062;CA1852;CA1859</NoWarn>
 
     <!-- Package metadata -->
     <Authors>Peaceful Studio</Authors>

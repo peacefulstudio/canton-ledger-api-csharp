@@ -15,6 +15,7 @@ namespace Daml.Runtime.Grpc;
 /// </summary>
 public static class DamlValueConverter
 {
+    /// <summary>Projects a Runtime <see cref="RuntimeIdentifier"/> onto its proto wire form.</summary>
     public static ProtoIdentifier ToProtoIdentifier(RuntimeIdentifier identifier)
     {
         ArgumentNullException.ThrowIfNull(identifier);
@@ -27,6 +28,7 @@ public static class DamlValueConverter
         };
     }
 
+    /// <summary>Projects a Runtime <see cref="DamlRecord"/> onto its proto wire form.</summary>
     public static Record ToProtoRecord(DamlRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -50,6 +52,11 @@ public static class DamlValueConverter
         return protoRecord;
     }
 
+    /// <summary>
+    /// Projects a Runtime <see cref="DamlValue"/> onto its proto wire form.
+    /// Throws <see cref="NotSupportedException"/> for unrecognised <c>DamlValue</c>
+    /// subclasses.
+    /// </summary>
     public static Value ToProtoValue(DamlValue value)
     {
         ArgumentNullException.ThrowIfNull(value);
@@ -94,6 +101,7 @@ public static class DamlValueConverter
         };
     }
 
+    /// <summary>Lifts a proto identifier into the Runtime <see cref="RuntimeIdentifier"/> type.</summary>
     public static RuntimeIdentifier FromProtoIdentifier(ProtoIdentifier identifier)
     {
         ArgumentNullException.ThrowIfNull(identifier);
@@ -101,6 +109,11 @@ public static class DamlValueConverter
         return new RuntimeIdentifier(identifier.PackageId, identifier.ModuleName, identifier.EntityName);
     }
 
+    /// <summary>
+    /// Lifts a proto <see cref="Record"/> into the Runtime <see cref="DamlRecord"/>
+    /// type, recursively converting each field's <see cref="Value"/> to its
+    /// <see cref="DamlValue"/> equivalent.
+    /// </summary>
     public static DamlRecord FromProtoRecord(Record record)
     {
         ArgumentNullException.ThrowIfNull(record);
@@ -122,6 +135,11 @@ public static class DamlValueConverter
         return new DamlRecord(recordId, fields);
     }
 
+    /// <summary>
+    /// Lifts a proto <see cref="Value"/> into its Runtime <see cref="DamlValue"/>
+    /// equivalent. Throws <see cref="InvalidOperationException"/> when the
+    /// proto sum-case is unset (a malformed wire payload).
+    /// </summary>
     public static DamlValue FromProtoValue(Value value)
     {
         ArgumentNullException.ThrowIfNull(value);
