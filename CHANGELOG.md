@@ -9,6 +9,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-04
+
 ### Added
 
 - **Multi-party submitter overloads** on `Canton.Ledger.Grpc.Client.LedgerClient` for `ExerciseAsync`, `TryCreateAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, and `SubscribeActiveAsync`. Each method now also accepts a `Daml.Runtime.Commands.SubmitterInfo`, populating `Commands.act_as` / `Commands.read_as` (and, on subscriptions, `EventFormat.FiltersByParty` for every `actAs` and `readAs` party). The existing `string actAs` overloads delegate to the new path via the `string -> SubmitterInfo` implicit conversion, so single-party callers keep working unchanged.
@@ -66,6 +68,7 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 - CI prerelease version strings now use dot-separated SemVer 2.0 identifiers (`${BASE}-${BRANCH}.${RUN}.${SHA}`) so `run_number` compares numerically; prevents `NU1605` downgrade warnings when consuming prereleases. (#24)
 
-[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.0-preview.2...v0.1.1
