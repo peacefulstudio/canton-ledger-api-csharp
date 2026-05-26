@@ -56,7 +56,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.GetParticipantIdAsync();
+        var result = await client.GetParticipantIdAsync(TestContext.Current.CancellationToken);
 
         result.Should().Be(expectedId);
     }
@@ -88,7 +88,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.AllocatePartyAsync("alice");
+        var result = await client.AllocatePartyAsync("alice", cancellationToken: TestContext.Current.CancellationToken);
 
         result.Party.Should().Be(partyId);
         result.IsLocal.Should().BeTrue();
@@ -123,7 +123,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.GetPartiesAsync(["party::alice", "party::bob"]);
+        var result = await client.GetPartiesAsync(["party::alice", "party::bob"], TestContext.Current.CancellationToken);
 
         result.Should().HaveCount(2);
         result[0].Party.Should().Be("party::alice");
@@ -156,7 +156,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.ListKnownPartiesAsync(pageSize: 50);
+        var result = await client.ListKnownPartiesAsync(pageSize: 50, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Should().ContainSingle();
         result[0].Party.Should().Be("party::alice");
@@ -188,7 +188,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.CreateUserAsync("test-user", "party::alice");
+        var result = await client.CreateUserAsync("test-user", "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         result.UserId.Should().Be("test-user");
         result.PrimaryParty.Should().Be("party::alice");
@@ -228,7 +228,7 @@ public class AdminClientTests
             new UserRight.ParticipantAdmin()
         };
 
-        await client.CreateUserAsync("test-user", "party::alice", rights);
+        await client.CreateUserAsync("test-user", "party::alice", rights, TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.Rights.Should().HaveCount(3);
@@ -260,7 +260,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.GetUserAsync("test-user");
+        var result = await client.GetUserAsync("test-user", TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
         result!.UserId.Should().Be("test-user");
@@ -279,7 +279,7 @@ public class AdminClientTests
                 throw new RpcException(new Status(StatusCode.NotFound, "User not found")));
 
         var client = CreateClient();
-        var result = await client.GetUserAsync("non-existent-user");
+        var result = await client.GetUserAsync("non-existent-user", TestContext.Current.CancellationToken);
 
         result.Should().BeNull();
     }
@@ -304,7 +304,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        await client.GrantUserRightsAsync("test-user", [new UserRight.ActAs("party::alice")]);
+        await client.GrantUserRightsAsync("test-user", [new UserRight.ActAs("party::alice")], TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.UserId.Should().Be("test-user");
@@ -331,7 +331,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        await client.RevokeUserRightsAsync("test-user", [new UserRight.ReadAs("party::bob")]);
+        await client.RevokeUserRightsAsync("test-user", [new UserRight.ReadAs("party::bob")], TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.UserId.Should().Be("test-user");
@@ -359,7 +359,7 @@ public class AdminClientTests
                 () => { }));
 
         var client = CreateClient();
-        var result = await client.ListUsersAsync(pageSize: 50);
+        var result = await client.ListUsersAsync(pageSize: 50, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Should().HaveCount(2);
         result[0].UserId.Should().Be("user1");
@@ -426,7 +426,7 @@ public class AdminClientTests
 
         var client = new AdminClient(_options, _channel, _partyService, _userService, emptyProvider);
 
-        var act = () => client.GetParticipantIdAsync();
+        var act = () => client.GetParticipantIdAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
@@ -440,7 +440,7 @@ public class AdminClientTests
 
         var client = new AdminClient(_options, _channel, _partyService, _userService, whitespaceProvider);
 
-        var act = () => client.GetParticipantIdAsync();
+        var act = () => client.GetParticipantIdAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");

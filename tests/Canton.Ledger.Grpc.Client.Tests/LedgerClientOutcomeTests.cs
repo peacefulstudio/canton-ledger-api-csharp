@@ -60,7 +60,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate());
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>();
         var success = (ExerciseOutcome<TransactionResult>.One)outcome;
@@ -78,7 +78,7 @@ public class LedgerClientOutcomeTests
         StubCommandServiceFailure(ex);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate());
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>();
         var err = (ExerciseOutcome<TransactionResult>.DamlError)outcome;
@@ -95,7 +95,7 @@ public class LedgerClientOutcomeTests
         StubCommandServiceFailure(ex);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate());
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>();
         var infra = (ExerciseOutcome<TransactionResult>.InfraError)outcome;
@@ -119,7 +119,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice");
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.One>();
         var created = (ExerciseOutcome<ContractId<FooBar>>.One)outcome;
@@ -134,7 +134,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice");
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.None>();
     }
@@ -149,7 +149,7 @@ public class LedgerClientOutcomeTests
         StubCommandServiceFailure(ex);
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice");
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.DamlError>();
         var err = (ExerciseOutcome<ContractId<FooBar>>.DamlError)outcome;
@@ -173,7 +173,7 @@ public class LedgerClientOutcomeTests
             DamlUnit.Instance);
 
         var client = CreateClient();
-        var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, "party::alice");
+        var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.Many>();
         var many = (ExerciseOutcome<ContractId<FooBar>>.Many)outcome;

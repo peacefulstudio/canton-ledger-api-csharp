@@ -27,7 +27,7 @@ public class NullTokenProviderTests
     [Fact]
     public async Task GetTokenAsync_returns_empty_string()
     {
-        var token = await ITokenProvider.None.GetTokenAsync();
+        var token = await ITokenProvider.None.GetTokenAsync(TestContext.Current.CancellationToken);
 
         token.Should().BeEmpty();
     }

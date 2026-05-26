@@ -1,9 +1,8 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
   <PropertyGroup>
-    <!-- Ensure all dependencies are copied to the output directory so coverlet's
-         Mono.Cecil resolver can find shared framework assemblies like
-         Microsoft.Extensions.Logging.Abstractions on .NET 10+ -->
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <TestingPlatformCommandLineArguments>--coverage --coverage-output-format cobertura --coverage-output $(MSBuildProjectName).cobertura.xml --coverage-settings $(MSBuildThisFileDirectory)../coverage.settings.xml</TestingPlatformCommandLineArguments>
   </PropertyGroup>
 </Project>

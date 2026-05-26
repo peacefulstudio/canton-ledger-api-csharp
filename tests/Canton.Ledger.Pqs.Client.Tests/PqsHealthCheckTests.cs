@@ -26,7 +26,7 @@ public class PqsHealthCheckTests
 
         var healthCheck = new PqsHealthCheck(options);
 
-        var result = await healthCheck.CheckHealthAsync(CreateContext(HealthStatus.Degraded));
+        var result = await healthCheck.CheckHealthAsync(CreateContext(HealthStatus.Degraded), TestContext.Current.CancellationToken);
 
         result.Status.Should().Be(HealthStatus.Degraded);
         result.Exception.Should().NotBeNull();

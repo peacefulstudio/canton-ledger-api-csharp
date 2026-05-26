@@ -172,7 +172,7 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var result = await client.SubmitAsync(submission);
+        var result = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
 
         result.Should().Be("update-123");
     }
@@ -224,7 +224,7 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         success.Result.UpdateId.Should().Be("update-123");
@@ -275,7 +275,7 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         success.Result.ArchivedContractIds.Should().ContainSingle().Which.Should().Be("00archived123");
@@ -327,7 +327,7 @@ public class LedgerClientTests
             .WithCommandId("test-cmd");
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         var ev = success.Result.ExercisedEvents.Should().ContainSingle().Subject;
@@ -356,7 +356,7 @@ public class LedgerClientTests
             .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
-        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
@@ -377,7 +377,7 @@ public class LedgerClientTests
             .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
 
-        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
@@ -422,7 +422,7 @@ public class LedgerClientTests
 
         var client = CreateClient();
 
-        var action = () => client.ExerciseAsync<object>(exerciseCommand, "party::alice");
+        var action = () => client.ExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*No ExercisedEvent found*Archive*00contract123*");
@@ -466,7 +466,7 @@ public class LedgerClientTests
 
         var client = CreateClient();
         var result = await client.ExerciseAsync<ContractId<TestTemplate>>(
-            exerciseCommand, "party::alice");
+            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         result.Value.Should().Be("00newcontract456");
     }
@@ -510,7 +510,7 @@ public class LedgerClientTests
         var client = CreateClient();
 
         // void overload should not throw
-        await client.ExerciseAsync(exerciseCommand, "party::alice");
+        await client.ExerciseAsync(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -552,7 +552,7 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var client = CreateClient();
-        await client.ExerciseAsync(exerciseCommand, "party::alice");
+        await client.ExerciseAsync(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.TransactionFormat.Should().NotBeNull();

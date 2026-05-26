@@ -40,7 +40,7 @@ public class ClientCredentialsProviderTests
         var options = CreateOptions();
         using var provider = CreateProvider(options, handler);
 
-        await provider.GetTokenAsync();
+        await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         handler.LastRequest!.RequestUri.Should().Be(new Uri("https://auth.example.com/oauth/token"));
         handler.LastRequest.Method.Should().Be(HttpMethod.Post);
@@ -56,7 +56,7 @@ public class ClientCredentialsProviderTests
         var options = CreateOptions(audience: "https://canton.network/");
         using var provider = CreateProvider(options, handler);
 
-        await provider.GetTokenAsync();
+        await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         handler.LastRequestBody.Should().Contain("audience=https%3A%2F%2Fcanton.network%2F");
     }
@@ -69,7 +69,7 @@ public class ClientCredentialsProviderTests
             """{"access_token":"my-real-token","expires_in":3600,"token_type":"Bearer"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var token = await provider.GetTokenAsync();
+        var token = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         token.Should().Be("my-real-token");
     }
@@ -82,7 +82,7 @@ public class ClientCredentialsProviderTests
             """{"error":"invalid_client"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<HttpRequestException>();
     }
@@ -95,7 +95,7 @@ public class ClientCredentialsProviderTests
             "not-json");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<Exception>();
     }
@@ -107,8 +107,8 @@ public class ClientCredentialsProviderTests
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
         using var provider = CreateProvider(CreateOptions(), handler, timeProvider);
 
-        var token1 = await provider.GetTokenAsync();
-        var token2 = await provider.GetTokenAsync();
+        var token1 = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
+        var token2 = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         token1.Should().Be(token2);
         handler.CallCount.Should().Be(1, "second call should use cache");
@@ -123,13 +123,13 @@ public class ClientCredentialsProviderTests
         options.SafetyMargin = TimeSpan.FromSeconds(30);
         using var provider = CreateProvider(options, handler, timeProvider);
 
-        await provider.GetTokenAsync();
+        await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         handler.CallCount.Should().Be(1);
 
         // Advance time to within safety margin (3600 - 30 = 3570 seconds)
         timeProvider.Advance(TimeSpan.FromSeconds(3571));
 
-        await provider.GetTokenAsync();
+        await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         handler.CallCount.Should().Be(2, "token should be refreshed when within safety margin");
     }
 
@@ -141,14 +141,14 @@ public class ClientCredentialsProviderTests
         using var provider = CreateProvider(CreateOptions(), handler, timeProvider);
 
         // Populate cache with initial token
-        await provider.GetTokenAsync();
+        await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         handler.CallCount.Should().Be(1);
 
         // Expire the cached token so all concurrent tasks trigger a refresh
         timeProvider.Advance(TimeSpan.FromHours(2));
 
         var tasks = Enumerable.Range(0, 10)
-            .Select(_ => provider.GetTokenAsync())
+            .Select(_ => provider.GetTokenAsync(TestContext.Current.CancellationToken))
             .ToArray();
 
         var tokens = await Task.WhenAll(tasks);
@@ -169,7 +169,7 @@ public class ClientCredentialsProviderTests
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
         using var provider = CreateProvider(CreateOptions(), handler, timeProvider);
 
-        var first = await provider.GetTokenAsync();
+        var first = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         first.Should().Be("token-v1");
 
         // Expire the cache
@@ -177,7 +177,7 @@ public class ClientCredentialsProviderTests
 
         // Fire concurrent reads — all should see token-v2, never token-v1
         var tasks = Enumerable.Range(0, 20)
-            .Select(_ => provider.GetTokenAsync())
+            .Select(_ => provider.GetTokenAsync(TestContext.Current.CancellationToken))
             .ToArray();
 
         var tokens = await Task.WhenAll(tasks);
@@ -193,7 +193,7 @@ public class ClientCredentialsProviderTests
             """{"access_token":"token","expires_in":0,"token_type":"Bearer"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*invalid expires_in*");
@@ -207,7 +207,7 @@ public class ClientCredentialsProviderTests
             """{"access_token":"token","expires_in":-1,"token_type":"Bearer"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*invalid expires_in*");
@@ -221,7 +221,7 @@ public class ClientCredentialsProviderTests
             """{"access_token":"","expires_in":3600,"token_type":"Bearer"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no access_token*");
@@ -235,7 +235,7 @@ public class ClientCredentialsProviderTests
             """{"expires_in":3600,"token_type":"Bearer"}""");
         using var provider = CreateProvider(CreateOptions(), handler);
 
-        var act = () => provider.GetTokenAsync();
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no access_token*");

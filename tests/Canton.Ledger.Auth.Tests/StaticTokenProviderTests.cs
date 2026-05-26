@@ -12,7 +12,7 @@ public class StaticTokenProviderTests
     {
         var provider = new StaticTokenProvider("my-test-token");
 
-        var token = await provider.GetTokenAsync();
+        var token = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         token.Should().Be("my-test-token");
     }
@@ -22,8 +22,8 @@ public class StaticTokenProviderTests
     {
         var provider = new StaticTokenProvider("stable-token");
 
-        var token1 = await provider.GetTokenAsync();
-        var token2 = await provider.GetTokenAsync();
+        var token1 = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
+        var token2 = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
 
         token1.Should().Be("stable-token");
         token2.Should().Be("stable-token");

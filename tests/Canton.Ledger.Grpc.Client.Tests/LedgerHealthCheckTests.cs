@@ -25,7 +25,7 @@ public class LedgerHealthCheckTests
 
         var healthCheck = new LedgerHealthCheck(adminClient);
 
-        var result = await healthCheck.CheckHealthAsync(CreateContext());
+        var result = await healthCheck.CheckHealthAsync(CreateContext(), TestContext.Current.CancellationToken);
 
         result.Status.Should().Be(HealthStatus.Healthy);
         result.Data.Should().ContainKey("participantId")
@@ -41,7 +41,7 @@ public class LedgerHealthCheckTests
 
         var healthCheck = new LedgerHealthCheck(adminClient);
 
-        var result = await healthCheck.CheckHealthAsync(CreateContext(HealthStatus.Degraded));
+        var result = await healthCheck.CheckHealthAsync(CreateContext(HealthStatus.Degraded), TestContext.Current.CancellationToken);
 
         result.Status.Should().Be(HealthStatus.Degraded);
         result.Exception.Should().BeOfType<InvalidOperationException>();
@@ -56,7 +56,7 @@ public class LedgerHealthCheckTests
 
         var healthCheck = new LedgerHealthCheck(adminClient);
 
-        var act = () => healthCheck.CheckHealthAsync(CreateContext());
+        var act = () => healthCheck.CheckHealthAsync(CreateContext(), TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

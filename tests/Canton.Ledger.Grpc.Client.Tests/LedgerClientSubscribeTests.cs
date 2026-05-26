@@ -61,7 +61,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle();
         var created = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject;
@@ -84,7 +84,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var archived = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Archived>().Subject;
@@ -111,7 +111,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var exercised = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Exercised>().Subject;
@@ -135,7 +135,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().HaveCount(2);
         events.OfType<ContractStreamEvent<FooBar>.Created>()
@@ -150,7 +150,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 123L));
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 123L, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         captured!.BeginExclusive.Should().Be(123L);
@@ -163,7 +163,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty[ActAs];
@@ -185,7 +185,7 @@ public class LedgerClientSubscribeTests
             new HashSet<Party> { (Party)"observer" });
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter));
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filtersByParty = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
@@ -204,7 +204,7 @@ public class LedgerClientSubscribeTests
             new HashSet<Party> { alice });
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter));
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(submitter, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filtersByParty = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
@@ -218,7 +218,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdatesFailure(ex);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var error = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
@@ -233,7 +233,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 50L));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 50L, cancellationToken: TestContext.Current.CancellationToken));
 
         // Caller recovers the last-seen offset from the event so it can resume later.
         var lastOffset = events.OfType<ContractStreamEvent<FooBar>.Created>().Last().Offset;
@@ -263,7 +263,7 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var act = async () =>
         {
-            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs)) { }
+            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken)) { }
         };
 
         await act.Should().ThrowAsync<RpcException>()
@@ -284,7 +284,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(matching, unrelated);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle();
         events[0].ContractId.Value.Should().Be("00foo");
@@ -298,7 +298,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs));
+        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         captured!.ActiveAtOffset.Should().Be(42L);
@@ -312,7 +312,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs));
+        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.EventFormat.FiltersByParty[ActAs];
@@ -333,7 +333,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(first, second);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var checkpoints = events.OfType<ContractStreamEvent<FooBar>.Checkpoint>().ToList();
         checkpoints.Should().HaveCount(2);
@@ -364,7 +364,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var assigned = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Assigned>().Subject;
@@ -393,7 +393,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unassigned = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>().Subject;
@@ -437,7 +437,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle();
         events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>()
@@ -473,7 +473,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle();
         events[0].ContractId.Value.Should().Be("00mid");
@@ -503,7 +503,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs));
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle();
         events[0].ContractId.Value.Should().Be("00mid2");
@@ -515,7 +515,7 @@ public class LedgerClientSubscribeTests
         StubGetLedgerEnd(offset: 12345L);
         var client = CreateClient();
 
-        var offset = await client.GetLedgerEndAsync();
+        var offset = await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
 
         offset.Should().Be(12345L);
     }
