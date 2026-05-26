@@ -9,6 +9,10 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Changed
+
+- **Bumped runtime transitive deps.** `Grpc.Net.Client` 2.76.0 → 2.80.0 (aligns with the `Grpc.Tools` 2.80.0 already pinned), `Google.Protobuf` 3.34.1 → 3.35.0 (matches `daml-codegen-csharp`), and all `Microsoft.Extensions.*` runtime packages (incl. `Http`) 10.0.7 → 10.0.8. No API or behaviour change; the package floors consumers inherit move up accordingly.
+
 ## [0.1.3] - 2026-05-04
 
 ### Added
