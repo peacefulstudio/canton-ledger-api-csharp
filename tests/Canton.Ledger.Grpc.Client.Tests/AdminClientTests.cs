@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using System.Diagnostics;
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2.Admin;
 using FluentAssertions;
@@ -454,5 +455,47 @@ public class AdminClientTests
         var action = () => client.Dispose();
 
         action.Should().NotThrow();
+    }
+
+    [Fact]
+    public async Task Dispose_does_not_disable_tracing_for_subsequent_instances()
+    {
+        var response = new GetParticipantIdResponse { ParticipantId = "participant::test" };
+
+        var secondCallInvoker = Substitute.For<CallInvoker>();
+        var secondPartyService = Substitute.ForPartsOf<PartyManagementService.PartyManagementServiceClient>(secondCallInvoker);
+        var secondUserService = Substitute.ForPartsOf<UserManagementService.UserManagementServiceClient>(secondCallInvoker);
+        secondPartyService
+            .GetParticipantIdAsync(
+                Arg.Any<GetParticipantIdRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<GetParticipantIdResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var startedActivities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == AdminClient.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStarted = startedActivities.Add
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
+        var firstClient = new AdminClient(_options, firstChannel, _partyService, _userService, _tokenProvider);
+        firstClient.Dispose();
+
+        using var secondChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
+        var secondClient = new AdminClient(_options, secondChannel, secondPartyService, secondUserService, _tokenProvider);
+        await secondClient.GetParticipantIdAsync(TestContext.Current.CancellationToken);
+
+        startedActivities.Should().NotBeEmpty(
+            "disposing one AdminClient must not disable tracing for subsequent instances");
     }
 }

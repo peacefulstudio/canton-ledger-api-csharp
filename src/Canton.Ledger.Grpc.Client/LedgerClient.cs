@@ -641,6 +641,5 @@ public sealed partial class LedgerClient : ILedgerClient
     public void Dispose()
     {
         _channel?.Dispose();
-        ActivitySource.Dispose();
     }
 }

@@ -9,6 +9,10 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Fixed
+
+- `LedgerClient` and `AdminClient` no longer dispose the shared static `ActivitySource` when an instance is disposed. Previously, the first instance's `Dispose()` silently disabled tracing — `StartActivity` returned `null` on every subsequent instance, so OpenTelemetry (or any other `ActivityListener`) saw no further spans, with no warning or exception. Affects any process that disposes a `LedgerClient`/`AdminClient` and then constructs another.
+
 ### Changed
 
 - **Bumped runtime transitive deps.** `Grpc.Net.Client` 2.76.0 → 2.80.0 (aligns with the `Grpc.Tools` 2.80.0 already pinned), `Google.Protobuf` 3.34.1 → 3.35.0 (matches `daml-codegen-csharp`), and all `Microsoft.Extensions.*` runtime packages (incl. `Http`) 10.0.7 → 10.0.8. No API or behaviour change; the package floors consumers inherit move up accordingly.

@@ -354,6 +354,5 @@ public sealed partial class AdminClient : IAdminClient
     public void Dispose()
     {
         _channel.Dispose();
-        ActivitySource.Dispose();
     }
 }

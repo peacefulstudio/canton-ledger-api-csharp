@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using System.Diagnostics;
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
@@ -391,6 +392,57 @@ public class LedgerClientTests
         var action = () => client.Dispose();
 
         action.Should().NotThrow();
+    }
+
+    [Fact]
+    public async Task Dispose_does_not_disable_tracing_for_subsequent_instances()
+    {
+        var response = new SubmitAndWaitForTransactionResponse
+        {
+            Transaction = new Transaction { UpdateId = "update-1", Offset = 1L }
+        };
+
+        var secondCommandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(
+            Substitute.For<CallInvoker>());
+        secondCommandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var startedActivities = new List<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == LedgerClient.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            ActivityStarted = startedActivities.Add
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
+        var firstClient = new LedgerClient(_options, firstChannel, _commandService, _tokenProvider);
+        firstClient.Dispose();
+
+        using var secondChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
+        var secondClient = new LedgerClient(_options, secondChannel, secondCommandService, _tokenProvider);
+        var submission = RuntimeCommands.CommandsSubmission.Single(
+                new RuntimeCommands.CreateCommand(
+                    new RuntimeIdentifier("pkg", "Module", "Template"),
+                    new DamlRecord(null, [])))
+            .WithActAs((Party)"party::alice")
+            .WithCommandId("test-cmd");
+
+        await secondClient.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+
+        startedActivities.Should().NotBeEmpty(
+            "disposing one LedgerClient must not disable tracing for subsequent instances");
     }
 
     [Fact]
