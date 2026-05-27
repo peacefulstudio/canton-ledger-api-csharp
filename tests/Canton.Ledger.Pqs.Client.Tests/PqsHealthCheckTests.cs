@@ -33,6 +33,39 @@ public class PqsHealthCheckTests
     }
 
     [Fact]
+    public async Task CheckHealth_uses_registration_failure_status_on_error()
+    {
+        var options = Options.Create(new PqsClientOptions
+        {
+            ConnectionString = "Host=127.0.0.1;Port=1;Database=pqs;Timeout=1"
+        });
+
+        var healthCheck = new PqsHealthCheck(options);
+
+        var result = await healthCheck.CheckHealthAsync(CreateContext(HealthStatus.Unhealthy), TestContext.Current.CancellationToken);
+
+        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Description.Should().Be("PQS database is unreachable.");
+    }
+
+    [Fact]
+    public async Task CheckHealth_propagates_OperationCanceledException_on_cancellation()
+    {
+        var options = Options.Create(new PqsClientOptions
+        {
+            ConnectionString = "Host=127.0.0.1;Port=1;Database=pqs;Timeout=30"
+        });
+        var healthCheck = new PqsHealthCheck(options);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = async () => await healthCheck.CheckHealthAsync(CreateContext(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public void Constructor_throws_for_null_options()
     {
         var act = () => new PqsHealthCheck(null!);

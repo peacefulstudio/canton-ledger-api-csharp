@@ -38,6 +38,80 @@ public class FilterTests
     }
 
     [Fact]
+    public void Field_throws_for_null_selector()
+    {
+        var act = () => Filter.Field<SampleTemplate>(null!, "alice");
+        act.Should().Throw<ArgumentNullException>().WithParameterName("selector");
+    }
+
+    [Fact]
+    public void Field_throws_for_null_value()
+    {
+        var act = () => Filter.Field<SampleTemplate>(t => t.Initiator, null!);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("value");
+    }
+
+    [Fact]
+    public void Field_value_with_sql_metacharacters_is_passed_as_parameter()
+    {
+        const string nasty = "alice'; DROP TABLE active; --";
+        var filter = Filter.Field<SampleTemplate>(t => t.Initiator, nasty);
+
+        using var cmd = new NpgsqlCommand();
+        var paramIndex = 0;
+        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+
+        sql.Should().Be("payload->>'initiator' = @p0");
+        sql.Should().NotContain(nasty);
+        cmd.Parameters["@p0"].Value.Should().Be(nasty);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("1leadingDigit")]
+    [InlineData("has-dash")]
+    [InlineData("has.dot")]
+    [InlineData("has space")]
+    [InlineData("has;semicolon")]
+    [InlineData("has'quote")]
+    [InlineData("has\"doublequote")]
+    [InlineData("has\\backslash")]
+    [InlineData("has/slash")]
+    [InlineData("has(paren")]
+    [InlineData("name; DROP TABLE active; --")]
+    public void FieldEquals_throws_for_unsafe_field_name(string fieldName)
+    {
+        var filter = new PqsFilter.FieldEquals(fieldName, "value");
+
+        using var cmd = new NpgsqlCommand();
+        var paramIndex = 0;
+        var act = () => filter.ToSqlClause(cmd, ref paramIndex);
+
+        act.Should().Throw<ArgumentException>().WithMessage($"*'{fieldName}'*");
+    }
+
+    [Theory]
+    [InlineData("a")]
+    [InlineData("Z")]
+    [InlineData("_underscore")]
+    [InlineData("camelCase")]
+    [InlineData("PascalCase")]
+    [InlineData("with_underscores")]
+    [InlineData("name123")]
+    [InlineData("name_123_456")]
+    public void FieldEquals_accepts_safe_field_name(string fieldName)
+    {
+        var filter = new PqsFilter.FieldEquals(fieldName, "value");
+
+        using var cmd = new NpgsqlCommand();
+        var paramIndex = 0;
+        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+
+        sql.Should().Be($"payload->>'{fieldName}' = @p0");
+    }
+
+    [Fact]
     public void Or_two_filters_generates_correct_sql()
     {
         var filter = Filter.Or(
@@ -77,6 +151,14 @@ public class FilterTests
     }
 
     [Fact]
+    public void Or_throws_when_element_is_null()
+    {
+        var validFilter = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
+        var act = () => Filter.Or(validFilter, null!);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("filters[1]");
+    }
+
+    [Fact]
     public void And_two_filters_generates_correct_sql()
     {
         var filter = Filter.And(
@@ -112,6 +194,14 @@ public class FilterTests
     {
         var act = () => Filter.And(null!);
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void And_throws_when_element_is_null()
+    {
+        var validFilter = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
+        var act = () => Filter.And(null!, validFilter);
+        act.Should().Throw<ArgumentNullException>().WithParameterName("filters[0]");
     }
 
     [Fact]
