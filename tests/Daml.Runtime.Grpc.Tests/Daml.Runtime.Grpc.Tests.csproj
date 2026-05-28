@@ -7,12 +7,6 @@
     <NoWarn>$(NoWarn);CA1707</NoWarn>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
-    <PackageReference Include="xunit.v3" />
-    <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Daml.Runtime.Grpc\Daml.Runtime.Grpc.csproj" />
