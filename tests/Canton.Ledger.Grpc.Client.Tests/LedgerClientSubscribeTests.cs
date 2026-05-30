@@ -172,6 +172,17 @@ public class LedgerClientSubscribeTests
         template.Should().NotBeNull();
         template.TemplateId.ModuleName.Should().Be("Murmures.Foo");
         template.TemplateId.EntityName.Should().Be("FooBar");
+        template.TemplateId.PackageId.Should().Be("#" + FooBar.PackageName);
+    }
+
+    [Fact]
+    public void SubscribeAsync_throws_eagerly_when_package_name_missing()
+    {
+        var client = CreateClient();
+
+        var act = () => client.SubscribeAsync<NoPackageNameTemplate>(ActAs);
+
+        act.Should().Throw<ArgumentException>().And.ParamName.Should().Be("packageName");
     }
 
     [Fact]
@@ -320,6 +331,17 @@ public class LedgerClientSubscribeTests
         var template = filter.Cumulative[0].TemplateFilter;
         template.TemplateId.ModuleName.Should().Be("Murmures.Foo");
         template.TemplateId.EntityName.Should().Be("FooBar");
+        template.TemplateId.PackageId.Should().Be("#" + FooBar.PackageName);
+    }
+
+    [Fact]
+    public void SubscribeActiveAsync_throws_eagerly_when_package_name_missing()
+    {
+        var client = CreateClient();
+
+        var act = () => client.SubscribeActiveAsync<NoPackageNameTemplate>(ActAs);
+
+        act.Should().Throw<ArgumentException>().And.ParamName.Should().Be("packageName");
     }
 
     [Fact]
@@ -743,6 +765,17 @@ public class LedgerClientSubscribeTests
         public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Murmures.Foo", "FooBar");
         public static string PackageId => "test-pkg";
         public static string PackageName => "test-package";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public DamlRecord ToRecord() => DamlRecord.Create(
+            DamlField.Create("owner", new DamlParty(Owner)));
+    }
+
+    internal sealed record NoPackageNameTemplate(string Owner) : ITemplate
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Murmures.Foo", "FooBar");
+        public static string PackageId => "test-pkg";
+        public static string PackageName => "";
         public static Version PackageVersion { get; } = new(0, 1, 0);
 
         public DamlRecord ToRecord() => DamlRecord.Create(

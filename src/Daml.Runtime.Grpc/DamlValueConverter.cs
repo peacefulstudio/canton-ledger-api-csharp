@@ -31,17 +31,25 @@ public static class DamlValueConverter
     /// <summary>
     /// Projects a Runtime template <see cref="RuntimeIdentifier"/> onto a proto identifier
     /// that references the template by package name (encoded as <c>#&lt;package-name&gt;</c>
-    /// in the <c>package_id</c> field), as required by Canton read-path filters. Falls back to
-    /// the hash-based <see cref="ToProtoIdentifier"/> form when <paramref name="packageName"/>
-    /// is null, empty, or whitespace.
+    /// in the <c>package_id</c> field), as required by Canton read-path (stream-filter) endpoints.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="packageName"/> is null, empty, or whitespace. Canton's ACS and
+    /// update filter endpoints reject the package-id hash form on filters, so a non-empty package
+    /// name is required here; the message names the offending template and its package-id hash for
+    /// diagnosis.
+    /// </exception>
     public static ProtoIdentifier ToProtoTemplateNameIdentifier(string packageName, RuntimeIdentifier templateId)
     {
         ArgumentNullException.ThrowIfNull(templateId);
 
         if (string.IsNullOrWhiteSpace(packageName))
         {
-            return ToProtoIdentifier(templateId);
+            throw new ArgumentException(
+                $"A non-empty package name is required to build a read/stream-filter identifier for " +
+                $"template {templateId.ModuleName}:{templateId.EntityName} (package-id {templateId.PackageId}); " +
+                $"Canton's ACS and update filter endpoints reject the package-id hash form on filters.",
+                nameof(packageName));
         }
 
         return new ProtoIdentifier

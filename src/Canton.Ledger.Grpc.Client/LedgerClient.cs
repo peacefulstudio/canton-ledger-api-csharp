@@ -15,6 +15,7 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
+using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
@@ -438,7 +439,8 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        return SubscribeAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, fromOffset, cancellationToken);
+        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
+        return SubscribeAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, templateFilter, fromOffset, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -447,10 +449,14 @@ public sealed partial class LedgerClient : ILedgerClient
         long? fromOffset = null,
         CancellationToken cancellationToken = default)
         where T : ITemplate
-        => SubscribeAsyncCore<T>(submitter, fromOffset, cancellationToken);
+    {
+        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
+        return SubscribeAsyncCore<T>(submitter, templateFilter, fromOffset, cancellationToken);
+    }
 
     private async IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsyncCore<T>(
         RuntimeCommands.SubmitterInfo submitter,
+        ProtoIdentifier templateFilter,
         long? fromOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
         where T : ITemplate
@@ -463,7 +469,7 @@ public sealed partial class LedgerClient : ILedgerClient
         var templateId = T.TemplateId;
         var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
-            DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, templateId),
+            templateFilter,
             fromOffset);
 
         LogSubscribeStarted(Logger, typeof(T).Name, fromOffset ?? 0L);
@@ -532,7 +538,8 @@ public sealed partial class LedgerClient : ILedgerClient
         where T : ITemplate
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        return SubscribeActiveAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, cancellationToken);
+        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
+        return SubscribeActiveAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, templateFilter, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -540,7 +547,10 @@ public sealed partial class LedgerClient : ILedgerClient
         RuntimeCommands.SubmitterInfo submitter,
         CancellationToken cancellationToken = default)
         where T : ITemplate
-        => SubscribeActiveAsyncCore<T>(submitter, cancellationToken);
+    {
+        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
+        return SubscribeActiveAsyncCore<T>(submitter, templateFilter, cancellationToken);
+    }
 
     /// <inheritdoc />
     public async Task<long> GetLedgerEndAsync(CancellationToken cancellationToken = default)
@@ -557,6 +567,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
     private async IAsyncEnumerable<ContractStreamEvent<T>.Created> SubscribeActiveAsyncCore<T>(
         RuntimeCommands.SubmitterInfo submitter,
+        ProtoIdentifier templateFilter,
         [EnumeratorCancellation] CancellationToken cancellationToken)
         where T : ITemplate
     {
@@ -575,7 +586,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(
             submitter,
-            DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, templateId),
+            templateFilter,
             ledgerEnd.Offset);
 
         LogSubscribeActiveStarted(Logger, typeof(T).Name, ledgerEnd.Offset);

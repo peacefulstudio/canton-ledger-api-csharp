@@ -39,17 +39,27 @@ public class DamlValueConverterTests
     }
 
     [Theory]
+    [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void ToProtoTemplateNameIdentifier_falls_back_to_hash_when_package_name_empty(string packageName)
+    public void ToProtoTemplateNameIdentifier_throws_when_package_name_missing(string? packageName)
     {
         var identifier = new RuntimeIdentifier("9b63deadbeefhash", "RichTypes", "RichRecord");
 
-        var result = DamlValueConverter.ToProtoTemplateNameIdentifier(packageName, identifier);
+        var action = () => DamlValueConverter.ToProtoTemplateNameIdentifier(packageName!, identifier);
 
-        result.PackageId.Should().Be("9b63deadbeefhash");
-        result.ModuleName.Should().Be("RichTypes");
-        result.EntityName.Should().Be("RichRecord");
+        action.Should().Throw<ArgumentException>()
+            .WithMessage("*RichTypes*RichRecord*9b63deadbeefhash*")
+            .And.ParamName.Should().Be("packageName");
+    }
+
+    [Fact]
+    public void ToProtoTemplateNameIdentifier_throws_when_template_id_null()
+    {
+        var action = () => DamlValueConverter.ToProtoTemplateNameIdentifier("richtypes", null!);
+
+        action.Should().Throw<ArgumentNullException>()
+            .And.ParamName.Should().Be("templateId");
     }
 
     [Fact]
