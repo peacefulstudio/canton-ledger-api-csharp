@@ -9,7 +9,13 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Added
+
+- **Integration test project `Canton.Ledger.Grpc.Client.Integration.Tests`** — end-to-end round-trip of a rich Daml template (Int/Numeric/Text/Bool/Date/Party/Optional/List/nested Record + one choice) through a real Canton participant on `canton-localnet-internal`, proving the published `Daml.Runtime` + generated C# + gRPC `LedgerClient` create/subscribe/exercise path. Self-skips without a live localnet.
+
 ### Fixed
+
+- **`SubscribeAsync<T>` and `SubscribeActiveAsync<T>` now reference templates by package name in their read-path filters.** Both stream filters previously sent the package hash in the `TemplateId.package_id` field; Canton's ACS/update filter endpoints reject that with `InvalidArgument: Invalid field packageId: ... expected a package name`, so every subscription failed against a real ledger. The filter now sends `#<T.PackageName>` (the smart-contract-upgrade package-name reference) and falls back to the hash only when a template has no package name. The command path (create/exercise) is unchanged and continues to use the hash.
 
 - `LedgerClient` and `AdminClient` no longer dispose the shared static `ActivitySource` when an instance is disposed. Previously, the first instance's `Dispose()` silently disabled tracing — `StartActivity` returned `null` on every subsequent instance, so OpenTelemetry (or any other `ActivityListener`) saw no further spans, with no warning or exception. Affects any process that disposes a `LedgerClient`/`AdminClient` and then constructs another.
 

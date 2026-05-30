@@ -463,7 +463,7 @@ public sealed partial class LedgerClient : ILedgerClient
         var templateId = T.TemplateId;
         var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
-            DamlValueConverter.ToProtoIdentifier(templateId),
+            DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, templateId),
             fromOffset);
 
         LogSubscribeStarted(Logger, typeof(T).Name, fromOffset ?? 0L);
@@ -575,7 +575,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
         var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(
             submitter,
-            DamlValueConverter.ToProtoIdentifier(templateId),
+            DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, templateId),
             ledgerEnd.Offset);
 
         LogSubscribeActiveStarted(Logger, typeof(T).Name, ledgerEnd.Offset);

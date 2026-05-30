@@ -27,6 +27,32 @@ public class DamlValueConverterTests
     }
 
     [Fact]
+    public void ToProtoTemplateNameIdentifier_emits_hash_prefixed_package_name()
+    {
+        var identifier = new RuntimeIdentifier("9b63deadbeefhash", "RichTypes", "RichRecord");
+
+        var result = DamlValueConverter.ToProtoTemplateNameIdentifier("richtypes", identifier);
+
+        result.PackageId.Should().Be("#richtypes");
+        result.ModuleName.Should().Be("RichTypes");
+        result.EntityName.Should().Be("RichRecord");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ToProtoTemplateNameIdentifier_falls_back_to_hash_when_package_name_empty(string packageName)
+    {
+        var identifier = new RuntimeIdentifier("9b63deadbeefhash", "RichTypes", "RichRecord");
+
+        var result = DamlValueConverter.ToProtoTemplateNameIdentifier(packageName, identifier);
+
+        result.PackageId.Should().Be("9b63deadbeefhash");
+        result.ModuleName.Should().Be("RichTypes");
+        result.EntityName.Should().Be("RichRecord");
+    }
+
+    [Fact]
     public void ToProtoValue_converts_unit()
     {
         var protoValue = DamlValueConverter.ToProtoValue(DamlUnit.Instance);

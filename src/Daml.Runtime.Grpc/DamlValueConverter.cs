@@ -28,6 +28,30 @@ public static class DamlValueConverter
         };
     }
 
+    /// <summary>
+    /// Projects a Runtime template <see cref="RuntimeIdentifier"/> onto a proto identifier
+    /// that references the template by package name (encoded as <c>#&lt;package-name&gt;</c>
+    /// in the <c>package_id</c> field), as required by Canton read-path filters. Falls back to
+    /// the hash-based <see cref="ToProtoIdentifier"/> form when <paramref name="packageName"/>
+    /// is null, empty, or whitespace.
+    /// </summary>
+    public static ProtoIdentifier ToProtoTemplateNameIdentifier(string packageName, RuntimeIdentifier templateId)
+    {
+        ArgumentNullException.ThrowIfNull(templateId);
+
+        if (string.IsNullOrWhiteSpace(packageName))
+        {
+            return ToProtoIdentifier(templateId);
+        }
+
+        return new ProtoIdentifier
+        {
+            PackageId = "#" + packageName,
+            ModuleName = templateId.ModuleName,
+            EntityName = templateId.EntityName
+        };
+    }
+
     /// <summary>Projects a Runtime <see cref="DamlRecord"/> onto its proto wire form.</summary>
     public static Record ToProtoRecord(DamlRecord record)
     {

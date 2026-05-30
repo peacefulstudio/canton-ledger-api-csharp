@@ -65,4 +65,23 @@ public class SubscribeRequestBuilderTests
 
         request.ActiveAtOffset.Should().Be(999L);
     }
+
+    [Fact]
+    public void BuildGetActiveContractsRequest_carries_package_name_reference_into_template_filter()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+        var packageNameTemplateId = new ProtoIdentifier
+        {
+            PackageId = "#richtypes",
+            ModuleName = "RichTypes",
+            EntityName = "RichRecord",
+        };
+
+        var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(submitter, packageNameTemplateId, activeAtOffset: 0L);
+
+        request.EventFormat.FiltersByParty["alice"].Cumulative[0].TemplateFilter.TemplateId.PackageId
+            .Should().Be("#richtypes");
+    }
 }

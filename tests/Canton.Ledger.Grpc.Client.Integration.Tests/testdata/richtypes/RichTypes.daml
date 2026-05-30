@@ -1,0 +1,42 @@
+-- Copyright (c) 2026 Peaceful Studio OÜ
+-- SPDX-License-Identifier: Apache-2.0
+module RichTypes where
+
+import DA.Time () -- ensures Time is in scope via stdlib prelude
+import DA.TextMap (TextMap)
+
+data Profile = Profile
+  with
+    nickname : Text
+    level : Int
+  deriving (Eq, Show)
+
+template Marker
+  with
+    owner : Party
+  where
+    signatory owner
+
+template RichRecord
+  with
+    owner : Party
+    count : Int
+    amount : Numeric 10
+    label : Text
+    active : Bool
+    asOf : Date
+    observedAt : Time
+    note : Optional Text
+    tags : [Text]
+    attributes : TextMap Text
+    marker : ContractId Marker
+    profile : Profile
+  where
+    signatory owner
+
+    nonconsuming choice Relabel : ContractId RichRecord
+      with
+        newLabel : Text
+      controller owner
+      do
+        create this with label = newLabel
