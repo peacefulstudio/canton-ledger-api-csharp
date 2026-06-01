@@ -502,14 +502,12 @@ public class AdminClientTests
     [Fact]
     public void AdminClient_constructor_does_not_throw_when_ITokenProvider_None()
     {
-        var act = () => new AdminClient(_options, ITokenProvider.None);
-        act.Should().NotThrow();
+        using var _ = new AdminClient(_options, ITokenProvider.None);
     }
 
     [Fact]
     public void AdminClient_constructor_does_not_throw_when_real_provider_registered()
     {
-        var act = () => new AdminClient(_options, _tokenProvider);
-        act.Should().NotThrow();
+        using var _ = new AdminClient(_options, _tokenProvider);
     }
 }

@@ -68,7 +68,7 @@ public sealed partial class AdminClient : IAdminClient
     [LoggerMessage(Level = LogLevel.Information, Message = "AdminClient initialized with endpoint {Endpoint}")]
     private static partial void LogInitialized(ILogger logger, string endpoint);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "AdminClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddLedgerClient overload that accepts authConfiguration.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "AdminClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddAdminClient overload that accepts authConfiguration.")]
     private static partial void LogUnauthenticatedMode(ILogger logger);
 
     /// <summary>

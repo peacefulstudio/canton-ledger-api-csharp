@@ -616,15 +616,13 @@ public class LedgerClientTests
     [Fact]
     public void LedgerClient_constructor_does_not_throw_when_ITokenProvider_None()
     {
-        var act = () => new LedgerClient(_options, ITokenProvider.None);
-        act.Should().NotThrow();
+        using var _ = new LedgerClient(_options, ITokenProvider.None);
     }
 
     [Fact]
     public void LedgerClient_constructor_does_not_throw_when_real_provider_registered()
     {
-        var act = () => new LedgerClient(_options, _tokenProvider);
-        act.Should().NotThrow();
+        using var _ = new LedgerClient(_options, _tokenProvider);
     }
 
     internal sealed record TestTemplate(string Owner) : ITemplate
