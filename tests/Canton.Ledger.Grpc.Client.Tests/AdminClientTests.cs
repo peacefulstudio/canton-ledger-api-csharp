@@ -498,4 +498,18 @@ public class AdminClientTests
         startedActivities.Should().NotBeEmpty(
             "disposing one AdminClient must not disable tracing for subsequent instances");
     }
+
+    [Fact]
+    public void AdminClient_constructor_does_not_throw_when_ITokenProvider_None()
+    {
+        var act = () => new AdminClient(_options, ITokenProvider.None);
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AdminClient_constructor_does_not_throw_when_real_provider_registered()
+    {
+        var act = () => new AdminClient(_options, _tokenProvider);
+        act.Should().NotThrow();
+    }
 }

@@ -72,10 +72,16 @@ public sealed partial class LedgerClient : ILedgerClient
         _stateService = new StateService.StateServiceClient(_channel);
 
         LogInitialized(Logger, _options.GrpcAddress);
+
+        if (ReferenceEquals(_tokenProvider, ITokenProvider.None))
+            LogUnauthenticatedMode(Logger);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "LedgerClient initialized with endpoint {Endpoint}")]
     private static partial void LogInitialized(ILogger logger, string endpoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "LedgerClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddLedgerClient overload that accepts authConfiguration.")]
+    private static partial void LogUnauthenticatedMode(ILogger logger);
 
     /// <summary>
     /// Creates a new LedgerClient with injected gRPC channel and service client.

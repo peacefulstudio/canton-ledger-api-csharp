@@ -613,6 +613,20 @@ public class LedgerClientTests
         capturedRequest.TransactionFormat.EventFormat.Verbose.Should().BeTrue();
     }
 
+    [Fact]
+    public void LedgerClient_constructor_does_not_throw_when_ITokenProvider_None()
+    {
+        var act = () => new LedgerClient(_options, ITokenProvider.None);
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void LedgerClient_constructor_does_not_throw_when_real_provider_registered()
+    {
+        var act = () => new LedgerClient(_options, _tokenProvider);
+        act.Should().NotThrow();
+    }
+
     internal sealed record TestTemplate(string Owner) : ITemplate
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
