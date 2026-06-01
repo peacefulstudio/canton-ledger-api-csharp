@@ -10,6 +10,7 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Daml.Runtime.Stdlib;
 using System;
 using System.Threading;
 using System.Threading.Tasks;

@@ -10,6 +10,7 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Daml.Runtime.Stdlib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -170,7 +171,7 @@ public sealed record RelabelResult(ContractId<RichRecord> RichRecord)
 /// <summary>
 /// Static <c>&lt;Choice&gt;Async</c> extension methods for <see cref="RichRecord"/>.
 /// One method per create-bearing choice; each delegates to
-/// <see cref="Daml.Ledger.Abstractions.ILedgerClient.TrySubmitAndWaitForTransactionAsync"/>
+/// <see cref="global::Daml.Ledger.Abstractions.ILedgerClient.TrySubmitAndWaitForTransactionAsync"/>
 /// and projects success via <c>&lt;Choice&gt;Result.FromCreatedContracts</c>.
 /// </summary>
 public static class RichRecordExtensions

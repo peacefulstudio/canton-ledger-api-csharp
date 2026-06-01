@@ -18,12 +18,12 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.8" />
     <!-- Integration with Daml codegen runtime -->
-    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.1.5" />
-    <PackageVersion Include="Daml.Runtime" Version="0.1.5" />
+    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.1.6" />
+    <PackageVersion Include="Daml.Runtime" Version="0.1.6" />
     <!-- Database (PQS) -->
-    <PackageVersion Include="Npgsql" Version="10.0.2" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
     <!-- Peaceful Extensions -->
-    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.1.3" />
+    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.2.0" />
     <!-- Auth -->
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <!-- Testing -->
