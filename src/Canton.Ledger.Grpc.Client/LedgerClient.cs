@@ -407,21 +407,8 @@ public sealed partial class LedgerClient : ILedgerClient
         return commands;
     }
 
-    private async Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken)
-    {
-        if (_tokenProvider is null || ReferenceEquals(_tokenProvider, ITokenProvider.None))
-            return null;
-
-        var token = await _tokenProvider.GetTokenAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(token))
-            throw new InvalidOperationException(
-                $"Token provider {_tokenProvider.GetType().Name} returned an empty token.");
-
-        return new Metadata
-        {
-            { "authorization", $"Bearer {token}" }
-        };
-    }
+    private Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken) =>
+        AuthHeaderHelper.GetHeadersAsync(_tokenProvider, cancellationToken);
 
     private DateTime? GetDeadline()
     {
