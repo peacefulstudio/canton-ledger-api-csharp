@@ -482,6 +482,81 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public async Task TryExerciseAsync_throws_when_response_has_no_Transaction()
+    {
+        var response = new SubmitAndWaitForTransactionResponse();
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*no Transaction*");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_throws_when_ExercisedEvent_has_no_ExerciseResult()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Archive",
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*no ExerciseResult*");
+    }
+
+    [Fact]
     public async Task TryExerciseAsync_returns_One_with_contract_id()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };

@@ -192,8 +192,9 @@ public sealed partial class LedgerClient : ILedgerClient
             var result = resultValue.FromDamlValue<TResult>()!;
             return new ExerciseOutcome<TResult>.One(result);
         }
-        catch (RpcException ex)
+        catch (RpcException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId, ex.StatusCode, ex.Status.Detail);
             var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
             if (errorId.Length > 0)
                 return new ExerciseOutcome<TResult>.DamlError(category, errorId, message, metadata);
@@ -207,6 +208,9 @@ public sealed partial class LedgerClient : ILedgerClient
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
     private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}: {StatusCode} — {Detail}")]
+    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId, StatusCode statusCode, string? detail);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(
