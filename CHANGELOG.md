@@ -13,6 +13,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 - **Integration test project `Canton.Ledger.Grpc.Client.Integration.Tests`** — end-to-end round-trip of a rich Daml template (Int/Numeric/Text/Bool/Date/Party/Optional/List/nested Record + one choice) through a real Canton participant on `canton-localnet-internal`, proving the published `Daml.Runtime` + generated C# + gRPC `LedgerClient` create/subscribe/exercise path. Self-skips without a live localnet.
 
+- **`ILedgerClient.TryExerciseAsync<TResult>`** — structured-outcome exercise overload required by the new `Daml.Ledger.Abstractions` 0.1.7 interface contract. `LedgerClient` implements this method; any other `ILedgerClient` implementation must add it.
+
 ### Fixed
 
 - **`DamlValueConverter.ToProtoTemplateNameIdentifier` now throws `ArgumentException` on an empty package name** instead of silently emitting the package-id hash (#92). The hash form is rejected by Canton's ACS/update filter endpoints (`Invalid field packageId: ... expected a package name`), so the previous soft fallback re-introduced the exact failure it was meant to avoid — surfacing as a cryptic runtime gRPC error mid-stream; the method never falls back to the hash on the stream-filter path. `SubscribeAsync<T>` / `SubscribeActiveAsync<T>` compute the filter identifier eagerly, so the throw now fails fast at the subscribe call rather than on the first `await foreach`. The message names the offending template's module, entity, and package-id hash so an operator can trace it back to the DAR. Stream-filter path only; the command (create/exercise) path is unaffected and continues to use the hash via `ToProtoIdentifier`.
@@ -20,10 +22,6 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 - **`SubscribeAsync<T>` and `SubscribeActiveAsync<T>` now reference templates by package name in their read-path filters.** Both stream filters previously sent the package hash in the `TemplateId.package_id` field; Canton's ACS/update filter endpoints reject that with `InvalidArgument: Invalid field packageId: ... expected a package name`, so every subscription failed against a real ledger. The filter now sends `#<T.PackageName>` (the smart-contract-upgrade package-name reference). The command path (create/exercise) is unchanged and continues to use the hash.
 
 - `LedgerClient` and `AdminClient` no longer dispose the shared static `ActivitySource` when an instance is disposed. Previously, the first instance's `Dispose()` silently disabled tracing — `StartActivity` returned `null` on every subsequent instance, so OpenTelemetry (or any other `ActivityListener`) saw no further spans, with no warning or exception. Affects any process that disposes a `LedgerClient`/`AdminClient` and then constructs another.
-
-### Added
-
-- **`ILedgerClient.TryExerciseAsync<TResult>`** — structured-outcome exercise overload required by the new `Daml.Ledger.Abstractions` 0.1.7 interface contract. `LedgerClient` implements this method; any other `ILedgerClient` implementation must add it.
 
 ### Removed — BREAKING for `ILedgerClient` implementors
 

@@ -7,14 +7,11 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using FluentAssertions;
-using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
-using Google.Rpc;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
-using GrpcStatus = Google.Rpc.Status;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
@@ -622,11 +619,11 @@ public class LedgerClientTests
     [Fact]
     public async Task TryExerciseAsync_returns_DamlError_on_structured_failure()
     {
-        var ex = MakeDamlRpcException(
+        var ex = LedgerClientTestFixtures.MakeDamlRpcException(
             "CONTRACT_NOT_FOUND",
             "contract not found",
             "InvalidGivenCurrentSystemStateOther");
-        StubCommandServiceFailure(ex);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var exerciseCommand = new RuntimeCommands.ExerciseCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -649,7 +646,7 @@ public class LedgerClientTests
     public async Task TryExerciseAsync_returns_InfraError_on_unstructured_failure()
     {
         var ex = new RpcException(new Status(StatusCode.Unavailable, "network down"));
-        StubCommandServiceFailure(ex);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var exerciseCommand = new RuntimeCommands.ExerciseCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -665,32 +662,6 @@ public class LedgerClientTests
         var infra = (ExerciseOutcome<object>.InfraError)outcome;
         infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
         infra.Message.Should().Be("network down");
-    }
-
-    private void StubCommandServiceFailure(RpcException exception)
-    {
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromException<SubmitAndWaitForTransactionResponse>(exception),
-                Task.FromResult(new Metadata()),
-                () => exception.Status,
-                () => exception.Trailers ?? new Metadata(),
-                () => { }));
-    }
-
-    private static RpcException MakeDamlRpcException(string errorId, string message, string category)
-    {
-        var info = new ErrorInfo { Reason = errorId, Domain = "ledger.api" };
-        info.Metadata.Add("category", category);
-        var status = new GrpcStatus { Code = (int)StatusCode.FailedPrecondition, Message = message };
-        status.Details.Add(Any.Pack(info));
-        var trailers = new Metadata { { "grpc-status-details-bin", status.ToByteArray() } };
-        return new RpcException(new Status(StatusCode.FailedPrecondition, message), trailers);
     }
 
     internal sealed record TestTemplate(string Owner) : ITemplate
