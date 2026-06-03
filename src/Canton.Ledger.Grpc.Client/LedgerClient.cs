@@ -131,15 +131,15 @@ public sealed partial class LedgerClient : ILedgerClient
     private static partial void LogCreatingContract(ILogger logger, string templateType);
 
     /// <inheritdoc />
-    public Task<TResult> ExerciseAsync<TResult>(
+    public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         string actAs,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
-        => ExerciseAsync<TResult>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
+        => TryExerciseAsync<TResult>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<TResult> ExerciseAsync<TResult>(
+    public async Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
@@ -169,31 +169,44 @@ public sealed partial class LedgerClient : ILedgerClient
             }
         };
 
-        var response = await _commandService.SubmitAndWaitForTransactionAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _commandService.SubmitAndWaitForTransactionAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        var transaction = response.Transaction
-            ?? throw new InvalidOperationException(
-                "Server returned a successful response but no Transaction was present.");
+            var transaction = response.Transaction
+                ?? throw new InvalidOperationException(
+                    "Server returned a successful response but no Transaction was present.");
 
-        var exercisedEvent = transaction.Events
-            .Where(e => e.EventCase == Event.EventOneofCase.Exercised)
-            .Select(e => e.Exercised)
-            .FirstOrDefault(e => e.ContractId == command.ContractId && e.Choice == command.Choice)
-            ?? throw new InvalidOperationException(
-                $"No ExercisedEvent found for choice {command.Choice} on {command.ContractId}");
+            var exercisedEvent = transaction.Events
+                .Where(e => e.EventCase == Event.EventOneofCase.Exercised)
+                .Select(e => e.Exercised)
+                .FirstOrDefault(e => e.ContractId == command.ContractId && e.Choice == command.Choice)
+                ?? throw new InvalidOperationException(
+                    $"No ExercisedEvent found for choice {command.Choice} on {command.ContractId}");
 
-        LogChoiceExercised(Logger, command.Choice, command.ContractId);
+            LogChoiceExercised(Logger, command.Choice, command.ContractId);
 
-        var exerciseResult = exercisedEvent.ExerciseResult
-            ?? throw new InvalidOperationException(
-                $"ExercisedEvent for choice {command.Choice} on {command.ContractId} has no ExerciseResult.");
+            var exerciseResult = exercisedEvent.ExerciseResult
+                ?? throw new InvalidOperationException(
+                    $"ExercisedEvent for choice {command.Choice} on {command.ContractId} has no ExerciseResult.");
 
-        var resultValue = DamlValueConverter.FromProtoValue(exerciseResult);
-        return resultValue.FromDamlValue<TResult>()!;
+            var resultValue = DamlValueConverter.FromProtoValue(exerciseResult);
+            var result = resultValue.FromDamlValue<TResult>()!;
+            return new ExerciseOutcome<TResult>.One(result);
+        }
+        catch (RpcException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId, ex.StatusCode, ex.Status.Detail);
+            var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
+            if (errorId.Length > 0)
+                return new ExerciseOutcome<TResult>.DamlError(category, errorId, message, metadata);
+
+            return new ExerciseOutcome<TResult>.InfraError((int)ex.StatusCode, ex.Status.Detail ?? ex.Message);
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
@@ -202,23 +215,8 @@ public sealed partial class LedgerClient : ILedgerClient
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
     private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
 
-    /// <inheritdoc />
-    public Task ExerciseAsync(
-        RuntimeCommands.ExerciseCommand command,
-        string actAs,
-        string? workflowId = null,
-        CancellationToken cancellationToken = default)
-        => ExerciseAsync(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
-
-    /// <inheritdoc />
-    public async Task ExerciseAsync(
-        RuntimeCommands.ExerciseCommand command,
-        RuntimeCommands.SubmitterInfo submitter,
-        string? workflowId = null,
-        CancellationToken cancellationToken = default)
-    {
-        await ExerciseAsync<object>(command, submitter, workflowId, cancellationToken);
-    }
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}: {StatusCode} — {Detail}")]
+    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId, StatusCode statusCode, string? detail);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(

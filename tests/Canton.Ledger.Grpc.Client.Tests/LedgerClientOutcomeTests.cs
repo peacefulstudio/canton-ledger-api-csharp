@@ -6,14 +6,10 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using FluentAssertions;
-using Google.Protobuf;
-using Google.Protobuf.WellKnownTypes;
-using Google.Rpc;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
-using GrpcStatus = Google.Rpc.Status;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
@@ -71,11 +67,11 @@ public class LedgerClientOutcomeTests
     [Fact]
     public async Task TrySubmitAndWaitForTransaction_returns_DamlError_on_structured_failure()
     {
-        var ex = MakeDamlRpcException(
+        var ex = LedgerClientTestFixtures.MakeDamlRpcException(
             "MURMURES_SWAP_ALREADY_EXECUTED",
             "swap already executed",
             "InvalidGivenCurrentSystemStateOther");
-        StubCommandServiceFailure(ex);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
@@ -90,9 +86,8 @@ public class LedgerClientOutcomeTests
     [Fact]
     public async Task TrySubmitAndWaitForTransaction_returns_InfraError_on_unstructured_failure()
     {
-        // RpcException without trailers → no rich error info → InfraError.
         var ex = new RpcException(new Status(StatusCode.Unavailable, "network down"));
-        StubCommandServiceFailure(ex);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
@@ -142,11 +137,11 @@ public class LedgerClientOutcomeTests
     [Fact]
     public async Task TryCreateAsync_returns_DamlError_on_structured_failure()
     {
-        var ex = MakeDamlRpcException(
+        var ex = LedgerClientTestFixtures.MakeDamlRpcException(
             "DUPLICATE_COMMAND",
             "duplicate command",
             "InvalidGivenCurrentSystemStateResourceExists");
-        StubCommandServiceFailure(ex);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
         var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
@@ -197,22 +192,6 @@ public class LedgerClientOutcomeTests
                 () => { }));
     }
 
-    private void StubCommandServiceFailure(RpcException exception)
-    {
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromException<SubmitAndWaitForTransactionResponse>(exception),
-                Task.FromResult(new Metadata()),
-                () => exception.Status,
-                () => exception.Trailers ?? new Metadata(),
-                () => { }));
-    }
-
     private static RuntimeCommands.CommandsSubmission MakeFooBarCreate()
     {
         var create = new RuntimeCommands.CreateCommand(
@@ -221,16 +200,6 @@ public class LedgerClientOutcomeTests
         return RuntimeCommands.CommandsSubmission.Single(create)
             .WithActAs((Party)"party::alice")
             .WithCommandId("test-cmd");
-    }
-
-    private static RpcException MakeDamlRpcException(string errorId, string message, string category)
-    {
-        var info = new ErrorInfo { Reason = errorId, Domain = "ledger.api" };
-        info.Metadata.Add("category", category);
-        var status = new GrpcStatus { Code = (int)StatusCode.FailedPrecondition, Message = message };
-        status.Details.Add(Any.Pack(info));
-        var trailers = new Metadata { { "grpc-status-details-bin", status.ToByteArray() } };
-        return new RpcException(new Status(StatusCode.FailedPrecondition, message), trailers);
     }
 
     internal sealed record FooBar(string Owner) : ITemplate
