@@ -11,6 +11,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ### Added
 
+- **`LedgerClient` and `AdminClient` now log a `Warning` at construction time when running in unauthenticated mode** (`ITokenProvider.None`). Each message names the concrete step to take — register an `ITokenProvider` or use the matching `AddLedgerClient`/`AddAdminClient` overload that accepts `authConfiguration` — so misconfigured apps surface the oversight immediately instead of failing with an opaque gRPC `UNAUTHENTICATED` error at the first API call.
+
 - **Integration test project `Canton.Ledger.Grpc.Client.Integration.Tests`** — end-to-end round-trip of a rich Daml template (Int/Numeric/Text/Bool/Date/Party/Optional/List/nested Record + one choice) through a real Canton participant on `canton-localnet-internal`, proving the published `Daml.Runtime` + generated C# + gRPC `LedgerClient` create/subscribe/exercise path. Self-skips without a live localnet.
 
 - **`ILedgerClient.TryExerciseAsync<TResult>`** — structured-outcome exercise overload required by the new `Daml.Ledger.Abstractions` 0.1.7 interface contract. `LedgerClient` implements this method; any other `ILedgerClient` implementation must add it.

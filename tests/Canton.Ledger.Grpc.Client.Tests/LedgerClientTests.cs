@@ -692,6 +692,18 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public void LedgerClient_constructor_does_not_throw_when_ITokenProvider_None()
+    {
+        using var _ = new LedgerClient(_options, ITokenProvider.None);
+    }
+
+    [Fact]
+    public void LedgerClient_constructor_does_not_throw_when_real_provider_registered()
+    {
+        using var _ = new LedgerClient(_options, _tokenProvider);
+    }
+
+    [Fact]
     public async Task TryExerciseAsync_returns_DamlError_on_structured_failure()
     {
         var ex = LedgerClientTestFixtures.MakeDamlRpcException(

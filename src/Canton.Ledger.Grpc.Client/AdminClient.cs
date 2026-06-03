@@ -60,10 +60,16 @@ public sealed partial class AdminClient : IAdminClient
         _userService = new UserManagementService.UserManagementServiceClient(_channel);
 
         LogInitialized(Logger, _options.GrpcAddress);
+
+        if (ReferenceEquals(_tokenProvider, ITokenProvider.None))
+            LogUnauthenticatedMode(Logger);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "AdminClient initialized with endpoint {Endpoint}")]
     private static partial void LogInitialized(ILogger logger, string endpoint);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "AdminClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddAdminClient overload that accepts authConfiguration.")]
+    private static partial void LogUnauthenticatedMode(ILogger logger);
 
     /// <summary>
     /// Creates a new AdminClient with injected gRPC channel and service clients.
