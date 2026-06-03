@@ -7,16 +7,21 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using FluentAssertions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
+using Google.Rpc;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using GrpcStatus = Google.Rpc.Status;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
+using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
@@ -446,10 +451,9 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task ExerciseAsync_throws_when_no_matching_event()
+    public async Task TryExerciseAsync_throws_when_no_matching_event()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
-        // No ExercisedEvent added — response has no matching event
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
@@ -474,14 +478,14 @@ public class LedgerClientTests
 
         var client = CreateClient();
 
-        var action = () => client.ExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*No ExercisedEvent found*Archive*00contract123*");
     }
 
     [Fact]
-    public async Task ExerciseAsync_returns_contract_id_result()
+    public async Task TryExerciseAsync_returns_One_with_contract_id()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -517,14 +521,15 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var client = CreateClient();
-        var result = await client.ExerciseAsync<ContractId<TestTemplate>>(
+        var outcome = await client.TryExerciseAsync<ContractId<TestTemplate>>(
             exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
-        result.Value.Should().Be("00newcontract456");
+        var success = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.One>().Subject;
+        success.Result.Value.Should().Be("00newcontract456");
     }
 
     [Fact]
-    public async Task ExerciseAsync_returns_unit_for_void_choice()
+    public async Task TryExerciseAsync_returns_One_for_void_choice()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -560,13 +565,14 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var client = CreateClient();
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
-        // void overload should not throw
-        await client.ExerciseAsync(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
     }
 
     [Fact]
-    public async Task ExerciseAsync_uses_ledger_effects_shape()
+    public async Task TryExerciseAsync_uses_ledger_effects_shape()
     {
         SubmitAndWaitForTransactionRequest? capturedRequest = null;
 
@@ -604,13 +610,87 @@ public class LedgerClientTests
             DamlUnit.Instance);
 
         var client = CreateClient();
-        await client.ExerciseAsync(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        await client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.TransactionFormat.Should().NotBeNull();
         capturedRequest.TransactionFormat.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
         capturedRequest.TransactionFormat.EventFormat.Should().NotBeNull();
         capturedRequest.TransactionFormat.EventFormat.Verbose.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_DamlError_on_structured_failure()
+    {
+        var ex = MakeDamlRpcException(
+            "CONTRACT_NOT_FOUND",
+            "contract not found",
+            "InvalidGivenCurrentSystemStateOther");
+        StubCommandServiceFailure(ex);
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<object>.DamlError>();
+        var err = (ExerciseOutcome<object>.DamlError)outcome;
+        err.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateOther);
+        err.ErrorId.Should().Be("CONTRACT_NOT_FOUND");
+        err.Message.Should().Be("contract not found");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_InfraError_on_unstructured_failure()
+    {
+        var ex = new RpcException(new Status(StatusCode.Unavailable, "network down"));
+        StubCommandServiceFailure(ex);
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<object>.InfraError>();
+        var infra = (ExerciseOutcome<object>.InfraError)outcome;
+        infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        infra.Message.Should().Be("network down");
+    }
+
+    private void StubCommandServiceFailure(RpcException exception)
+    {
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromException<SubmitAndWaitForTransactionResponse>(exception),
+                Task.FromResult(new Metadata()),
+                () => exception.Status,
+                () => exception.Trailers ?? new Metadata(),
+                () => { }));
+    }
+
+    private static RpcException MakeDamlRpcException(string errorId, string message, string category)
+    {
+        var info = new ErrorInfo { Reason = errorId, Domain = "ledger.api" };
+        info.Metadata.Add("category", category);
+        var status = new GrpcStatus { Code = (int)StatusCode.FailedPrecondition, Message = message };
+        status.Details.Add(Any.Pack(info));
+        var trailers = new Metadata { { "grpc-status-details-bin", status.ToByteArray() } };
+        return new RpcException(new Status(StatusCode.FailedPrecondition, message), trailers);
     }
 
     internal sealed record TestTemplate(string Owner) : ITemplate
