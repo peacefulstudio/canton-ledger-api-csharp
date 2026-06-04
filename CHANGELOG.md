@@ -9,6 +9,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-04
+
 ### Added
 
 - **`LedgerClient` and `AdminClient` now log a `Warning` at construction time when running in unauthenticated mode** (`ITokenProvider.None`). Each message names the concrete step to take — register an `ITokenProvider` or use the matching `AddLedgerClient`/`AddAdminClient` overload that accepts `authConfiguration` — so misconfigured apps surface the oversight immediately instead of failing with an opaque gRPC `UNAUTHENTICATED` error at the first API call.
@@ -95,7 +97,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 - CI prerelease version strings now use dot-separated SemVer 2.0 identifiers (`${BASE}-${BRANCH}.${RUN}.${SHA}`) so `run_number` compares numerically; prevents `NU1605` downgrade warnings when consuming prereleases. (#24)
 
-[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.0-preview.2...v0.1.1
