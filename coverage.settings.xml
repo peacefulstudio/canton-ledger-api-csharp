@@ -5,6 +5,7 @@
       <Exclude>
         <ModulePath>.*\.Tests\.dll$</ModulePath>
         <ModulePath>.*Canton\.Ledger\.Grpc\.dll$</ModulePath>
+        <ModulePath>.*Peaceful\.Canton\.Localnet\.Testing\.dll$</ModulePath>
       </Exclude>
     </ModulePaths>
     <Attributes>
