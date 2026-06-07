@@ -23,7 +23,7 @@
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <!-- Peaceful Extensions -->
-    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.2.0" />
+    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.2.1-preview.1" />
     <!-- Auth -->
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <!-- Testing -->

@@ -9,6 +9,10 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Changed
+
+- **`Peaceful.Extensions.Logging` now resolves from public nuget.org instead of the `peacefulstudio` GitHub Packages feed, bumped `0.2.0` → `0.2.1-preview.1`.** Consumers no longer need GitHub Packages authentication to restore this transitive dependency — only the still-private `Daml.*` packages keep the `peaceful` feed. The `NuGet.config` source mapping routes `Peaceful.Extensions.*` to nuget.org (the broader `Peaceful.*` pattern stays on the GitHub feed for any internal Peaceful packages).
+
 ## [0.1.4] - 2026-06-04
 
 ### Added
