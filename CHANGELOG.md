@@ -9,6 +9,10 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Added
+
+- **`TransactionResult.ExerciseResult<TReturn>(choiceName)` and `AllExerciseResults<TReturn>(choiceName)` extension methods** (`Canton.Ledger.Grpc.Client`). They locate exercised events by ordinal choice name in `TransactionResult.ExercisedEvents` and deserialize each `ExerciseResult` through the existing `Daml.Runtime` `FromDamlValue<T>` path, giving codegen consumers a typed surface for non-CID choice results (e.g. `choice GetTrailingTwap : Decimal`). `ExerciseResult<TReturn>` mirrors the `Single<T>()` cardinality contract — it throws `InvalidOperationException` on zero or more than one match; `AllExerciseResults<TReturn>` returns every match in transaction order (empty list when none). Non-breaking addition.
+
 ### Changed
 
 - **`Peaceful.Extensions.Logging` now resolves from public nuget.org instead of the `peacefulstudio` GitHub Packages feed, bumped `0.2.0` → `0.2.1-preview.1`.** Consumers no longer need GitHub Packages authentication to restore this transitive dependency — only the still-private `Daml.*` packages keep the `peaceful` feed. The `NuGet.config` source mapping routes `Peaceful.Extensions.*` to nuget.org (the broader `Peaceful.*` pattern stays on the GitHub feed for any internal Peaceful packages).
