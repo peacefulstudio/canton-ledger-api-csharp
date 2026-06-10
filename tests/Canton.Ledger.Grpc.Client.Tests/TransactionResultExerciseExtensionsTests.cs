@@ -132,6 +132,16 @@ public class TransactionResultExerciseExtensionsTests
         result.AllExerciseResults<decimal>("GetTrailingTwap").Should().BeEmpty();
     }
 
+    [Fact]
+    public void AllExerciseResults_propagates_NotSupportedException_for_unsupported_TReturn()
+    {
+        var result = MakeResult(("GetTrailingTwap", new DamlNumeric(1m)));
+
+        var act = () => result.AllExerciseResults<Uri>("GetTrailingTwap");
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
     private static TransactionResult MakeResult(params (string ChoiceName, DamlValue Result)[] exercised)
     {
         var templateId = new Identifier("pkg", "Module", "Template");
