@@ -345,16 +345,23 @@ public sealed partial class AdminClient : IAdminClient
                 p.PackageId,
                 p.Name,
                 p.Version,
-                p.PackageSize,
-                p.KnownSince.ToDateTimeOffset()))
+                (long)p.PackageSize,
+                KnownSinceOrThrow(p).ToDateTimeOffset()))
             .ToList();
     }
 
+    private static Google.Protobuf.WellKnownTypes.Timestamp KnownSinceOrThrow(
+        Com.Daml.Ledger.Api.V2.Admin.PackageDetails details) =>
+        details.KnownSince ?? throw new InvalidOperationException(
+            $"Package '{details.PackageId}' is missing the required known_since timestamp.");
+
     /// <inheritdoc />
-    public async Task<byte[]> GetPackageAsync(
+    public async Task<PackageArchive> GetPackageAsync(
         string packageId,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+
         using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("packageId", packageId);
 
@@ -364,7 +371,10 @@ public sealed partial class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
-        return response.ArchivePayload.ToByteArray();
+        return new PackageArchive(
+            response.ArchivePayload.ToByteArray(),
+            response.Hash,
+            response.HashFunction.ToString());
     }
 
     /// <inheritdoc />
@@ -401,6 +411,10 @@ public sealed partial class AdminClient : IAdminClient
                     group.ParticipantId,
                     group.SynchronizerId))));
 
+            if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
+                throw new InvalidOperationException(
+                    $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
+
             request.PageToken = response.NextPageToken;
         } while (request.PageToken.Length > 0);
 
@@ -413,6 +427,8 @@ public sealed partial class AdminClient : IAdminClient
         string? submissionId = null,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfNullOrEmpty(darFile);
+
         using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
         activity?.SetTag("submissionId", submissionId);
 
@@ -444,6 +460,8 @@ public sealed partial class AdminClient : IAdminClient
         byte[] darFile,
         CancellationToken cancellationToken = default)
     {
+        ThrowIfNullOrEmpty(darFile);
+
         using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
 
         var request = new ValidateDarFileRequest
@@ -462,6 +480,13 @@ public sealed partial class AdminClient : IAdminClient
 
     [LoggerMessage(Level = LogLevel.Information, Message = "DAR file validated ({DarSize} bytes)")]
     private static partial void LogDarValidated(ILogger logger, int darSize);
+
+    private static void ThrowIfNullOrEmpty(byte[] darFile)
+    {
+        ArgumentNullException.ThrowIfNull(darFile);
+        if (darFile.Length == 0)
+            throw new ArgumentException("DAR file must not be empty.", nameof(darFile));
+    }
 
     internal static Right ToProtoRight(UserRight right) => right switch
     {

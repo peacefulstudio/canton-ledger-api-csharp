@@ -561,7 +561,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task GetPackage_returns_archive_payload_for_requested_package_id()
+    public async Task GetPackage_returns_PackageArchive_with_payload_hash_and_hash_function()
     {
         var payload = new byte[] { 0x01, 0x02, 0x03, 0x04 };
         var response = new GetPackageResponse
@@ -583,9 +583,72 @@ public class AdminClientTests
         var client = CreateClient();
         var result = await client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
 
-        result.Should().Equal(payload);
+        result.Payload.Should().Equal(payload);
+        result.Hash.Should().Be("pkg-id-1");
+        result.HashFunction.Should().Be("Sha256");
         capturedRequest.Should().NotBeNull();
         capturedRequest!.PackageId.Should().Be("pkg-id-1");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetPackage_throws_ArgumentException_when_packageId_null_or_whitespace(string? packageId)
+    {
+        var client = CreateClient();
+
+        var act = () => client.GetPackageAsync(packageId!, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task GetPackage_throws_when_package_not_found()
+    {
+        _packageService
+            .GetPackageAsync(
+                Arg.Any<GetPackageRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns<AsyncUnaryCall<GetPackageResponse>>(_ =>
+                throw new RpcException(new Status(StatusCode.NotFound, "Package not found")));
+
+        var client = CreateClient();
+
+        var act = () => client.GetPackageAsync("pkg-id-missing", TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<RpcException>())
+            .Which.StatusCode.Should().Be(StatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task ListKnownPackages_throws_when_KnownSince_missing()
+    {
+        var response = new ListKnownPackagesResponse();
+        response.PackageDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+        {
+            PackageId = "pkg-id-no-timestamp",
+            Name = "my-package",
+            Version = "1.2.3",
+            PackageSize = 1
+        });
+
+        _packageManagementService
+            .ListKnownPackagesAsync(
+                Arg.Any<ListKnownPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+
+        var act = () => client.ListKnownPackagesAsync(TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("pkg-id-no-timestamp");
     }
 
     [Fact]
@@ -697,6 +760,51 @@ public class AdminClientTests
         capturedPageTokens.Should().Equal("", "page-2");
     }
 
+    [Fact]
+    public async Task ListVettedPackages_throws_when_server_echoes_same_page_token()
+    {
+        var firstPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
+        var echoedPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
+
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Any<ListVettedPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(echoedPage));
+
+        var client = CreateClient();
+
+        var act = () => client.ListVettedPackagesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("page-2");
+    }
+
+    [Fact]
+    public async Task ListVettedPackages_sends_filter_on_every_paginated_request()
+    {
+        var firstPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
+        var secondPage = new ListVettedPackagesResponse { NextPageToken = "" };
+
+        var capturedRequests = new List<ListVettedPackagesRequest>();
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Do<ListVettedPackagesRequest>(r => capturedRequests.Add(r.Clone())),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(secondPage));
+
+        var client = CreateClient();
+        await client.ListVettedPackagesAsync(["splice"], TestContext.Current.CancellationToken);
+
+        capturedRequests.Should().HaveCount(2);
+        capturedRequests.Should().AllSatisfy(request =>
+            request.PackageMetadataFilter.PackageNamePrefixes.Should().Equal("splice"));
+    }
+
     [Theory]
     [InlineData(null, "")]
     [InlineData("submission-1", "submission-1")]
@@ -719,6 +827,46 @@ public class AdminClientTests
         capturedRequest.Should().NotBeNull();
         capturedRequest!.DarFile.ToByteArray().Should().Equal(darFile);
         capturedRequest.SubmissionId.Should().Be(expectedSubmissionId);
+    }
+
+    [Fact]
+    public async Task UploadDar_throws_ArgumentNullException_when_darFile_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.UploadDarAsync(null!, cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task UploadDar_throws_ArgumentException_when_darFile_empty()
+    {
+        var client = CreateClient();
+
+        var act = () => client.UploadDarAsync([], cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task ValidateDar_throws_ArgumentNullException_when_darFile_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.ValidateDarAsync(null!, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task ValidateDar_throws_ArgumentException_when_darFile_empty()
+    {
+        var client = CreateClient();
+
+        var act = () => client.ValidateDarAsync([], TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentException>();
     }
 
     [Fact]

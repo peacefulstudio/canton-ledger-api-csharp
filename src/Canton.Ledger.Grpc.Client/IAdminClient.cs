@@ -83,21 +83,23 @@ public interface IAdminClient : IDisposable
     /// <summary>
     /// Lists all Daml-LF packages known to the participant.
     /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Downloads the archive payload of a single package.
+    /// Downloads the archive of a single package.
     /// </summary>
     /// <param name="packageId">The ID of the requested package.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The <c>daml_lf</c> archive payload bytes.</returns>
-    Task<byte[]> GetPackageAsync(
+    /// <returns>The <c>daml_lf</c> archive payload together with its hash and hash function.</returns>
+    Task<PackageArchive> GetPackageAsync(
         string packageId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Lists the packages vetted on the participant's connected synchronizers.
+    /// Transparently follows server pagination and returns the complete result set.
     /// </summary>
     /// <param name="packageNamePrefixes">
     /// Optional package name prefixes to filter by; a vetted package matches when its name
@@ -109,7 +111,9 @@ public interface IAdminClient : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Uploads a DAR file to the participant.
+    /// Uploads a DAR file to the participant. By default the ledger also vets all packages
+    /// in the DAR (the underlying request's <c>vetting_change</c> defaults to
+    /// <c>VETTING_CHANGE_VET_ALL_PACKAGES</c>).
     /// </summary>
     /// <param name="darFile">The DAR file contents.</param>
     /// <param name="submissionId">Optional unique submission identifier; the ledger generates one when null.</param>
@@ -120,7 +124,8 @@ public interface IAdminClient : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Validates a DAR file without uploading it; throws on validation failure.
+    /// Validates a DAR file without persisting or vetting anything;
+    /// throws <see cref="global::Grpc.Core.RpcException"/> on validation failure.
     /// </summary>
     /// <param name="darFile">The DAR file contents.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -151,8 +156,17 @@ public record PackageDetails(
     string PackageId,
     string Name,
     string Version,
-    ulong PackageSize,
+    long PackageSize,
     DateTimeOffset KnownSince);
+
+/// <summary>
+/// A package archive downloaded from the participant: the <c>daml_lf</c> payload
+/// together with its hash and the hash function used to compute it.
+/// </summary>
+public record PackageArchive(
+    byte[] Payload,
+    string Hash,
+    string HashFunction);
 
 /// <summary>
 /// A package vetted on a participant and synchronizer.
