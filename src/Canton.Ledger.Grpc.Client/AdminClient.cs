@@ -2,7 +2,9 @@
 
 using System.Diagnostics;
 using Canton.Ledger.Auth;
+using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
+using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
@@ -28,6 +30,8 @@ public sealed partial class AdminClient : IAdminClient
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
     private readonly UserManagementService.UserManagementServiceClient _userService;
+    private readonly PackageManagementService.PackageManagementServiceClient _packageManagementService;
+    private readonly PackageService.PackageServiceClient _packageService;
     private readonly LedgerClientOptions _options;
     private readonly ITokenProvider? _tokenProvider;
 
@@ -58,6 +62,8 @@ public sealed partial class AdminClient : IAdminClient
 
         _partyService = new PartyManagementService.PartyManagementServiceClient(_channel);
         _userService = new UserManagementService.UserManagementServiceClient(_channel);
+        _packageManagementService = new PackageManagementService.PackageManagementServiceClient(_channel);
+        _packageService = new PackageService.PackageServiceClient(_channel);
 
         LogInitialized(Logger, _options.GrpcAddress);
 
@@ -80,12 +86,16 @@ public sealed partial class AdminClient : IAdminClient
         GrpcChannel channel,
         PartyManagementService.PartyManagementServiceClient partyService,
         UserManagementService.UserManagementServiceClient userService,
-        ITokenProvider? tokenProvider = null)
+        ITokenProvider? tokenProvider = null,
+        PackageManagementService.PackageManagementServiceClient? packageManagementService = null,
+        PackageService.PackageServiceClient? packageService = null)
     {
         _options = options;
         _channel = channel;
         _partyService = partyService;
         _userService = userService;
+        _packageManagementService = packageManagementService ?? new PackageManagementService.PackageManagementServiceClient(channel);
+        _packageService = packageService ?? new PackageService.PackageServiceClient(channel);
         _tokenProvider = tokenProvider;
     }
 
@@ -317,6 +327,141 @@ public sealed partial class AdminClient : IAdminClient
 
         return response.Users.Select(FromProtoUser).ToList();
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+
+        var response = await _packageManagementService.ListKnownPackagesAsync(
+            new ListKnownPackagesRequest(),
+            headers: await GetHeadersAsync(cancellationToken),
+            deadline: GetDeadline(),
+            cancellationToken: cancellationToken);
+
+        return response.PackageDetails
+            .Select(p => new PackageDetails(
+                p.PackageId,
+                p.Name,
+                p.Version,
+                p.PackageSize,
+                p.KnownSince.ToDateTimeOffset()))
+            .ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<byte[]> GetPackageAsync(
+        string packageId,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        activity?.SetTag("packageId", packageId);
+
+        var response = await _packageService.GetPackageAsync(
+            new GetPackageRequest { PackageId = packageId },
+            headers: await GetHeadersAsync(cancellationToken),
+            deadline: GetDeadline(),
+            cancellationToken: cancellationToken);
+
+        return response.ArchivePayload.ToByteArray();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<VettedPackage>> ListVettedPackagesAsync(
+        IEnumerable<string>? packageNamePrefixes = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+
+        var request = new ListVettedPackagesRequest();
+
+        var prefixes = packageNamePrefixes?.ToList();
+        if (prefixes is { Count: > 0 })
+        {
+            request.PackageMetadataFilter = new PackageMetadataFilter();
+            request.PackageMetadataFilter.PackageNamePrefixes.AddRange(prefixes);
+        }
+
+        var vettedPackages = new List<VettedPackage>();
+
+        do
+        {
+            var response = await _packageService.ListVettedPackagesAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
+
+            vettedPackages.AddRange(response.VettedPackages.SelectMany(group =>
+                group.Packages.Select(p => new VettedPackage(
+                    p.PackageId,
+                    p.PackageName,
+                    p.PackageVersion,
+                    group.ParticipantId,
+                    group.SynchronizerId))));
+
+            request.PageToken = response.NextPageToken;
+        } while (request.PageToken.Length > 0);
+
+        return vettedPackages;
+    }
+
+    /// <inheritdoc />
+    public async Task UploadDarAsync(
+        byte[] darFile,
+        string? submissionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        activity?.SetTag("submissionId", submissionId);
+
+        LogUploadingDar(Logger, darFile.Length);
+
+        var request = new UploadDarFileRequest
+        {
+            DarFile = ByteString.CopyFrom(darFile),
+            SubmissionId = submissionId ?? string.Empty
+        };
+
+        await _packageManagementService.UploadDarFileAsync(
+            request,
+            headers: await GetHeadersAsync(cancellationToken),
+            deadline: GetDeadline(),
+            cancellationToken: cancellationToken);
+
+        LogDarUploaded(Logger, darFile.Length);
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Uploading DAR file ({DarSize} bytes)")]
+    private static partial void LogUploadingDar(ILogger logger, int darSize);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "DAR file uploaded ({DarSize} bytes)")]
+    private static partial void LogDarUploaded(ILogger logger, int darSize);
+
+    /// <inheritdoc />
+    public async Task ValidateDarAsync(
+        byte[] darFile,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+
+        var request = new ValidateDarFileRequest
+        {
+            DarFile = ByteString.CopyFrom(darFile)
+        };
+
+        await _packageManagementService.ValidateDarFileAsync(
+            request,
+            headers: await GetHeadersAsync(cancellationToken),
+            deadline: GetDeadline(),
+            cancellationToken: cancellationToken);
+
+        LogDarValidated(Logger, darFile.Length);
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "DAR file validated ({DarSize} bytes)")]
+    private static partial void LogDarValidated(ILogger logger, int darSize);
 
     internal static Right ToProtoRight(UserRight right) => right switch
     {

@@ -2,8 +2,11 @@
 
 using System.Diagnostics;
 using Canton.Ledger.Auth;
+using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
 using FluentAssertions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
@@ -17,6 +20,8 @@ public class AdminClientTests
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
     private readonly UserManagementService.UserManagementServiceClient _userService;
+    private readonly PackageManagementService.PackageManagementServiceClient _packageManagementService;
+    private readonly PackageService.PackageServiceClient _packageService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public AdminClientTests()
@@ -33,9 +38,20 @@ public class AdminClientTests
         var callInvoker = Substitute.For<CallInvoker>();
         _partyService = Substitute.ForPartsOf<PartyManagementService.PartyManagementServiceClient>(callInvoker);
         _userService = Substitute.ForPartsOf<UserManagementService.UserManagementServiceClient>(callInvoker);
+        _packageManagementService = Substitute.ForPartsOf<PackageManagementService.PackageManagementServiceClient>(callInvoker);
+        _packageService = Substitute.ForPartsOf<PackageService.PackageServiceClient>(callInvoker);
     }
 
-    private AdminClient CreateClient() => new(_options, _channel, _partyService, _userService, _tokenProvider);
+    private AdminClient CreateClient() =>
+        new(_options, _channel, _partyService, _userService, _tokenProvider, _packageManagementService, _packageService);
+
+    private static AsyncUnaryCall<TResponse> UnaryResponse<TResponse>(TResponse response) =>
+        new(
+            Task.FromResult(response),
+            Task.FromResult(new Metadata()),
+            () => Status.DefaultSuccess,
+            () => new Metadata(),
+            () => { });
 
     [Fact]
     public async Task GetParticipantId_returns_id_from_response()
@@ -509,5 +525,220 @@ public class AdminClientTests
     public void AdminClient_constructor_does_not_throw_when_real_provider_registered()
     {
         using var _ = new AdminClient(_options, _tokenProvider);
+    }
+
+    [Fact]
+    public async Task ListKnownPackages_returns_PackageDetails_with_name_version_id_and_size()
+    {
+        var knownSince = new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
+        var response = new ListKnownPackagesResponse();
+        response.PackageDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+        {
+            PackageId = "pkg-id-1",
+            Name = "my-package",
+            Version = "1.2.3",
+            PackageSize = 12345,
+            KnownSince = Timestamp.FromDateTimeOffset(knownSince)
+        });
+
+        _packageManagementService
+            .ListKnownPackagesAsync(
+                Arg.Any<ListKnownPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+        var result = await client.ListKnownPackagesAsync(TestContext.Current.CancellationToken);
+
+        result.Should().ContainSingle();
+        result[0].PackageId.Should().Be("pkg-id-1");
+        result[0].Name.Should().Be("my-package");
+        result[0].Version.Should().Be("1.2.3");
+        result[0].PackageSize.Should().Be(12345);
+        result[0].KnownSince.Should().Be(knownSince);
+    }
+
+    [Fact]
+    public async Task GetPackage_returns_archive_payload_for_requested_package_id()
+    {
+        var payload = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+        var response = new GetPackageResponse
+        {
+            ArchivePayload = ByteString.CopyFrom(payload),
+            Hash = "pkg-id-1",
+            HashFunction = HashFunction.Sha256
+        };
+
+        GetPackageRequest? capturedRequest = null;
+        _packageService
+            .GetPackageAsync(
+                Arg.Do<GetPackageRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+        var result = await client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
+
+        result.Should().Equal(payload);
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.PackageId.Should().Be("pkg-id-1");
+    }
+
+    [Fact]
+    public async Task ListVettedPackages_flattens_groups_into_VettedPackage_list()
+    {
+        var group = new Com.Daml.Ledger.Api.V2.VettedPackages
+        {
+            ParticipantId = "participant::p1",
+            SynchronizerId = "sync::s1"
+        };
+        group.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage
+        {
+            PackageId = "pkg-id-1",
+            PackageName = "my-package",
+            PackageVersion = "1.2.3"
+        });
+        var response = new ListVettedPackagesResponse { NextPageToken = "" };
+        response.VettedPackages.Add(group);
+
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Any<ListVettedPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+        var result = await client.ListVettedPackagesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        result.Should().ContainSingle();
+        result[0].Should().Be(new VettedPackage("pkg-id-1", "my-package", "1.2.3", "participant::p1", "sync::s1"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(new object[] { new string[0] })]
+    public async Task ListVettedPackages_sends_no_filter_when_prefixes_null_or_empty(string[]? packageNamePrefixes)
+    {
+        ListVettedPackagesRequest? capturedRequest = null;
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Do<ListVettedPackagesRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new ListVettedPackagesResponse { NextPageToken = "" }));
+
+        var client = CreateClient();
+        await client.ListVettedPackagesAsync(packageNamePrefixes, TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.PackageMetadataFilter.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ListVettedPackages_sends_package_name_prefixes_in_filter()
+    {
+        ListVettedPackagesRequest? capturedRequest = null;
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Do<ListVettedPackagesRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new ListVettedPackagesResponse { NextPageToken = "" }));
+
+        var client = CreateClient();
+        await client.ListVettedPackagesAsync(["splice", "canton"], TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.PackageMetadataFilter.PackageNamePrefixes.Should().Equal("splice", "canton");
+    }
+
+    [Fact]
+    public async Task ListVettedPackages_follows_pagination_until_next_page_token_empty()
+    {
+        var firstGroup = new Com.Daml.Ledger.Api.V2.VettedPackages
+        {
+            ParticipantId = "participant::p1",
+            SynchronizerId = "sync::s1"
+        };
+        firstGroup.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-1" });
+        var firstPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
+        firstPage.VettedPackages.Add(firstGroup);
+
+        var secondGroup = new Com.Daml.Ledger.Api.V2.VettedPackages
+        {
+            ParticipantId = "participant::p1",
+            SynchronizerId = "sync::s2"
+        };
+        secondGroup.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-2" });
+        var secondPage = new ListVettedPackagesResponse { NextPageToken = "" };
+        secondPage.VettedPackages.Add(secondGroup);
+
+        var capturedPageTokens = new List<string>();
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Do<ListVettedPackagesRequest>(r => capturedPageTokens.Add(r.PageToken)),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(secondPage));
+
+        var client = CreateClient();
+        var result = await client.ListVettedPackagesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        result.Select(p => p.PackageId).Should().Equal("pkg-id-1", "pkg-id-2");
+        capturedPageTokens.Should().Equal("", "page-2");
+    }
+
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("submission-1", "submission-1")]
+    public async Task UploadDar_sends_dar_file_and_submission_id(string? submissionId, string expectedSubmissionId)
+    {
+        var darFile = new byte[] { 0x0A, 0x0B, 0x0C };
+
+        UploadDarFileRequest? capturedRequest = null;
+        _packageManagementService
+            .UploadDarFileAsync(
+                Arg.Do<UploadDarFileRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new UploadDarFileResponse()));
+
+        var client = CreateClient();
+        await client.UploadDarAsync(darFile, submissionId, TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.DarFile.ToByteArray().Should().Equal(darFile);
+        capturedRequest.SubmissionId.Should().Be(expectedSubmissionId);
+    }
+
+    [Fact]
+    public async Task ValidateDar_sends_dar_file_in_request()
+    {
+        var darFile = new byte[] { 0x0A, 0x0B, 0x0C };
+
+        ValidateDarFileRequest? capturedRequest = null;
+        _packageManagementService
+            .ValidateDarFileAsync(
+                Arg.Do<ValidateDarFileRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new ValidateDarFileResponse()));
+
+        var client = CreateClient();
+        await client.ValidateDarAsync(darFile, TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.DarFile.ToByteArray().Should().Equal(darFile);
     }
 }
