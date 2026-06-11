@@ -152,6 +152,28 @@ public class TransactionResultExerciseExtensionsTests
     }
 
     [Fact]
+    public void ExerciseResult_throws_InvalidOperationException_for_default_ChoiceName()
+    {
+        var result = MakeResult(("GetTrailingTwap", new DamlNumeric(1m)));
+
+        var act = () => result.ExerciseResult<decimal>(default(ChoiceName));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*default (uninitialized) ChoiceName*");
+    }
+
+    [Fact]
+    public void AllExerciseResults_throws_InvalidOperationException_for_default_ChoiceName()
+    {
+        var result = MakeResult(("GetTrailingTwap", new DamlNumeric(1m)));
+
+        var act = () => result.AllExerciseResults<decimal>(default(ChoiceName));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*default (uninitialized) ChoiceName*");
+    }
+
+    [Fact]
     public void AllExerciseResults_propagates_NotSupportedException_for_unsupported_TReturn()
     {
         var result = MakeResult(("GetTrailingTwap", new DamlNumeric(1m)));
