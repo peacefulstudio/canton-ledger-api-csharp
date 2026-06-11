@@ -100,7 +100,7 @@ public static class DamlValueConverter
             DamlInt64 i => new Value { Int64 = i.Value },
             DamlText t => new Value { Text = t.Value },
             DamlParty p => new Value { Party = p.Value },
-            DamlNumeric n => new Value { Numeric = n.Value.ToString(CultureInfo.InvariantCulture) },
+            DamlNumeric n => new Value { Numeric = FormatCanonicalNumeric(n.Value) },
             DamlDate d => new Value { Date = d.DaysSinceEpoch },
             DamlTimestamp ts => new Value { Timestamp = ts.MicrosecondsSinceEpoch },
             DamlContractId c => new Value { ContractId = c.Value },
@@ -211,6 +211,9 @@ public static class DamlValueConverter
             _ => throw new NotSupportedException($"Proto Value case {value.SumCase} is not supported")
         };
     }
+
+    private static string FormatCanonicalNumeric(decimal value) =>
+        value.ToString("0.0###########################", CultureInfo.InvariantCulture);
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>
         message ?? throw new InvalidOperationException(
