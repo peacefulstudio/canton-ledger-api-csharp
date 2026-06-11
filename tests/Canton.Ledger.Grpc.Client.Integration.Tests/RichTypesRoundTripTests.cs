@@ -81,7 +81,9 @@ public class RichTypesRoundTripTests
             Tags: ExpectedTags,
             Attributes: new Dictionary<string, string> { ["k1"] = "v1", ["k2"] = "v2" },
             Marker: markerCid,
-            Profile: new Profile(Nickname: "cdg", Level: 7L));
+            Profile: new Profile(Nickname: "cdg", Level: 7L),
+            Outcome: new Outcome.Win(new Outcome_Win(Prize: 250.50m, Tier: "gold")),
+            Fee: 0.05m);
 
         var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
@@ -106,6 +108,10 @@ public class RichTypesRoundTripTests
         Assert.Equal(markerCid.Value, readBack.Marker.Value);
         Assert.Equal("cdg", readBack.Profile.Nickname);
         Assert.Equal(7L, readBack.Profile.Level);
+        var win = Assert.IsType<Outcome.Win>(readBack.Outcome);
+        Assert.Equal(250.50m, win.Value.Prize);
+        Assert.Equal("gold", win.Value.Tier);
+        Assert.Equal(0.05m, readBack.Fee);
     }
 
     [Fact]
@@ -148,7 +154,9 @@ public class RichTypesRoundTripTests
             Tags: Array.Empty<string>(),
             Attributes: new Dictionary<string, string>(),
             Marker: markerCid,
-            Profile: new Profile(Nickname: "cdg", Level: 1L));
+            Profile: new Profile(Nickname: "cdg", Level: 1L),
+            Outcome: new Outcome.Pending(),
+            Fee: 1.00m);
 
         var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
@@ -165,14 +173,17 @@ public class RichTypesRoundTripTests
 
         var seen = await ReadBackAsync(client, owner, relabelledCid.Value);
         Assert.NotNull(seen);
-        Assert.Equal("renamed", RichRecord.FromRecord(seen!.Payload).Label);
+        var readBack = RichRecord.FromRecord(seen!.Payload);
+        Assert.Equal("renamed", readBack.Label);
+        Assert.IsType<Outcome.Pending>(readBack.Outcome);
+        Assert.Equal(1.00m, readBack.Fee);
     }
 
     private static async Task<ContractStreamEvent<RichRecord>.Created?> ReadBackAsync(
         LedgerClient client, Party owner, string contractIdValue)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner.Id, cts.Token))
+        await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner, cts.Token))
         {
             if (evt.ContractId.Value == contractIdValue)
             {

@@ -9,7 +9,15 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+### Changed — BREAKING
+
+- **Bumped `Daml.Ledger.Abstractions` and `Daml.Runtime` to `0.1.8-preview.1`** (first public nuget.org release of the runtime line) and adopted its typed submission surface (#103). `LedgerClient` follows the new `ILedgerClient` contract: the `string actAs` convenience overloads of `TryCreateAsync`, `TryExerciseAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, and `SubscribeActiveAsync` are gone — pass a `Party` (implicitly convertible to `SubmitterInfo`) or a full `SubmitterInfo` instead. `CommandsSubmission.CommandId`/`WorkflowId` are now the `CommandId`/`WorkflowId` value types and `ExerciseCommand` carries `ContractId`/`ChoiceName` value types, so a bare string can no longer be transposed into the wrong slot at a call site.
+- **`DamlValueConverter.ToProtoValue` emits `Numeric` in canonical unpadded decimal form** (`Daml.Runtime.Grpc`), the commitment-grade wire shape per codegen ADR-0011: trailing zeros stripped, at least one fractional digit, never scientific notation — `1.50m` → `"1.5"`, `0m` → `"0.0"`, `42m` → `"42.0"`. The gRPC wire encoder now agrees with the runtime's `DamlJsonSerializer`, so the wire shape no longer depends on the `decimal`'s construction scale (previously `0m` → `"0"`, `1.50m` → `"1.50"`).
+- **Bumped `Peaceful.Extensions.Logging` `0.2.1-preview.1` → `0.2.1-preview.2`** (nuget.org).
+
 ### Added
+
+- **Live round-trip coverage for variants and non-default-scale numerics** (`Canton.Ledger.Grpc.Client.Integration.Tests`). The `richtypes` fixture DAR now carries an `Outcome` variant — including the `Win` record-payload case (`prize : Numeric 2; tier : Text`) — and a `fee : Numeric 2` field; `RichTypesRoundTripTests` creates and reads both back through Canton localnet, gating the ADR-0011 numeric wire form and the ADR-0012 variant round-trip end to end. Generated fixtures regenerated with `dpm-codegen-cs:0.1.8-preview.1`.
 
 - **`TransactionResult.ExerciseResult<TReturn>(choiceName)` and `AllExerciseResults<TReturn>(choiceName)` extension methods** (`Canton.Ledger.Grpc.Client`). They locate exercised events by ordinal choice name in `TransactionResult.ExercisedEvents` and deserialize each `ExerciseResult` through the existing `Daml.Runtime` `FromDamlValue<T>` path, giving codegen consumers a typed surface for non-CID choice results (e.g. `choice GetTrailingTwap : Decimal`). `ExerciseResult<TReturn>` mirrors the `Single<T>()` cardinality contract — it throws `InvalidOperationException` on zero or more than one match; `AllExerciseResults<TReturn>` returns every match in transaction order (empty list when none). Non-breaking addition.
 

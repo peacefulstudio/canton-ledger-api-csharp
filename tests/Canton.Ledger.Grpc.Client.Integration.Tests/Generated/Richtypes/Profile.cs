@@ -12,7 +12,7 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml record Profile
 /// </summary>
-public sealed record Profile(string Nickname, long Level) : IDamlValue
+public sealed record Profile(string Nickname, long Level) : IDamlRecord
 {
     /// <summary>Converts this value to a DamlRecord.</summary>
     public DamlRecord ToRecord() => DamlRecord.Create(

@@ -22,13 +22,13 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml template RichTypes:RichRecord
 /// </summary>
-public sealed partial record RichRecord(Party Owner, long Count, decimal Amount, string Label, bool Active, DateOnly AsOf, DateTimeOffset ObservedAt, string? Note, IReadOnlyList<string> Tags, IReadOnlyDictionary<string, string> Attributes, ContractId<Marker> Marker, Profile Profile) : ITemplate
+public sealed partial record RichRecord(Party Owner, long Count, decimal Amount, string Label, bool Active, DateOnly AsOf, DateTimeOffset ObservedAt, string? Note, IReadOnlyList<string> Tags, IReadOnlyDictionary<string, string> Attributes, ContractId<Marker> Marker, Profile Profile, Outcome Outcome, decimal Fee) : ITemplate
 {
     /// <summary>Gets the template identifier.</summary>
-    public static Identifier TemplateId { get; } = new("9b632e831723777332a1ba27c9f4715ec8174b61da29b985d7db250dbfdb9bb1", "RichTypes", "RichRecord");
+    public static Identifier TemplateId { get; } = new("9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f", "RichTypes", "RichRecord");
 
     /// <summary>Gets the package ID.</summary>
-    public static string PackageId => "9b632e831723777332a1ba27c9f4715ec8174b61da29b985d7db250dbfdb9bb1";
+    public static string PackageId => "9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f";
 
     /// <summary>Gets the package name.</summary>
     public static string PackageName => "richtypes";
@@ -49,7 +49,9 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
         DamlField.Create("tags", new DamlList(Tags.Select(x => (DamlValue)new DamlText(x)).ToList())),
         DamlField.Create("attributes", new DamlTextMap(Attributes.ToDictionary(kv => kv.Key, kv => (DamlValue)new DamlText(kv.Value)))),
         DamlField.Create("marker", Marker.ToDamlValue()),
-        DamlField.Create("profile", Profile.ToRecord())
+        DamlField.Create("profile", Profile.ToRecord()),
+        DamlField.Create("outcome", Outcome.ToVariant()),
+        DamlField.Create("fee", new DamlNumeric(Fee))
     );
 
     /// <summary>Creates an instance from a DamlRecord.</summary>
@@ -61,11 +63,13 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
         Active: record.GetRequiredField("active").As<DamlBool>().Value,
         AsOf: record.GetRequiredField("asOf").As<DamlDate>().Value,
         ObservedAt: record.GetRequiredField("observedAt").As<DamlTimestamp>().Value,
-        Note: record.GetRequiredField("note").As<DamlOptional>().HasValue ? record.GetRequiredField("note").As<DamlOptional>().Value!.As<DamlText>().Value : null,
+        Note: record.GetRequiredField("note").AsOptional().HasValue ? record.GetRequiredField("note").AsOptional().Value!.As<DamlText>().Value : null,
         Tags: (IReadOnlyList<string>)record.GetRequiredField("tags").As<DamlList>().Values.Select(x => x.As<DamlText>().Value).ToList(),
         Attributes: record.GetRequiredField("attributes").As<DamlTextMap>().Values.ToDictionary(kv => kv.Key, kv => kv.Value.As<DamlText>().Value),
         Marker: new ContractId<Marker>(record.GetRequiredField("marker").As<DamlContractId>().Value),
-        Profile: Profile.FromRecord(record.GetRequiredField("profile").As<DamlRecord>())
+        Profile: Profile.FromRecord(record.GetRequiredField("profile").As<DamlRecord>()),
+        Outcome: Outcome.FromVariant(record.GetRequiredField("outcome").As<DamlVariant>()),
+        Fee: record.GetRequiredField("fee").As<DamlNumeric>().Value
     );
 
     /// <summary>
@@ -74,7 +78,7 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
     /// </summary>
     public static Choice<RichRecord, DamlUnit, DamlUnit> ChoiceArchive { get; } = new()
     {
-        Name = "Archive",
+        Name = new ChoiceName("Archive"),
         Consuming = true,
         ArgumentEncoder = _ => DamlUnit.Instance,
         ResultDecoder = _ => DamlUnit.Instance
@@ -85,7 +89,7 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
     /// </summary>
     public static Choice<RichRecord, Relabel, ContractId<RichRecord>> ChoiceRelabel { get; } = new()
     {
-        Name = "Relabel",
+        Name = new ChoiceName("Relabel"),
         Consuming = false,
         ArgumentEncoder = arg => arg.ToRecord(),
         ResultDecoder = val => new ContractId<RichRecord>(val.As<DamlContractId>().Value)
@@ -180,8 +184,8 @@ public static class RichRecordExtensions
     /// Exercises the Relabel choice and projects the resulting transaction's created contracts to a typed <see cref="RelabelResult"/>.
     /// The submitter is passed explicitly via <paramref name="submitter"/> — the static
     /// analyzer could not resolve the Daml <c>controller</c> clause to payload-field
-    /// references. <see cref="SubmitterInfo"/> implicitly converts from <c>string</c> /
-    /// <c>Party</c>, so the single-party call site stays a one-liner.
+    /// references. <see cref="SubmitterInfo"/> implicitly converts from a
+    /// single <c>Party</c>, so the single-party call site stays a one-liner.
     /// </summary>
     /// <param name="contractId">The contract on which to exercise the choice.</param>
     /// <param name="client">The ledger client.</param>
@@ -203,16 +207,16 @@ public static class RichRecordExtensions
 
         var command = new ExerciseCommand(
             RichRecord.TemplateId,
-            contractId.Value,
-            "Relabel",
+            contractId,
+            new ChoiceName("Relabel"),
             argument.ToRecord());
 
         var submission = CommandsSubmission.Single(command)
             .WithSubmitter(submitter)
-            .WithCommandId(Guid.NewGuid().ToString());
-        if (workflowId is not null)
+            .WithCommandId(new CommandId(Guid.NewGuid().ToString()));
+        if (!string.IsNullOrEmpty(workflowId))
         {
-            submission = submission.WithWorkflowId(workflowId);
+            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
         }
 
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken).ConfigureAwait(false);
@@ -245,7 +249,7 @@ public static class RichRecordSubmissionExtensions
     /// analyzer could not resolve the Daml <c>signatory</c> clause to payload-field
     /// references — typically because the expression involves the template key, a
     /// constant, or a function call. <see cref="SubmitterInfo"/> implicitly converts
-    /// from <c>string</c> / <c>Party</c>, so single-party callers still pass one literal.
+    /// from a single <c>Party</c>, so single-party callers still pass one literal.
     /// </summary>
     /// <param name="client">The ledger client.</param>
     /// <param name="payload">The contract payload.</param>
