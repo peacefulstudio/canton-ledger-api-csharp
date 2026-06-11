@@ -346,14 +346,10 @@ public sealed partial class AdminClient : IAdminClient
                 p.Name,
                 p.Version,
                 (long)p.PackageSize,
-                KnownSinceOrThrow(p).ToDateTimeOffset()))
+                (p.KnownSince ?? throw new InvalidOperationException(
+                    $"Package '{p.PackageId}' is missing the required known_since timestamp.")).ToDateTimeOffset()))
             .ToList();
     }
-
-    private static Google.Protobuf.WellKnownTypes.Timestamp KnownSinceOrThrow(
-        Com.Daml.Ledger.Api.V2.Admin.PackageDetails details) =>
-        details.KnownSince ?? throw new InvalidOperationException(
-            $"Package '{details.PackageId}' is missing the required known_since timestamp.");
 
     /// <inheritdoc />
     public async Task<PackageArchive> GetPackageAsync(
@@ -388,10 +384,7 @@ public sealed partial class AdminClient : IAdminClient
 
         var prefixes = packageNamePrefixes?.ToList();
         if (prefixes is { Count: > 0 })
-        {
-            request.PackageMetadataFilter = new PackageMetadataFilter();
-            request.PackageMetadataFilter.PackageNamePrefixes.AddRange(prefixes);
-        }
+            request.PackageMetadataFilter = new PackageMetadataFilter { PackageNamePrefixes = { prefixes } };
 
         var vettedPackages = new List<VettedPackage>();
 

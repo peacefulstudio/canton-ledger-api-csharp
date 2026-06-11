@@ -531,15 +531,20 @@ public class AdminClientTests
     public async Task ListKnownPackages_returns_PackageDetails_with_name_version_id_and_size()
     {
         var knownSince = new DateTimeOffset(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
-        var response = new ListKnownPackagesResponse();
-        response.PackageDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+        var response = new ListKnownPackagesResponse
         {
-            PackageId = "pkg-id-1",
-            Name = "my-package",
-            Version = "1.2.3",
-            PackageSize = 12345,
-            KnownSince = Timestamp.FromDateTimeOffset(knownSince)
-        });
+            PackageDetails =
+            {
+                new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+                {
+                    PackageId = "pkg-id-1",
+                    Name = "my-package",
+                    Version = "1.2.3",
+                    PackageSize = 12345,
+                    KnownSince = Timestamp.FromDateTimeOffset(knownSince)
+                }
+            }
+        };
 
         _packageManagementService
             .ListKnownPackagesAsync(
@@ -626,14 +631,19 @@ public class AdminClientTests
     [Fact]
     public async Task ListKnownPackages_throws_when_KnownSince_missing()
     {
-        var response = new ListKnownPackagesResponse();
-        response.PackageDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+        var response = new ListKnownPackagesResponse
         {
-            PackageId = "pkg-id-no-timestamp",
-            Name = "my-package",
-            Version = "1.2.3",
-            PackageSize = 1
-        });
+            PackageDetails =
+            {
+                new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+                {
+                    PackageId = "pkg-id-no-timestamp",
+                    Name = "my-package",
+                    Version = "1.2.3",
+                    PackageSize = 1
+                }
+            }
+        };
 
         _packageManagementService
             .ListKnownPackagesAsync(
@@ -654,19 +664,27 @@ public class AdminClientTests
     [Fact]
     public async Task ListVettedPackages_flattens_groups_into_VettedPackage_list()
     {
-        var group = new Com.Daml.Ledger.Api.V2.VettedPackages
+        var response = new ListVettedPackagesResponse
         {
-            ParticipantId = "participant::p1",
-            SynchronizerId = "sync::s1"
+            NextPageToken = "",
+            VettedPackages =
+            {
+                new Com.Daml.Ledger.Api.V2.VettedPackages
+                {
+                    ParticipantId = "participant::p1",
+                    SynchronizerId = "sync::s1",
+                    Packages =
+                    {
+                        new Com.Daml.Ledger.Api.V2.VettedPackage
+                        {
+                            PackageId = "pkg-id-1",
+                            PackageName = "my-package",
+                            PackageVersion = "1.2.3"
+                        }
+                    }
+                }
+            }
         };
-        group.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage
-        {
-            PackageId = "pkg-id-1",
-            PackageName = "my-package",
-            PackageVersion = "1.2.3"
-        });
-        var response = new ListVettedPackagesResponse { NextPageToken = "" };
-        response.VettedPackages.Add(group);
 
         _packageService
             .ListVettedPackagesAsync(
@@ -726,23 +744,33 @@ public class AdminClientTests
     [Fact]
     public async Task ListVettedPackages_follows_pagination_until_next_page_token_empty()
     {
-        var firstGroup = new Com.Daml.Ledger.Api.V2.VettedPackages
+        var firstPage = new ListVettedPackagesResponse
         {
-            ParticipantId = "participant::p1",
-            SynchronizerId = "sync::s1"
+            NextPageToken = "page-2",
+            VettedPackages =
+            {
+                new Com.Daml.Ledger.Api.V2.VettedPackages
+                {
+                    ParticipantId = "participant::p1",
+                    SynchronizerId = "sync::s1",
+                    Packages = { new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-1" } }
+                }
+            }
         };
-        firstGroup.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-1" });
-        var firstPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
-        firstPage.VettedPackages.Add(firstGroup);
 
-        var secondGroup = new Com.Daml.Ledger.Api.V2.VettedPackages
+        var secondPage = new ListVettedPackagesResponse
         {
-            ParticipantId = "participant::p1",
-            SynchronizerId = "sync::s2"
+            NextPageToken = "",
+            VettedPackages =
+            {
+                new Com.Daml.Ledger.Api.V2.VettedPackages
+                {
+                    ParticipantId = "participant::p1",
+                    SynchronizerId = "sync::s2",
+                    Packages = { new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-2" } }
+                }
+            }
         };
-        secondGroup.Packages.Add(new Com.Daml.Ledger.Api.V2.VettedPackage { PackageId = "pkg-id-2" });
-        var secondPage = new ListVettedPackagesResponse { NextPageToken = "" };
-        secondPage.VettedPackages.Add(secondGroup);
 
         var capturedPageTokens = new List<string>();
         _packageService
