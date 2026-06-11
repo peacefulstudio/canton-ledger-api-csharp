@@ -172,9 +172,11 @@ public sealed partial class LedgerClient : ILedgerClient
                 LogChoiceExercised(Logger, command.Choice, command.ContractId);
                 return new ExerciseOutcome<TResult>.One(success.Result.ExerciseResult<TResult>(command.Choice));
             case ExerciseOutcome<TransactionResult>.DamlError damlError:
+                LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId);
                 return new ExerciseOutcome<TResult>.DamlError(
                     damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata);
             case ExerciseOutcome<TransactionResult>.InfraError infraError:
+                LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId);
                 return new ExerciseOutcome<TResult>.InfraError(infraError.StatusCode, infraError.Message);
             default:
                 throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}");
@@ -186,6 +188,9 @@ public sealed partial class LedgerClient : ILedgerClient
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
     private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}")]
+    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(
