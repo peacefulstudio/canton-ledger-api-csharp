@@ -367,6 +367,10 @@ public sealed partial class AdminClient : IAdminClient
             deadline: GetDeadline(),
             cancellationToken: cancellationToken);
 
+        if (!System.Enum.IsDefined(response.HashFunction))
+            throw new InvalidOperationException(
+                $"Package '{packageId}' was returned with unrecognized hash function value {(int)response.HashFunction}.");
+
         return new PackageArchive(
             response.ArchivePayload.ToByteArray(),
             response.Hash,
@@ -396,6 +400,10 @@ public sealed partial class AdminClient : IAdminClient
                 deadline: GetDeadline(),
                 cancellationToken: cancellationToken);
 
+            if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
+                throw new InvalidOperationException(
+                    $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
+
             vettedPackages.AddRange(response.VettedPackages.SelectMany(group =>
                 group.Packages.Select(p => new VettedPackage(
                     p.PackageId,
@@ -403,10 +411,6 @@ public sealed partial class AdminClient : IAdminClient
                     p.PackageVersion,
                     group.ParticipantId,
                     group.SynchronizerId))));
-
-            if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
-                throw new InvalidOperationException(
-                    $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
 
             request.PageToken = response.NextPageToken;
         } while (request.PageToken.Length > 0);

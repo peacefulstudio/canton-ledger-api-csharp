@@ -609,6 +609,32 @@ public class AdminClientTests
     }
 
     [Fact]
+    public async Task GetPackage_throws_when_hash_function_unrecognized()
+    {
+        var response = new GetPackageResponse
+        {
+            ArchivePayload = ByteString.CopyFrom(new byte[] { 0x01 }),
+            Hash = "pkg-id-1",
+            HashFunction = (HashFunction)42
+        };
+
+        _packageService
+            .GetPackageAsync(
+                Arg.Any<GetPackageRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+
+        var act = () => client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("pkg-id-1");
+    }
+
+    [Fact]
     public async Task GetPackage_throws_when_package_not_found()
     {
         _packageService
