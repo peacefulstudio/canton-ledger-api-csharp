@@ -478,7 +478,7 @@ public class LedgerClientTests
         var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*No ExercisedEvent found*Archive*00contract123*");
+            .WithMessage("*no exercised event for choice*Archive*");
     }
 
     [Fact]
@@ -514,7 +514,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task TryExerciseAsync_throws_when_ExercisedEvent_has_no_ExerciseResult()
+    public async Task TryExerciseAsync_returns_One_when_ExercisedEvent_has_no_ExerciseResult()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -550,10 +550,10 @@ public class LedgerClientTests
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*no ExerciseResult*");
+        outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
     }
 
     [Fact]
@@ -689,6 +689,119 @@ public class LedgerClientTests
         capturedRequest.TransactionFormat.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
         capturedRequest.TransactionFormat.EventFormat.Should().NotBeNull();
         capturedRequest.TransactionFormat.EventFormat.Verbose.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransaction_uses_default_acs_delta_shape()
+    {
+        SubmitAndWaitForTransactionRequest? capturedRequest = null;
+
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var createCommand = new RuntimeCommands.CreateCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, []));
+        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
+            .WithActAs((Party)"party::alice")
+            .WithCommandId("test-cmd");
+
+        var client = CreateClient();
+        await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.TransactionFormat.Should().BeNull(
+            "the plain submit path must keep the server-default AcsDelta shape");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_throws_when_multiple_matching_events()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Bump",
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
+            }
+        });
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00childcontract456",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Bump",
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Bump",
+            DamlUnit.Instance);
+
+        var client = CreateClient();
+
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Bump*");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_propagates_cancellation()
+    {
+        var ex = new RpcException(new Status(StatusCode.Cancelled, "cancelled"));
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
+
+        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            "00contract123",
+            "Archive",
+            DamlUnit.Instance);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var client = CreateClient();
+
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: cts.Token);
+
+        await action.Should().ThrowAsync<RpcException>(
+            "a caller-cancelled exercise must surface as cancellation, not a mapped InfraError");
     }
 
     [Fact]
