@@ -138,17 +138,7 @@ public sealed partial class LedgerClient : ILedgerClient
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice.Value);
-        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId.Value);
-        SetSubmitterTags(activity, submitter);
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithSubmitter(submitter)
-            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
-            .WithWorkflowId(new RuntimeCommands.WorkflowId(
-                workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}"));
-
-        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var transactionFormat = new TransactionFormat
         {
@@ -275,11 +265,8 @@ public sealed partial class LedgerClient : ILedgerClient
         SetSubmitterTags(activity, submitter);
 
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithSubmitter(submitter)
-            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
-            .WithWorkflowId(new RuntimeCommands.WorkflowId(
-                workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}"));
+        var submission = NewSubmission(
+            createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
 
         LogCreatingContract(Logger, typeof(TTemplate).Name);
 
@@ -296,21 +283,34 @@ public sealed partial class LedgerClient : ILedgerClient
         where TTemplate : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice.Value);
-        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId.Value);
         activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TTemplate).Name);
-        SetSubmitterTags(activity, submitter);
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithSubmitter(submitter)
-            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
-            .WithWorkflowId(new RuntimeCommands.WorkflowId(
-                workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}"));
-
-        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
         return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
+    }
+
+    private static RuntimeCommands.CommandsSubmission NewSubmission(
+        RuntimeCommands.ICommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string workflowId) =>
+        RuntimeCommands.CommandsSubmission.Single(command)
+            .WithSubmitter(submitter)
+            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
+            .WithWorkflowId(new RuntimeCommands.WorkflowId(workflowId));
+
+    private static RuntimeCommands.CommandsSubmission NewExerciseSubmission(
+        Activity? activity,
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string? workflowId)
+    {
+        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice.Value);
+        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId.Value);
+        SetSubmitterTags(activity, submitter);
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        return NewSubmission(
+            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}");
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Submitting {CommandCount} commands")]

@@ -103,7 +103,7 @@ public static class DamlValueConverter
             DamlInt64 i => new Value { Int64 = i.Value },
             DamlText t => new Value { Text = t.Value },
             DamlParty p => new Value { Party = p.Value },
-            DamlNumeric n => new Value { Numeric = FormatCanonicalNumeric(n.Value) },
+            DamlNumeric n => new Value { Numeric = n.Value.ToString(CanonicalNumericFormat, CultureInfo.InvariantCulture) },
             DamlDate d => new Value { Date = d.DaysSinceEpoch },
             DamlTimestamp ts => new Value { Timestamp = ts.MicrosecondsSinceEpoch },
             DamlContractId c => new Value { ContractId = c.Value },
@@ -221,9 +221,6 @@ public static class DamlValueConverter
     /// <see cref="decimal"/>, so no representable value is ever rounded on the wire.
     /// </summary>
     private const string CanonicalNumericFormat = "0.0###########################";
-
-    private static string FormatCanonicalNumeric(decimal value) =>
-        value.ToString(CanonicalNumericFormat, CultureInfo.InvariantCulture);
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>
         message ?? throw new InvalidOperationException(
