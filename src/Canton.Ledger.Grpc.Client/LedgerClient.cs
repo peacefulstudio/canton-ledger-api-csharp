@@ -157,55 +157,27 @@ public sealed partial class LedgerClient : ILedgerClient
 
         LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
-        var commands = BuildCommands(submission);
-
-        var request = new SubmitAndWaitForTransactionRequest
+        var transactionFormat = new TransactionFormat
         {
-            Commands = commands,
-            TransactionFormat = new TransactionFormat
-            {
-                TransactionShape = TransactionShape.LedgerEffects,
-                EventFormat = new EventFormat { Verbose = true }
-            }
+            TransactionShape = TransactionShape.LedgerEffects,
+            EventFormat = new EventFormat { Verbose = true }
         };
 
-        try
+        var outcome = await TrySubmitCoreAsync(
+            submission, transactionFormat, propagateCancellation: true, cancellationToken);
+
+        switch (outcome)
         {
-            var response = await _commandService.SubmitAndWaitForTransactionAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            var transaction = response.Transaction
-                ?? throw new InvalidOperationException(
-                    "Server returned a successful response but no Transaction was present.");
-
-            var exercisedEvent = transaction.Events
-                .Where(e => e.EventCase == Event.EventOneofCase.Exercised)
-                .Select(e => e.Exercised)
-                .FirstOrDefault(e => e.ContractId == command.ContractId && e.Choice == command.Choice)
-                ?? throw new InvalidOperationException(
-                    $"No ExercisedEvent found for choice {command.Choice} on {command.ContractId}");
-
-            LogChoiceExercised(Logger, command.Choice, command.ContractId);
-
-            var exerciseResult = exercisedEvent.ExerciseResult
-                ?? throw new InvalidOperationException(
-                    $"ExercisedEvent for choice {command.Choice} on {command.ContractId} has no ExerciseResult.");
-
-            var resultValue = DamlValueConverter.FromProtoValue(exerciseResult);
-            var result = resultValue.FromDamlValue<TResult>()!;
-            return new ExerciseOutcome<TResult>.One(result);
-        }
-        catch (RpcException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId, ex.StatusCode, ex.Status.Detail);
-            var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
-            if (errorId.Length > 0)
-                return new ExerciseOutcome<TResult>.DamlError(category, errorId, message, metadata);
-
-            return new ExerciseOutcome<TResult>.InfraError((int)ex.StatusCode, ex.Status.Detail ?? ex.Message);
+            case ExerciseOutcome<TransactionResult>.One success:
+                LogChoiceExercised(Logger, command.Choice, command.ContractId);
+                return new ExerciseOutcome<TResult>.One(success.Result.ExerciseResult<TResult>(command.Choice));
+            case ExerciseOutcome<TransactionResult>.DamlError damlError:
+                return new ExerciseOutcome<TResult>.DamlError(
+                    damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata);
+            case ExerciseOutcome<TransactionResult>.InfraError infraError:
+                return new ExerciseOutcome<TResult>.InfraError(infraError.StatusCode, infraError.Message);
+            default:
+                throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}");
         }
     }
 
@@ -214,9 +186,6 @@ public sealed partial class LedgerClient : ILedgerClient
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
     private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}: {StatusCode} — {Detail}")]
-    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId, StatusCode statusCode, string? detail);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(
@@ -233,11 +202,25 @@ public sealed partial class LedgerClient : ILedgerClient
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
+        LogSubmittingCommands(Logger, submission.Commands.Count);
 
+        // Plain request: no TransactionFormat yields the server-default AcsDelta shape.
+        return await TrySubmitCoreAsync(
+            submission, transactionFormat: null, propagateCancellation: false, cancellationToken);
+    }
+
+    private async Task<ExerciseOutcome<TransactionResult>> TrySubmitCoreAsync(
+        RuntimeCommands.CommandsSubmission submission,
+        TransactionFormat? transactionFormat,
+        bool propagateCancellation,
+        CancellationToken cancellationToken)
+    {
         var commands = BuildCommands(submission);
         var request = new SubmitAndWaitForTransactionRequest { Commands = commands };
-
-        LogSubmittingCommands(Logger, submission.Commands.Count);
+        if (transactionFormat is not null)
+        {
+            request.TransactionFormat = transactionFormat;
+        }
 
         try
         {
@@ -257,9 +240,17 @@ public sealed partial class LedgerClient : ILedgerClient
         }
         catch (RpcException ex)
         {
+            // A caller-cancelled exercise should surface as cancellation, not a mapped
+            // InfraError; the plain submit path keeps its historical map-everything behavior.
+            if (propagateCancellation && cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
             // Distinguish structured Daml errors (rich error model) from infra failures.
             // If the trailer carries an ErrorInfo we treat it as a Daml error, even on
             // status codes that aren't intrinsically Canton (server choice).
+            LogSubmitFailed(Logger, ex.StatusCode, ex.Status.Detail);
             var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
             if (errorId.Length > 0)
             {
@@ -269,6 +260,9 @@ public sealed partial class LedgerClient : ILedgerClient
             return new ExerciseOutcome<TransactionResult>.InfraError((int)ex.StatusCode, ex.Status.Detail ?? ex.Message);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Submit failed: {StatusCode} — {Detail}")]
+    private static partial void LogSubmitFailed(ILogger logger, StatusCode statusCode, string? detail);
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
