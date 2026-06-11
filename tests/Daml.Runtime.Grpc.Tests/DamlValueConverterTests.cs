@@ -156,9 +156,30 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void ToProtoValue_never_emits_scientific_notation_for_high_precision_numeric()
+    public void ToProtoValue_converts_negative_zero_numeric_to_canonical_zero()
     {
-        DamlValueConverter.ToProtoValue(new DamlNumeric(0.0000000001m)).Numeric.Should().Be("0.0000000001");
+        DamlValueConverter.ToProtoValue(new DamlNumeric(-0.0m)).Numeric.Should().Be("0.0");
+    }
+
+    [Fact]
+    public void ToProtoValue_preserves_scale_28_smallest_decimal_without_scientific_notation()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(0.0000000000000000000000000001m))
+            .Numeric.Should().Be("0.0000000000000000000000000001");
+    }
+
+    [Fact]
+    public void ToProtoValue_preserves_all_28_fractional_digits_of_numeric()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(0.1234567890123456789012345678m))
+            .Numeric.Should().Be("0.1234567890123456789012345678");
+    }
+
+    [Fact]
+    public void ToProtoValue_converts_decimal_MaxValue_with_forced_fractional_digit()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(decimal.MaxValue))
+            .Numeric.Should().Be("79228162514264337593543950335.0");
     }
 
     [Fact]

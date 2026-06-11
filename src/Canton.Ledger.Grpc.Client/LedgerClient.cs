@@ -148,7 +148,7 @@ public sealed partial class LedgerClient : ILedgerClient
             .WithWorkflowId(new RuntimeCommands.WorkflowId(
                 workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}"));
 
-        LogExercisingChoice(Logger, command.Choice.Value, command.ContractId.Value);
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
         var transactionFormat = new TransactionFormat
         {
@@ -162,14 +162,14 @@ public sealed partial class LedgerClient : ILedgerClient
         switch (outcome)
         {
             case ExerciseOutcome<TransactionResult>.One success:
-                LogChoiceExercised(Logger, command.Choice.Value, command.ContractId.Value);
-                return new ExerciseOutcome<TResult>.One(success.Result.ExerciseResult<TResult>(command.Choice.Value));
+                LogChoiceExercised(Logger, command.Choice, command.ContractId);
+                return new ExerciseOutcome<TResult>.One(success.Result.ExerciseResult<TResult>(command.Choice));
             case ExerciseOutcome<TransactionResult>.DamlError damlError:
-                LogChoiceExerciseFailed(Logger, command.Choice.Value, command.ContractId.Value);
+                LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId);
                 return new ExerciseOutcome<TResult>.DamlError(
                     damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata);
             case ExerciseOutcome<TransactionResult>.InfraError infraError:
-                LogChoiceExerciseFailed(Logger, command.Choice.Value, command.ContractId.Value);
+                LogChoiceExerciseFailed(Logger, command.Choice, command.ContractId);
                 return new ExerciseOutcome<TResult>.InfraError(infraError.StatusCode, infraError.Message);
             default:
                 throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}");
@@ -177,13 +177,13 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
-    private static partial void LogExercisingChoice(ILogger logger, string choice, string contractId);
+    private static partial void LogExercisingChoice(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
-    private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
+    private static partial void LogChoiceExercised(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}")]
-    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId);
+    private static partial void LogChoiceExerciseFailed(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(
@@ -307,7 +307,7 @@ public sealed partial class LedgerClient : ILedgerClient
             .WithWorkflowId(new RuntimeCommands.WorkflowId(
                 workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}"));
 
-        LogExercisingChoice(Logger, command.Choice.Value, command.ContractId.Value);
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
         return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);

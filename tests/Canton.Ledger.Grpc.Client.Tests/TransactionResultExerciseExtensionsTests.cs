@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using FluentAssertions;
@@ -130,6 +131,24 @@ public class TransactionResultExerciseExtensionsTests
         var result = MakeResult(("Other", new DamlNumeric(1m)));
 
         result.AllExerciseResults<decimal>("GetTrailingTwap").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ExerciseResult_accepts_ChoiceName_typed_choice()
+    {
+        var result = MakeResult(("GetTrailingTwap", new DamlNumeric(42.5m)));
+
+        result.ExerciseResult<decimal>(new ChoiceName("GetTrailingTwap")).Should().Be(42.5m);
+    }
+
+    [Fact]
+    public void AllExerciseResults_accepts_ChoiceName_typed_choice()
+    {
+        var result = MakeResult(
+            ("GetTrailingTwap", new DamlNumeric(1m)),
+            ("GetTrailingTwap", new DamlNumeric(2m)));
+
+        result.AllExerciseResults<decimal>(new ChoiceName("GetTrailingTwap")).Should().Equal(1m, 2m);
     }
 
     [Fact]

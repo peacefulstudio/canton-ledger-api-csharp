@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
 
+using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 
@@ -38,6 +39,19 @@ public static class TransactionResultExerciseExtensions
     }
 
     /// <summary>
+    /// <see cref="ChoiceName"/>-typed overload of
+    /// <see cref="ExerciseResult{TReturn}(TransactionResult, string)"/>, matching the typed
+    /// submission surface of <c>Daml.Runtime</c> command types.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="choiceName"/> is a default (uninitialized) <see cref="ChoiceName"/>,
+    /// or zero or more than one event matches it.
+    /// </exception>
+    public static TReturn ExerciseResult<TReturn>(this TransactionResult result, ChoiceName choiceName) =>
+        result.ExerciseResult<TReturn>(choiceName.Value);
+
+    /// <summary>
     /// Returns the typed return values of every exercised event whose
     /// <see cref="ExercisedEvent.ChoiceName"/> equals <paramref name="choiceName"/> (ordinal),
     /// in transaction order. Returns an empty collection when no event matches.
@@ -57,6 +71,18 @@ public static class TransactionResultExerciseExtensions
         }
         return results;
     }
+
+    /// <summary>
+    /// <see cref="ChoiceName"/>-typed overload of
+    /// <see cref="AllExerciseResults{TReturn}(TransactionResult, string)"/>, matching the typed
+    /// submission surface of <c>Daml.Runtime</c> command types.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="result"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="choiceName"/> is a default (uninitialized) <see cref="ChoiceName"/>.
+    /// </exception>
+    public static IReadOnlyList<TReturn> AllExerciseResults<TReturn>(this TransactionResult result, ChoiceName choiceName) =>
+        result.AllExerciseResults<TReturn>(choiceName.Value);
 
     private static List<ExercisedEvent> MatchingExercisedEvents(TransactionResult result, string choiceName)
     {
