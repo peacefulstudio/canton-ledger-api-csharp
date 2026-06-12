@@ -18,6 +18,9 @@ internal sealed class ClientCredentialsOptionsValidator : IValidateOptions<Clien
 {
     public ValidateOptionsResult Validate(string? name, ClientCredentialsOptions options)
     {
+        if (name != Options.DefaultName)
+            return ValidateOptionsResult.Skip;
+
         var failures = options.Validate(new ValidationContext(options))
             .Select(result => result.ErrorMessage ?? "ClientCredentialsOptions validation failed.")
             .ToList();
