@@ -56,15 +56,23 @@
       DestinationFileName="proto-google-common-protos-$(GoogleCommonProtosVersion).jar"
       SkipUnchangedFiles="true" />
 
-    <!-- Extract proto files from JARs using unzip -->
-    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar&quot; &quot;com/daml/ledger/api/v2/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
-          IgnoreExitCode="false" />
+    <!-- MSBuild's Unzip task extracts identically on every OS. The previous `unzip` Exec
+         relied on Info-ZIP wildcards crossing '/' (com/daml/ledger/api/v2/*.proto also
+         matching v2/admin/); the unzip on windows-latest/windows-11-arm runners does not
+         cross '/', silently dropping the admin/interactive/testing protos. Full archives
+         are extracted (no Include filter): the Protobuf globs in the csproj select what
+         is compiled, and $(ProtoSourceDir) is gitignored. -->
+    <Unzip SourceFiles="$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar"
+           DestinationFolder="$(ProtoSourceDir)"
+           OverwriteReadOnlyFiles="true" />
 
-    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/ledger-api-value-proto-$(CantonVersion).jar&quot; &quot;com/daml/ledger/api/v2/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
-          IgnoreExitCode="false" />
+    <Unzip SourceFiles="$(ProtoCacheDir)/ledger-api-value-proto-$(CantonVersion).jar"
+           DestinationFolder="$(ProtoSourceDir)"
+           OverwriteReadOnlyFiles="true" />
 
-    <Exec Command="unzip -o -q &quot;$(ProtoCacheDir)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar&quot; &quot;google/api/*.proto&quot; &quot;google/rpc/*.proto&quot; &quot;google/type/*.proto&quot; &quot;google/longrunning/*.proto&quot; -d &quot;$(ProtoSourceDir)&quot;"
-          IgnoreExitCode="false" />
+    <Unzip SourceFiles="$(ProtoCacheDir)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar"
+           DestinationFolder="$(ProtoSourceDir)"
+           OverwriteReadOnlyFiles="true" />
 
     <!-- Create marker file -->
     <WriteLinesToFile File="$(ProtoMarkerFile)" Lines="Downloaded: $(CantonVersion) + $(GoogleCommonProtosVersion)" Overwrite="true" />
