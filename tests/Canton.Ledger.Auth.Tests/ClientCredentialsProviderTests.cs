@@ -34,6 +34,21 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
+    public void ClientCredentialsProvider_throws_at_construction_when_neither_Domain_nor_TokenEndpoint_set()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "test-client",
+            ClientSecret = "test-secret"
+        };
+
+        var act = () => CreateProvider(options, new FakeHttpHandler());
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*TokenEndpoint*");
+    }
+
+    [Fact]
     public async Task GetTokenAsync_sends_correct_form_data_to_TokenEndpoint()
     {
         var handler = new FakeHttpHandler();
@@ -126,7 +141,6 @@ public class ClientCredentialsProviderTests
         await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         handler.CallCount.Should().Be(1);
 
-        // Advance time to within safety margin (3600 - 30 = 3570 seconds)
         timeProvider.Advance(TimeSpan.FromSeconds(3571));
 
         await provider.GetTokenAsync(TestContext.Current.CancellationToken);
@@ -140,11 +154,9 @@ public class ClientCredentialsProviderTests
         var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
         using var provider = CreateProvider(CreateOptions(), handler, timeProvider);
 
-        // Populate cache with initial token
         await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         handler.CallCount.Should().Be(1);
 
-        // Expire the cached token so all concurrent tasks trigger a refresh
         timeProvider.Advance(TimeSpan.FromHours(2));
 
         var tasks = Enumerable.Range(0, 10)
@@ -160,9 +172,6 @@ public class ClientCredentialsProviderTests
     [Fact]
     public async Task GetTokenAsync_refreshed_token_is_never_paired_with_stale_value()
     {
-        // Verifies that after a token refresh, callers always see the new token —
-        // never the old token extended by the new expiry. This would happen if
-        // the write order in RequestTokenAsync published expiry before token.
         var handler = new FakeHttpHandler().WithResponseSequence(
             """{"access_token":"token-v1","expires_in":3600,"token_type":"Bearer"}""",
             """{"access_token":"token-v2","expires_in":3600,"token_type":"Bearer"}""");
@@ -172,10 +181,8 @@ public class ClientCredentialsProviderTests
         var first = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
         first.Should().Be("token-v1");
 
-        // Expire the cache
         timeProvider.Advance(TimeSpan.FromHours(2));
 
-        // Fire concurrent reads — all should see token-v2, never token-v1
         var tasks = Enumerable.Range(0, 20)
             .Select(_ => provider.GetTokenAsync(TestContext.Current.CancellationToken))
             .ToArray();

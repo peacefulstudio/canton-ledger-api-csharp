@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Auth;
@@ -99,7 +100,7 @@ public static class ServiceCollectionExtensions
         {
             ConfigureLogging(sp);
             var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ClientCredentialsOptions>>();
+            var options = sp.GetRequiredService<IOptions<ClientCredentialsOptions>>();
             var timeProvider = sp.GetRequiredService<TimeProvider>();
             return new ClientCredentialsProvider(options, httpClientFactory, timeProvider);
         });

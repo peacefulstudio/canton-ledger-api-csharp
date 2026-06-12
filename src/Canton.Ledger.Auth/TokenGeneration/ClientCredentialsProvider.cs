@@ -9,6 +9,9 @@ namespace Canton.Ledger.Auth.TokenGeneration;
 
 /// <summary>
 /// OAuth2 client-credentials token provider with TTL-based caching.
+/// Thread-safe: concurrent callers share a single refresh request, and cached
+/// tokens are reused until <c>expires_in</c> minus
+/// <see cref="ClientCredentialsOptions.SafetyMargin"/>.
 /// </summary>
 public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposable
 {
@@ -16,6 +19,7 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ClientCredentialsOptions _options;
+    private readonly Uri _tokenEndpoint;
     private readonly TimeProvider _timeProvider;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
@@ -25,6 +29,15 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
     /// <summary>
     /// Creates a new <see cref="ClientCredentialsProvider"/>.
     /// </summary>
+    /// <param name="options">The client-credentials configuration.</param>
+    /// <param name="httpClientFactory">Factory used to create the <c>CantonAuth</c> named client.</param>
+    /// <param name="timeProvider">Time source used to track token expiry.</param>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The options resolve to no usable token endpoint — neither
+    /// <see cref="ClientCredentialsOptions.TokenEndpoint"/> nor a valid
+    /// <see cref="ClientCredentialsOptions.Domain"/> is configured.
+    /// </exception>
     public ClientCredentialsProvider(
         IOptions<ClientCredentialsOptions> options,
         IHttpClientFactory httpClientFactory,
@@ -35,14 +48,17 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _options = options.Value;
+        _tokenEndpoint = _options.TokenGenerationEndpoint;
         _httpClientFactory = httpClientFactory;
         _timeProvider = timeProvider;
     }
 
     /// <inheritdoc />
+    /// <exception cref="HttpRequestException">The token endpoint returned a non-success status code or was unreachable.</exception>
+    /// <exception cref="InvalidOperationException">The token endpoint returned a malformed response (missing <c>access_token</c> or non-positive <c>expires_in</c>).</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled via <paramref name="cancellationToken"/>.</exception>
     public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
     {
-        // Fast path: return cached token if still valid (volatile reads for cross-thread visibility)
         var cachedToken = Volatile.Read(ref _cachedToken);
         if (cachedToken is not null && _timeProvider.GetUtcNow().Ticks < Volatile.Read(ref _expiresAtTicks) - _options.SafetyMargin.Ticks)
             return cachedToken;
@@ -50,7 +66,6 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
         await _refreshLock.WaitAsync(cancellationToken);
         try
         {
-            // Double-check after acquiring lock
             cachedToken = Volatile.Read(ref _cachedToken);
             if (cachedToken is not null && _timeProvider.GetUtcNow().Ticks < Volatile.Read(ref _expiresAtTicks) - _options.SafetyMargin.Ticks)
                 return cachedToken;
@@ -63,7 +78,7 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
         }
         catch (Exception ex)
         {
-            LogTokenRefreshFailed(Logger, _options.TokenGenerationEndpoint, ex);
+            LogTokenRefreshFailed(Logger, _tokenEndpoint, ex);
             throw;
         }
         finally
@@ -87,7 +102,7 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
         var httpClient = _httpClientFactory.CreateClient("CantonAuth");
         using var content = new FormUrlEncodedContent(formData);
         using var response = await httpClient.PostAsync(
-            _options.TokenGenerationEndpoint,
+            _tokenEndpoint,
             content,
             cancellationToken);
 
@@ -96,7 +111,7 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (errorBody.Length > 1024)
                 errorBody = string.Concat(errorBody.AsSpan(0, 1024), "… (truncated)");
-            LogTokenAcquisitionFailed(Logger, _options.TokenGenerationEndpoint, (int)response.StatusCode, errorBody);
+            LogTokenAcquisitionFailed(Logger, _tokenEndpoint, (int)response.StatusCode, errorBody);
             response.EnsureSuccessStatusCode();
         }
 
@@ -105,16 +120,16 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
 
         if (string.IsNullOrEmpty(tokenResponse.AccessToken))
             throw new InvalidOperationException(
-                $"Token endpoint {_options.TokenGenerationEndpoint} returned a response with no access_token.");
+                $"Token endpoint {_tokenEndpoint} returned a response with no access_token.");
 
         if (tokenResponse.ExpiresIn <= 0)
             throw new InvalidOperationException(
-                $"Token endpoint {_options.TokenGenerationEndpoint} returned an invalid expires_in value '{tokenResponse.ExpiresIn}'. A positive value is required.");
+                $"Token endpoint {_tokenEndpoint} returned an invalid expires_in value '{tokenResponse.ExpiresIn}'. A positive value is required.");
 
         Volatile.Write(ref _cachedToken, tokenResponse.AccessToken);
         Volatile.Write(ref _expiresAtTicks, (_timeProvider.GetUtcNow() + TimeSpan.FromSeconds(tokenResponse.ExpiresIn)).Ticks);
 
-        LogTokenAcquired(Logger, _options.TokenGenerationEndpoint);
+        LogTokenAcquired(Logger, _tokenEndpoint);
 
         return tokenResponse.AccessToken;
     }
