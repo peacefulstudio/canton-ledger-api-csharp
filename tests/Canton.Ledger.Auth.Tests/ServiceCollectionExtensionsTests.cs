@@ -4,6 +4,7 @@ using Canton.Ledger.Auth.TokenGeneration;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Canton.Ledger.Auth.Tests;
@@ -79,6 +80,23 @@ public class ServiceCollectionExtensionsTests
         var provider = services.BuildServiceProvider();
         var tokenProvider = provider.GetService<ITokenProvider>();
         tokenProvider.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddCantonAuth_throws_OptionsValidationException_when_ITokenProvider_resolved_with_neither_Domain_nor_TokenEndpoint()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(opts =>
+        {
+            opts.ClientId = "action-client";
+            opts.ClientSecret = "action-secret";
+        });
+        var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<ITokenProvider>();
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Domain or TokenEndpoint*");
     }
 
     private static IConfiguration BuildConfig() =>

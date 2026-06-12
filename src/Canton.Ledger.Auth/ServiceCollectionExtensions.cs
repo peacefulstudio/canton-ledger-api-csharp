@@ -35,7 +35,6 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<ClientCredentialsOptions>()
             .Bind(configuration)
-            .ValidateDataAnnotations()
             .ValidateOnStart();
 
         AddSharedServices(services);
@@ -60,7 +59,6 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<ClientCredentialsOptions>()
             .Configure(configure)
-            .ValidateDataAnnotations()
             .ValidateOnStart();
 
         AddSharedServices(services);
@@ -94,6 +92,8 @@ public static class ServiceCollectionExtensions
 
     private static void AddSharedServices(IServiceCollection services)
     {
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<ClientCredentialsOptions>, ClientCredentialsOptionsValidator>());
         services.AddHttpClient("CantonAuth");
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ITokenProvider>(sp =>

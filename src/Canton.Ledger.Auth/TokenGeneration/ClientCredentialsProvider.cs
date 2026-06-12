@@ -29,14 +29,20 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
     /// <summary>
     /// Creates a new <see cref="ClientCredentialsProvider"/>.
     /// </summary>
+    /// <remarks>
+    /// When registered via <c>AddCantonAuth</c>, options validation surfaces the same
+    /// misconfiguration as an <see cref="OptionsValidationException"/> before this
+    /// constructor runs.
+    /// </remarks>
     /// <param name="options">The client-credentials configuration.</param>
     /// <param name="httpClientFactory">Factory used to create the <c>CantonAuth</c> named client.</param>
     /// <param name="timeProvider">Time source used to track token expiry.</param>
     /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
-    /// The options resolve to no usable token endpoint — neither
-    /// <see cref="ClientCredentialsOptions.TokenEndpoint"/> nor a valid
-    /// <see cref="ClientCredentialsOptions.Domain"/> is configured.
+    /// The options resolve to no usable token endpoint:
+    /// <see cref="ClientCredentialsOptions.TokenEndpoint"/> is set but is not an absolute
+    /// http/https URI, <see cref="ClientCredentialsOptions.Domain"/> ends with the
+    /// <c>/oauth/token</c> path, or neither is configured.
     /// </exception>
     public ClientCredentialsProvider(
         IOptions<ClientCredentialsOptions> options,
@@ -55,7 +61,8 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
 
     /// <inheritdoc />
     /// <exception cref="HttpRequestException">The token endpoint returned a non-success status code or was unreachable.</exception>
-    /// <exception cref="InvalidOperationException">The token endpoint returned a malformed response (missing <c>access_token</c> or non-positive <c>expires_in</c>).</exception>
+    /// <exception cref="System.Text.Json.JsonException">The token endpoint returned a body that is not valid JSON.</exception>
+    /// <exception cref="InvalidOperationException">The token endpoint returned a malformed response: <see langword="null"/> after deserialization, missing <c>access_token</c>, or non-positive <c>expires_in</c>.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled via <paramref name="cancellationToken"/>.</exception>
     public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
     {

@@ -33,19 +33,51 @@ public class ClientCredentialsProviderTests
             timeProvider ?? TimeProvider.System);
     }
 
-    [Fact]
-    public void ClientCredentialsProvider_throws_at_construction_when_neither_Domain_nor_TokenEndpoint_set()
+    public static TheoryData<ClientCredentialsOptions, string> OptionsWithUnresolvableEndpoint => new()
     {
-        var options = new ClientCredentialsOptions
         {
-            ClientId = "test-client",
-            ClientSecret = "test-secret"
-        };
+            new ClientCredentialsOptions { ClientId = "test-client", ClientSecret = "test-secret" },
+            "*Either TokenEndpoint*"
+        },
+        {
+            new ClientCredentialsOptions
+            {
+                ClientId = "test-client",
+                ClientSecret = "test-secret",
+                TokenEndpoint = new Uri("/oauth/token", UriKind.Relative)
+            },
+            "TokenEndpoint must be a valid absolute http/https URI."
+        },
+        {
+            new ClientCredentialsOptions
+            {
+                ClientId = "test-client",
+                ClientSecret = "test-secret",
+                TokenEndpoint = new Uri("ftp://auth.example.com/token")
+            },
+            "TokenEndpoint must be a valid absolute http/https URI."
+        },
+        {
+            new ClientCredentialsOptions
+            {
+                ClientId = "test-client",
+                ClientSecret = "test-secret",
+                Domain = "https://auth.example.com/oauth/token"
+            },
+            "Domain must not include the /oauth/token path*"
+        }
+    };
 
+    [Theory]
+    [MemberData(nameof(OptionsWithUnresolvableEndpoint))]
+    public void ClientCredentialsProvider_throws_at_construction_when_endpoint_is_unresolvable(
+        ClientCredentialsOptions options,
+        string expectedMessage)
+    {
         var act = () => CreateProvider(options, new FakeHttpHandler());
 
         act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*TokenEndpoint*");
+            .WithMessage(expectedMessage);
     }
 
     [Fact]
@@ -170,7 +202,7 @@ public class ClientCredentialsProviderTests
     }
 
     [Fact]
-    public async Task GetTokenAsync_refreshed_token_is_never_paired_with_stale_value()
+    public async Task GetTokenAsync_publishes_refreshed_token_before_new_expiry_so_no_reader_sees_stale_token()
     {
         var handler = new FakeHttpHandler().WithResponseSequence(
             """{"access_token":"token-v1","expires_in":3600,"token_type":"Bearer"}""",
