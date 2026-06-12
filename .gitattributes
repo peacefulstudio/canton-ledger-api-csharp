@@ -1,0 +1,8 @@
+# Working-tree text must stay LF on every platform (Windows runners default
+# to core.autocrlf=true and would check out CRLF).
+* text=auto eol=lf
+*.dar binary
+*.binpb binary
+*.png binary
+*.cmd text eol=crlf
+*.bat text eol=crlf
