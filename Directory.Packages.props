@@ -8,7 +8,10 @@
     <PackageVersion Include="Grpc.Net.Client" Version="2.80.0" />
     <!-- Grpc.Tools >= 2.69.0 ships a linux_arm64 protoc that segfaults (grpc/grpc#38538;
          fix attempt grpc/grpc#41994 shipped in 2.81.x without resolving it); 2.68.1 is the
-         last release whose linux_arm64 protoc works. Bump only when #38538 is closed. -->
+         last release whose linux_arm64 protoc works. Bump only when #38538 is closed.
+         Its protoc (~28.x) is older than the Google.Protobuf 3.35.x runtime; the generated
+         code is forward-compatible today, but revisit this skew before bumping
+         Google.Protobuf to a version whose generated-code features need a newer protoc. -->
     <PackageVersion Include="Grpc.Tools" Version="2.68.1" />
     <!-- Microsoft Extensions -->
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />

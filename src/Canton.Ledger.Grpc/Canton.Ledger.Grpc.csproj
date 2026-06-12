@@ -27,7 +27,9 @@
   <ItemGroup>
     <!-- Canton Ledger API v2 protos -->
     <Protobuf Include="$(ProtoSourceDir)/com/daml/ledger/api/v2/**/*.proto" GrpcServices="Client" ProtoRoot="$(ProtoSourceDir)" />
-    <!-- Google common protos (dependencies) - exclude google/protobuf which is provided by Grpc.Tools -->
+    <!-- Google common protos (dependencies). DownloadProtos.targets extracts the full JARs,
+         so google/protobuf/*.proto exist on disk too - never glob them: Grpc.Tools supplies
+         its own copies for import resolution and duplicate compilation breaks the build. -->
     <Protobuf Include="$(ProtoSourceDir)/google/api/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
     <Protobuf Include="$(ProtoSourceDir)/google/rpc/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
     <Protobuf Include="$(ProtoSourceDir)/google/type/**/*.proto" GrpcServices="None" ProtoRoot="$(ProtoSourceDir)" />
