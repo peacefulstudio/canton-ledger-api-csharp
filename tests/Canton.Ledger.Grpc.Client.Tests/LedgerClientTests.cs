@@ -24,6 +24,9 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 
 public class LedgerClientTests
 {
+    private static readonly Party ActAs = new("party::alice");
+    private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
+
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
@@ -46,6 +49,13 @@ public class LedgerClientTests
     }
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
+
+    private static RuntimeCommands.ExerciseCommand Exercise(string choice = "Archive", string cid = "00contract123") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new ContractId<TestTemplate>(cid),
+            new RuntimeCommands.ChoiceName(choice),
+            DamlUnit.Instance);
     [Fact]
     public void BuildCommands_sets_command_id_and_workflow_id()
     {
@@ -54,9 +64,9 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("cmd-123")
-            .WithWorkflowId("workflow-456");
+            .WithActAs(ActAs)
+            .WithCommandId(new RuntimeCommands.CommandId("cmd-123"))
+            .WithWorkflowId(new RuntimeCommands.WorkflowId("workflow-456"));
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -75,7 +85,7 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice");
+            .WithActAs(ActAs);
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -94,8 +104,8 @@ public class LedgerClientTests
                 [new DamlField("owner", new DamlParty("party::alice"))]));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -109,15 +119,11 @@ public class LedgerClientTests
     [Fact]
     public void BuildCommands_adds_exercise_command()
     {
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -136,9 +142,9 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
+            .WithActAs(ActAs)
             .WithReadAs((Party)"party::observer1", (Party)"party::observer2")
-            .WithCommandId("test-cmd");
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var commands = client.BuildCommands(submission);
@@ -171,8 +177,8 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var result = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
@@ -223,8 +229,8 @@ public class LedgerClientTests
             new DamlRecord(null, []));
 
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
@@ -267,15 +273,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00archived123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise(cid: "00archived123");
 
         var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
@@ -319,15 +321,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract999",
-            "Transfer",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise(choice: "Transfer", cid: "00contract999");
 
         var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
@@ -338,8 +336,8 @@ public class LedgerClientTests
         ev.ChoiceName.Should().Be("Transfer");
         ev.Consuming.Should().BeTrue();
         ev.InterfaceId.Should().BeNull();
-        ev.ActingParties.Should().BeEquivalentTo([(Party)"party::alice"]);
-        ev.WitnessParties.Should().BeEquivalentTo([(Party)"party::alice", (Party)"party::bob"]);
+        ev.ActingParties.Should().BeEquivalentTo([ActAs]);
+        ev.WitnessParties.Should().BeEquivalentTo([ActAs, (Party)"party::bob"]);
         ev.TemplateId.ModuleName.Should().Be("Module");
         ev.TemplateId.EntityName.Should().Be("Template");
     }
@@ -356,8 +354,8 @@ public class LedgerClientTests
                 new RuntimeCommands.CreateCommand(
                     new RuntimeIdentifier("pkg", "Module", "Template"),
                     new DamlRecord(null, [])))
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
@@ -377,8 +375,8 @@ public class LedgerClientTests
                 new RuntimeCommands.CreateCommand(
                     new RuntimeIdentifier("pkg", "Module", "Template"),
                     new DamlRecord(null, [])))
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
@@ -438,8 +436,8 @@ public class LedgerClientTests
                 new RuntimeCommands.CreateCommand(
                     new RuntimeIdentifier("pkg", "Module", "Template"),
                     new DamlRecord(null, [])))
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         await secondClient.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
 
@@ -467,15 +465,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no exercised event for choice*Archive*");
@@ -499,15 +493,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*no Transaction*");
@@ -542,16 +532,12 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
 
         var outcome = await client.TryExerciseAsync<object>(
-            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
     }
@@ -586,15 +572,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Accept",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise(choice: "Accept");
 
         var client = CreateClient();
         var outcome = await client.TryExerciseAsync<ContractId<TestTemplate>>(
-            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.One>().Subject;
         success.Result.Value.Should().Be("00newcontract456");
@@ -630,15 +612,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
         var outcome = await client.TryExerciseAsync<object>(
-            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
     }
@@ -675,14 +653,10 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
-        await client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        await client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.TransactionFormat.Should().NotBeNull();
@@ -716,8 +690,8 @@ public class LedgerClientTests
             new RuntimeIdentifier("pkg", "Module", "Template"),
             new DamlRecord(null, []));
         var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
 
         var client = CreateClient();
         await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
@@ -767,15 +741,11 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Bump",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise(choice: "Bump");
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Bump*");
@@ -787,18 +757,14 @@ public class LedgerClientTests
         var ex = new RpcException(new Status(StatusCode.Cancelled, "cancelled"));
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, "party::alice", cancellationToken: cts.Token);
+        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: cts.Token);
 
         await action.Should().ThrowAsync<RpcException>(
             "a caller-cancelled exercise must surface as cancellation, not a mapped InfraError");
@@ -825,15 +791,11 @@ public class LedgerClientTests
             "InvalidGivenCurrentSystemStateOther");
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
         var outcome = await client.TryExerciseAsync<object>(
-            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<object>.DamlError>();
         var err = (ExerciseOutcome<object>.DamlError)outcome;
@@ -848,15 +810,11 @@ public class LedgerClientTests
         var ex = new RpcException(new Status(StatusCode.Unavailable, "network down"));
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        var exerciseCommand = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            "00contract123",
-            "Archive",
-            DamlUnit.Instance);
+        var exerciseCommand = Exercise();
 
         var client = CreateClient();
         var outcome = await client.TryExerciseAsync<object>(
-            exerciseCommand, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<object>.InfraError>();
         var infra = (ExerciseOutcome<object>.InfraError)outcome;

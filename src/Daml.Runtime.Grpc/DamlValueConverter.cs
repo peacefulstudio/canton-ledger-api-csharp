@@ -86,6 +86,9 @@ public static class DamlValueConverter
 
     /// <summary>
     /// Projects a Runtime <see cref="DamlValue"/> onto its proto wire form.
+    /// <see cref="DamlNumeric"/> values are encoded in the canonical unpadded decimal form
+    /// committed by codegen ADR-0011: trailing zeros stripped, at least one fractional digit,
+    /// never scientific notation (e.g. <c>1.50m</c> → <c>"1.5"</c>, <c>0m</c> → <c>"0.0"</c>).
     /// Throws <see cref="NotSupportedException"/> for unrecognised <c>DamlValue</c>
     /// subclasses.
     /// </summary>
@@ -100,7 +103,7 @@ public static class DamlValueConverter
             DamlInt64 i => new Value { Int64 = i.Value },
             DamlText t => new Value { Text = t.Value },
             DamlParty p => new Value { Party = p.Value },
-            DamlNumeric n => new Value { Numeric = n.Value.ToString(CultureInfo.InvariantCulture) },
+            DamlNumeric n => new Value { Numeric = n.Value.ToString(CanonicalNumericFormat, CultureInfo.InvariantCulture) },
             DamlDate d => new Value { Date = d.DaysSinceEpoch },
             DamlTimestamp ts => new Value { Timestamp = ts.MicrosecondsSinceEpoch },
             DamlContractId c => new Value { ContractId = c.Value },
@@ -211,6 +214,13 @@ public static class DamlValueConverter
             _ => throw new NotSupportedException($"Proto Value case {value.SumCase} is not supported")
         };
     }
+
+    /// <summary>
+    /// Canonical unpadded numeric wire format (codegen ADR-0011): one forced fractional digit
+    /// followed by 27 optional fractional digits — 28 in total, matching the maximum scale of
+    /// <see cref="decimal"/>, so no representable value is ever rounded on the wire.
+    /// </summary>
+    private const string CanonicalNumericFormat = "0.0###########################";
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>
         message ?? throw new InvalidOperationException(

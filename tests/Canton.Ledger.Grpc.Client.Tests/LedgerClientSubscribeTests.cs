@@ -22,7 +22,7 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 
 public class LedgerClientSubscribeTests
 {
-    private const string ActAs = "party::alice";
+    private static readonly Party ActAs = new("party::alice");
 
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
@@ -166,7 +166,7 @@ public class LedgerClientSubscribeTests
         _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
-        var filter = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty[ActAs];
+        var filter = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty[ActAs.Id];
         filter.Cumulative.Should().ContainSingle();
         var template = filter.Cumulative[0].TemplateFilter;
         template.Should().NotBeNull();
@@ -326,7 +326,7 @@ public class LedgerClientSubscribeTests
         _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
-        var filter = captured!.EventFormat.FiltersByParty[ActAs];
+        var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
         filter.Cumulative.Should().ContainSingle();
         var template = filter.Cumulative[0].TemplateFilter;
         template.TemplateId.ModuleName.Should().Be("Murmures.Foo");

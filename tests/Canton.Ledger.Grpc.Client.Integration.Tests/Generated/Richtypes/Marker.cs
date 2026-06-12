@@ -23,10 +23,10 @@ namespace Richtypes;
 public sealed partial record Marker(Party Owner) : ITemplate
 {
     /// <summary>Gets the template identifier.</summary>
-    public static Identifier TemplateId { get; } = new("9b632e831723777332a1ba27c9f4715ec8174b61da29b985d7db250dbfdb9bb1", "RichTypes", "Marker");
+    public static Identifier TemplateId { get; } = new("9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f", "RichTypes", "Marker");
 
     /// <summary>Gets the package ID.</summary>
-    public static string PackageId => "9b632e831723777332a1ba27c9f4715ec8174b61da29b985d7db250dbfdb9bb1";
+    public static string PackageId => "9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f";
 
     /// <summary>Gets the package name.</summary>
     public static string PackageName => "richtypes";
@@ -50,7 +50,7 @@ public sealed partial record Marker(Party Owner) : ITemplate
     /// </summary>
     public static Choice<Marker, DamlUnit, DamlUnit> ChoiceArchive { get; } = new()
     {
-        Name = "Archive",
+        Name = new ChoiceName("Archive"),
         Consuming = true,
         ArgumentEncoder = _ => DamlUnit.Instance,
         ResultDecoder = _ => DamlUnit.Instance
@@ -90,7 +90,7 @@ public static class MarkerSubmissionExtensions
     /// analyzer could not resolve the Daml <c>signatory</c> clause to payload-field
     /// references — typically because the expression involves the template key, a
     /// constant, or a function call. <see cref="SubmitterInfo"/> implicitly converts
-    /// from <c>string</c> / <c>Party</c>, so single-party callers still pass one literal.
+    /// from a single <c>Party</c>, so single-party callers still pass one literal.
     /// </summary>
     /// <param name="client">The ledger client.</param>
     /// <param name="payload">The contract payload.</param>

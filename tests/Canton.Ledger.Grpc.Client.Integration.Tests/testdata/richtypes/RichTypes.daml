@@ -11,6 +11,10 @@ data Profile = Profile
     level : Int
   deriving (Eq, Show)
 
+data Outcome = Win with prize : Numeric 2; tier : Text
+             | Pending
+  deriving (Eq, Show)
+
 template Marker
   with
     owner : Party
@@ -31,6 +35,8 @@ template RichRecord
     attributes : TextMap Text
     marker : ContractId Marker
     profile : Profile
+    outcome : Outcome
+    fee : Numeric 2
   where
     signatory owner
 

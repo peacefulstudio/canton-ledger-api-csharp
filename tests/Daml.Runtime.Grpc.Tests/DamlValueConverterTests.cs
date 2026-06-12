@@ -121,9 +121,65 @@ public class DamlValueConverterTests
     }
 
     [Fact]
-    public void ToProtoValue_converts_numeric_zero()
+    public void ToProtoValue_converts_numeric_zero_to_canonical_form()
     {
-        DamlValueConverter.ToProtoValue(new DamlNumeric(0m)).Numeric.Should().Be("0");
+        DamlValueConverter.ToProtoValue(new DamlNumeric(0m)).Numeric.Should().Be("0.0");
+    }
+
+    [Fact]
+    public void ToProtoValue_converts_integer_numeric_with_single_trailing_zero()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(42m)).Numeric.Should().Be("42.0");
+    }
+
+    [Fact]
+    public void ToProtoValue_strips_trailing_zeros_from_numeric()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(1.50m)).Numeric.Should().Be("1.5");
+    }
+
+    [Fact]
+    public void ToProtoValue_numeric_form_is_independent_of_construction_scale()
+    {
+        var fromShort = DamlValueConverter.ToProtoValue(new DamlNumeric(1.5m)).Numeric;
+        var fromPadded = DamlValueConverter.ToProtoValue(new DamlNumeric(1.500000m)).Numeric;
+
+        fromShort.Should().Be("1.5");
+        fromPadded.Should().Be(fromShort);
+    }
+
+    [Fact]
+    public void ToProtoValue_keeps_sign_and_strips_trailing_zeros_from_negative_numeric()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(-1.50m)).Numeric.Should().Be("-1.5");
+        DamlValueConverter.ToProtoValue(new DamlNumeric(-42m)).Numeric.Should().Be("-42.0");
+    }
+
+    [Fact]
+    public void ToProtoValue_converts_negative_zero_numeric_to_canonical_zero()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(-0.0m)).Numeric.Should().Be("0.0");
+    }
+
+    [Fact]
+    public void ToProtoValue_preserves_scale_28_smallest_decimal_without_scientific_notation()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(0.0000000000000000000000000001m))
+            .Numeric.Should().Be("0.0000000000000000000000000001");
+    }
+
+    [Fact]
+    public void ToProtoValue_preserves_all_28_fractional_digits_of_numeric()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(0.1234567890123456789012345678m))
+            .Numeric.Should().Be("0.1234567890123456789012345678");
+    }
+
+    [Fact]
+    public void ToProtoValue_converts_decimal_MaxValue_with_forced_fractional_digit()
+    {
+        DamlValueConverter.ToProtoValue(new DamlNumeric(decimal.MaxValue))
+            .Numeric.Should().Be("79228162514264337593543950335.0");
     }
 
     [Fact]

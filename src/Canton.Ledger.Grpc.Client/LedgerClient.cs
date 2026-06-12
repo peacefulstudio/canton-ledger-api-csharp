@@ -131,14 +131,6 @@ public sealed partial class LedgerClient : ILedgerClient
     private static partial void LogCreatingContract(ILogger logger, string templateType);
 
     /// <inheritdoc />
-    public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
-        RuntimeCommands.ExerciseCommand command,
-        string actAs,
-        string? workflowId = null,
-        CancellationToken cancellationToken = default)
-        => TryExerciseAsync<TResult>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
-
-    /// <inheritdoc />
     public async Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
@@ -146,16 +138,7 @@ public sealed partial class LedgerClient : ILedgerClient
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice);
-        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId);
-        SetSubmitterTags(activity, submitter);
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithSubmitter(submitter)
-            .WithCommandId(Guid.NewGuid().ToString())
-            .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
-
-        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var transactionFormat = new TransactionFormat
         {
@@ -184,13 +167,13 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Exercising choice {Choice} on {ContractId}")]
-    private static partial void LogExercisingChoice(ILogger logger, string choice, string contractId);
+    private static partial void LogExercisingChoice(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Choice exercised: {Choice} on {ContractId}")]
-    private static partial void LogChoiceExercised(ILogger logger, string choice, string contractId);
+    private static partial void LogChoiceExercised(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to exercise choice {Choice} on {ContractId}")]
-    private static partial void LogChoiceExerciseFailed(ILogger logger, string choice, string contractId);
+    private static partial void LogChoiceExerciseFailed(ILogger logger, RuntimeCommands.ChoiceName choice, ContractId contractId);
 
     /// <inheritdoc />
     public async Task<string> SubmitAsync(
@@ -270,15 +253,6 @@ public sealed partial class LedgerClient : ILedgerClient
     private static partial void LogSubmitFailed(ILogger logger, StatusCode statusCode, string? detail);
 
     /// <inheritdoc />
-    public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
-        TTemplate payload,
-        string actAs,
-        string? workflowId = null,
-        CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate
-        => TryCreateAsync(payload, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
-
-    /// <inheritdoc />
     public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,
@@ -291,25 +265,14 @@ public sealed partial class LedgerClient : ILedgerClient
         SetSubmitterTags(activity, submitter);
 
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithSubmitter(submitter)
-            .WithCommandId(Guid.NewGuid().ToString())
-            .WithWorkflowId(workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
+        var submission = NewSubmission(
+            createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
 
         LogCreatingContract(Logger, typeof(TTemplate).Name);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
         return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
     }
-
-    /// <inheritdoc />
-    public Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
-        RuntimeCommands.ExerciseCommand command,
-        string actAs,
-        string? workflowId = null,
-        CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate
-        => TryExerciseForCreatedAsync<TTemplate>(command, (RuntimeCommands.SubmitterInfo)actAs, workflowId, cancellationToken);
 
     /// <inheritdoc />
     public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
@@ -320,20 +283,34 @@ public sealed partial class LedgerClient : ILedgerClient
         where TTemplate : ITemplate
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice);
-        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId);
         activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TTemplate).Name);
-        SetSubmitterTags(activity, submitter);
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(command)
-            .WithSubmitter(submitter)
-            .WithCommandId(Guid.NewGuid().ToString())
-            .WithWorkflowId(workflowId ?? $"exercise-{command.Choice.ToLowerInvariant()}");
-
-        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
         return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
+    }
+
+    private static RuntimeCommands.CommandsSubmission NewSubmission(
+        RuntimeCommands.ICommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string workflowId) =>
+        RuntimeCommands.CommandsSubmission.Single(command)
+            .WithSubmitter(submitter)
+            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
+            .WithWorkflowId(new RuntimeCommands.WorkflowId(workflowId));
+
+    private static RuntimeCommands.CommandsSubmission NewExerciseSubmission(
+        Activity? activity,
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string? workflowId)
+    {
+        activity?.SetTag(LedgerClientActivityTags.Choice, command.Choice.Value);
+        activity?.SetTag(LedgerClientActivityTags.ContractId, command.ContractId.Value);
+        SetSubmitterTags(activity, submitter);
+        LogExercisingChoice(Logger, command.Choice, command.ContractId);
+        return NewSubmission(
+            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}");
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Submitting {CommandCount} commands")]
@@ -360,8 +337,8 @@ public sealed partial class LedgerClient : ILedgerClient
     {
         var commands = new Commands
         {
-            CommandId = submission.CommandId ?? Guid.NewGuid().ToString(),
-            WorkflowId = submission.WorkflowId ?? string.Empty,
+            CommandId = submission.CommandId?.Value ?? Guid.NewGuid().ToString(),
+            WorkflowId = submission.WorkflowId?.Value ?? string.Empty,
         };
 
         if (_options.UserId is not null)
@@ -396,8 +373,8 @@ public sealed partial class LedgerClient : ILedgerClient
                     Exercise = new ExerciseCommand
                     {
                         TemplateId = DamlValueConverter.ToProtoIdentifier(exercise.TemplateId),
-                        ContractId = exercise.ContractId,
-                        Choice = exercise.Choice,
+                        ContractId = exercise.ContractId.Value,
+                        Choice = exercise.Choice.Value,
                         ChoiceArgument = DamlValueConverter.ToProtoValue(exercise.ChoiceArgument)
                     }
                 },
@@ -419,18 +396,6 @@ public sealed partial class LedgerClient : ILedgerClient
             return null;
 
         return DateTime.UtcNow.Add(_options.Timeout.Value);
-    }
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsync<T>(
-        string actAs,
-        long? fromOffset = null,
-        CancellationToken cancellationToken = default)
-        where T : ITemplate
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
-        return SubscribeAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, templateFilter, fromOffset, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -519,17 +484,6 @@ public sealed partial class LedgerClient : ILedgerClient
                 LogStreamVariantSkipped(Logger, typeof(T).Name, response.UpdateCase);
                 break;
         }
-    }
-
-    /// <inheritdoc />
-    public IAsyncEnumerable<ContractStreamEvent<T>.Created> SubscribeActiveAsync<T>(
-        string actAs,
-        CancellationToken cancellationToken = default)
-        where T : ITemplate
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(actAs);
-        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
-        return SubscribeActiveAsyncCore<T>((RuntimeCommands.SubmitterInfo)actAs, templateFilter, cancellationToken);
     }
 
     /// <inheritdoc />

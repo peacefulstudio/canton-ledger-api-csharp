@@ -114,7 +114,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.One>();
         var created = (ExerciseOutcome<ContractId<FooBar>>.One)outcome;
@@ -129,7 +129,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.None>();
     }
@@ -144,7 +144,7 @@ public class LedgerClientOutcomeTests
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
-        var outcome = await client.TryCreateAsync(new FooBar("alice"), "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryCreateAsync(new FooBar("alice"), new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.DamlError>();
         var err = (ExerciseOutcome<ContractId<FooBar>>.DamlError)outcome;
@@ -163,12 +163,12 @@ public class LedgerClientOutcomeTests
 
         var exercise = new RuntimeCommands.ExerciseCommand(
             new RuntimeIdentifier("test-pkg", "Murmures.Foo", "FooBar"),
-            "00contract",
-            "Multiply",
+            new ContractId<FooBar>("00contract"),
+            new RuntimeCommands.ChoiceName("Multiply"),
             DamlUnit.Instance);
 
         var client = CreateClient();
-        var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.Many>();
         var many = (ExerciseOutcome<ContractId<FooBar>>.Many)outcome;
@@ -199,7 +199,7 @@ public class LedgerClientOutcomeTests
             new DamlRecord(null, []));
         return RuntimeCommands.CommandsSubmission.Single(create)
             .WithActAs((Party)"party::alice")
-            .WithCommandId("test-cmd");
+            .WithCommandId(new RuntimeCommands.CommandId("test-cmd"));
     }
 
     internal sealed record FooBar(string Owner) : ITemplate
