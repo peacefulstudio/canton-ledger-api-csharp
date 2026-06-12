@@ -81,6 +81,7 @@ When no `ITokenProvider` is registered, `AddLedgerClient`/`AddAdminClient` regis
 - `TimeProvider` for testable time (pass `FakeTimeProvider` in tests)
 - `Volatile.Read`/`Volatile.Write` for cache fields — write order: token before expiry (matches read order)
 - Validates `expires_in > 0` and `access_token` non-empty after deserialization
+- Token endpoint is resolved once at construction — unresolvable options (no `TokenEndpoint`, invalid `Domain`) throw `InvalidOperationException` when the provider is constructed, not at the first token request
 
 ## Related Packages
 

@@ -13,13 +13,11 @@ public class ClientCredentialsOptions : IValidatableObject
     /// <summary>
     /// OAuth2 client identifier.
     /// </summary>
-    [Required]
     public required string ClientId { get; set; }
 
     /// <summary>
     /// OAuth2 client secret.
     /// </summary>
-    [Required]
     public required string ClientSecret { get; set; }
 
     /// <summary>

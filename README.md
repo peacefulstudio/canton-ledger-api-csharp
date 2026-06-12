@@ -14,6 +14,7 @@ C# client libraries for interacting with Canton participant nodes via the Ledger
 | [`Canton.Ledger.Grpc`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc) | Generated gRPC stubs from Canton Ledger API protos |
 | [`Canton.Ledger.Grpc.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc.Client) | High-level client with `Daml.Runtime` integration |
 | [`Canton.Ledger.Pqs.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Pqs.Client) | Type-safe query client for the Participant Query Store (PQS) |
+| [`Canton.Ledger.Auth`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Auth) | Bearer-token providers (`ITokenProvider`) for the clients — OAuth2 client-credentials with automatic refresh, static token, or unauthenticated |
 
 Packages are published to [GitHub Packages](https://github.com/orgs/peacefulstudio/packages?repo_name=canton-ledger-api-csharp).
 
@@ -83,6 +84,35 @@ var contract = await pqsClient.FetchByIdAsync<Agreement>(contractId);
 var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 ```
 
+### Authentication
+
+`Canton.Ledger.Auth` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register a token provider before adding the clients:
+
+```csharp
+using Canton.Ledger.Auth;
+
+// OAuth2 client-credentials with automatic refresh and caching
+services.AddCantonAuth(configuration.GetSection("Canton:Auth"));
+
+// ...or a fixed token for short-lived processes
+services.AddCantonStaticAuth("eyJ...");
+```
+
+```json
+{
+  "Canton": {
+    "Auth": {
+      "Domain": "my-tenant.eu.auth0.com",
+      "ClientId": "my-client-id",
+      "ClientSecret": "my-client-secret",
+      "Audience": "https://canton.network/"
+    }
+  }
+}
+```
+
+When no `ITokenProvider` is registered, the clients run unauthenticated (`ITokenProvider.None`) and log a warning at construction. See the [`Canton.Ledger.Auth` README](src/Canton.Ledger.Auth/README.md) for the full options reference, including custom token endpoints (e.g. Keycloak).
+
 ## Features
 
 ### Ledger Client (`Canton.Ledger.Grpc.Client`)
@@ -102,6 +132,11 @@ var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 - Parameterized SQL queries — no SQL injection by construction
 - Composable `Filter.Or` / `Filter.And` combinators
 - OpenTelemetry tracing via `ActivitySource`
+
+### Auth (`Canton.Ledger.Auth`)
+- OAuth2 client-credentials flow with thread-safe TTL token caching and automatic refresh
+- Static token and unauthenticated modes behind a single `ITokenProvider` abstraction
+- `IServiceCollection` integration with options validation at startup
 
 ## Integration with Daml Code Generation
 
