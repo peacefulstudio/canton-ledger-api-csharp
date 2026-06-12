@@ -159,6 +159,10 @@ var assets = await pqsClient.QueryAsync<Asset>(
     Filter.Field<Asset>(a => a.Owner, party.Party));
 ```
 
+## Architecture
+
+See the [architecture overview](docs/architecture-overview.md) for how the codegen pipeline, the `Daml.Runtime` library, and the `Canton.Ledger.*` client packages fit together.
+
 ## Canton Version Compatibility
 
 This library targets Canton Ledger API v2. The proto files are automatically downloaded from Maven Central during build.
