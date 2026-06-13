@@ -49,7 +49,7 @@ public class LedgerClientOutcomeTests
             Created = new ProtoCreatedEvent
             {
                 ContractId = "00abc",
-                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Murmures.Foo", EntityName = "FooBar" },
+                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
                 CreateArguments = new ProtoRecord(),
             },
         });
@@ -68,8 +68,8 @@ public class LedgerClientOutcomeTests
     public async Task TrySubmitAndWaitForTransaction_returns_DamlError_on_structured_failure()
     {
         var ex = LedgerClientTestFixtures.MakeDamlRpcException(
-            "MURMURES_SWAP_ALREADY_EXECUTED",
-            "swap already executed",
+            "SAMPLE_ALREADY_EXECUTED",
+            "already executed",
             "InvalidGivenCurrentSystemStateOther");
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
@@ -79,8 +79,8 @@ public class LedgerClientOutcomeTests
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>();
         var err = (ExerciseOutcome<TransactionResult>.DamlError)outcome;
         err.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateOther);
-        err.ErrorId.Should().Be("MURMURES_SWAP_ALREADY_EXECUTED");
-        err.Message.Should().Be("swap already executed");
+        err.ErrorId.Should().Be("SAMPLE_ALREADY_EXECUTED");
+        err.Message.Should().Be("already executed");
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class LedgerClientOutcomeTests
             Created = new ProtoCreatedEvent
             {
                 ContractId = "00xyz",
-                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Murmures.Foo", EntityName = "FooBar" },
+                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
                 CreateArguments = new ProtoRecord(),
             },
         });
@@ -156,13 +156,13 @@ public class LedgerClientOutcomeTests
     public async Task TryExerciseForCreatedAsync_returns_Many_when_multiple_matching_creates()
     {
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
-        var tid = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Murmures.Foo", EntityName = "FooBar" };
+        var tid = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" };
         transaction.Events.Add(new Event { Created = new ProtoCreatedEvent { ContractId = "00a", TemplateId = tid, CreateArguments = new ProtoRecord() } });
         transaction.Events.Add(new Event { Created = new ProtoCreatedEvent { ContractId = "00b", TemplateId = tid, CreateArguments = new ProtoRecord() } });
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var exercise = new RuntimeCommands.ExerciseCommand(
-            new RuntimeIdentifier("test-pkg", "Murmures.Foo", "FooBar"),
+            new RuntimeIdentifier("test-pkg", "Sample.Foo", "FooBar"),
             new ContractId<FooBar>("00contract"),
             new RuntimeCommands.ChoiceName("Multiply"),
             DamlUnit.Instance);
@@ -195,7 +195,7 @@ public class LedgerClientOutcomeTests
     private static RuntimeCommands.CommandsSubmission MakeFooBarCreate()
     {
         var create = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("test-pkg", "Murmures.Foo", "FooBar"),
+            new RuntimeIdentifier("test-pkg", "Sample.Foo", "FooBar"),
             new DamlRecord(null, []));
         return RuntimeCommands.CommandsSubmission.Single(create)
             .WithActAs((Party)"party::alice")
@@ -204,7 +204,7 @@ public class LedgerClientOutcomeTests
 
     internal sealed record FooBar(string Owner) : ITemplate
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Murmures.Foo", "FooBar");
+        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
         public static string PackageId => "test-pkg";
         public static string PackageName => "test-package";
         public static Version PackageVersion { get; } = new(0, 1, 0);

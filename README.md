@@ -161,7 +161,7 @@ var assets = await pqsClient.QueryAsync<Asset>(
 
 ## Architecture
 
-See the [architecture overview](docs/architecture-overview.md) for how the codegen pipeline, the `Daml.Runtime` library, and the `Canton.Ledger.*` client packages fit together.
+See the [architecture overview](docs/public/architecture-overview.md) for how the codegen pipeline, the `Daml.Runtime` library, and the `Canton.Ledger.*` client packages fit together.
 
 ## Canton Version Compatibility
 
@@ -194,9 +194,25 @@ dotnet pack -c Release
 |---------|-------------|--------|
 | `Canton.Ledger.Rest` | REST/JSON API client | Planned |
 
+## Contributing
+
+Contributions are welcome from anyone in the Canton and Daml communities. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, the testing requirements,
+the branch model, and the PR checklist.
+
+## Project stewardship
+
+`Canton.Ledger.*` is currently developed and maintained by **Peaceful Studio OÜ**
+(Estonia). The project is licensed under Apache-2.0 with the explicit intent of
+community ownership: if and when adoption warrants neutral governance, Peaceful
+Studio commits to transferring this repository to a community-led organisation
+under the same license terms. Contributions welcome from anywhere in the Canton
+and Daml ecosystems; no CLA required.
+
 ## License
 
-Apache 2.0 - See [LICENSE](LICENSE) for details.
+Apache-2.0. © 2026 Peaceful Studio OÜ. See [LICENSE](LICENSE) and [NOTICE](NOTICE)
+for details.
 
 ## Related Projects
 

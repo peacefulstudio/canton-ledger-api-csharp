@@ -111,20 +111,20 @@ public class DamlErrorParserTests
     {
         var ex = MakeRpcException(
             statusCode: StatusCode.FailedPrecondition,
-            errorId: "MURMURES_SWAP_ALREADY_EXECUTED",
-            statusMessage: "swap already executed",
+            errorId: "SAMPLE_ALREADY_EXECUTED",
+            statusMessage: "already executed",
             metadata: new Dictionary<string, string>
             {
                 ["category"] = "InvalidGivenCurrentSystemStateOther",
-                ["agreement_id"] = "00abc",
-                ["swap_index"] = "42",
+                ["resource_id"] = "00abc",
+                ["sequence"] = "42",
             });
 
         var (_, _, _, metadata) = DamlErrorParser.Parse(ex);
 
         metadata.Should().ContainKey("category");
-        metadata.Should().Contain(new KeyValuePair<string, string>("agreement_id", "00abc"));
-        metadata.Should().Contain(new KeyValuePair<string, string>("swap_index", "42"));
+        metadata.Should().Contain(new KeyValuePair<string, string>("resource_id", "00abc"));
+        metadata.Should().Contain(new KeyValuePair<string, string>("sequence", "42"));
     }
 
     [Fact]

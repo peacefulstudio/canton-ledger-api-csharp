@@ -17,6 +17,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ### Added
 
+- **`NOTICE` file** at the repository root declaring the product, copyright, and Apache-2.0 attribution alongside `LICENSE`.
+
 - Add CI-verified platform support across the full OS × architecture matrix: every shipped package builds and passes the unit test suite on Linux, Windows, and macOS, on both amd64 and arm64 (matching `daml-codegen-csharp` #314).
   Integration tests against Canton localnet continue to run on linux-amd64 only.
 
@@ -28,6 +30,7 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ### Changed
 
+- **Relocated the architecture overview to `docs/public/architecture-overview.md`** (was `docs/architecture-overview.md`); the README link now points at the new path.
 - **`ClientCredentialsProvider` now resolves its token endpoint at construction** (`Canton.Ledger.Auth`, #107). Direct instantiation with misconfigured options — no `TokenEndpoint`/`Domain`, a non-absolute or non-http `TokenEndpoint`, or a `Domain` ending in `/oauth/token` — throws `InvalidOperationException` from the constructor instead of at the first `GetTokenAsync` call. DI users registering through `AddCantonAuth` continue to see the same misconfiguration as an `OptionsValidationException` from the validator below.
 - **`AddCantonAuth` validates options through a dedicated `IValidateOptions<ClientCredentialsOptions>` instead of `ValidateDataAnnotations`** (`Canton.Ledger.Auth`, #107). Misconfiguration now surfaces as a clean `OptionsValidationException` — previously the DataAnnotations property sweep invoked the throwing `TokenGenerationEndpoint` getter and crashed with `TargetInvocationException`. Validation failure messages now come from `ClientCredentialsOptions.Validate` (e.g. "ClientId must not be whitespace." instead of "The ClientId field is required.").
 - **`LedgerClient.TryExerciseAsync<TResult>` and `TrySubmitAndWaitForTransactionAsync` now share a single internal submit path** (`Canton.Ledger.Grpc.Client`). Both route through one private `TrySubmitCoreAsync` that owns command building, header/deadline resolution, the gRPC call, response projection, and the `RpcException` → `DamlError`/`InfraError` mapping; only the `TransactionFormat` differs (`TryExerciseAsync` requests `LedgerEffects` + verbose, the plain submit path keeps the server-default `AcsDelta`). `TryExerciseAsync<TResult>` now unpacks its typed value via `TransactionResult.ExerciseResult<TResult>(choiceName)` instead of walking the raw protobuf. Consequences for `TryExerciseAsync` callers: the exercised event is now located by choice name only (no longer also keyed on the command's contract id), so a transaction containing more than one exercised event with that choice name — e.g. a choice whose body re-exercises the same choice on a child contract — now throws `InvalidOperationException` (the cardinality contract of `ExerciseResult<TResult>`) where the contract-id-keyed lookup previously disambiguated; the "no exercised event" not-found error message changed wording; and a choice that returns no `ExerciseResult` is normalized to `Unit` and yields `One` (previously threw). Caller-requested cancellation still propagates from `TryExerciseAsync` as before. `RpcException` failures are now logged on the shared path for both methods.

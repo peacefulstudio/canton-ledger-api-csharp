@@ -14,7 +14,7 @@ namespace Canton.Ledger.Grpc.Client;
 /// Canton attaches a <see cref="GrpcStatus"/> in the <c>grpc-status-details-bin</c> trailer
 /// (rich error model). Inside <c>Status.details</c>, the <see cref="ErrorInfo"/> entry carries:
 /// <list type="bullet">
-///   <item><c>reason</c> — the error ID (e.g. <c>CONTRACT_NOT_FOUND</c>, <c>MURMURES_SWAP_ALREADY_EXECUTED</c>);</item>
+///   <item><c>reason</c> — the error ID (e.g. <c>CONTRACT_NOT_FOUND</c>, <c>SAMPLE_ALREADY_EXECUTED</c>);</item>
 ///   <item><c>metadata["category"]</c> — the Canton error category name; mapped to <see cref="DamlErrorCategory"/>;</item>
 ///   <item><c>metadata</c> — additional structured detail (cookies, definite_answer, etc.).</item>
 /// </list>

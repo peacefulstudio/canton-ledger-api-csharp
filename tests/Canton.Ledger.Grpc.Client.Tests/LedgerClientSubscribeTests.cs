@@ -128,7 +128,7 @@ public class LedgerClientSubscribeTests
             MakeCreatedEvent("00other", new ProtoIdentifier
             {
                 PackageId = "test-pkg",
-                ModuleName = "Murmures.Other",
+                ModuleName = "Sample.Other",
                 EntityName = "Other",
             }, offset: 2L),
             MakeCreatedEvent("00foo2", FooBarTemplate, offset: 3L));
@@ -170,7 +170,7 @@ public class LedgerClientSubscribeTests
         filter.Cumulative.Should().ContainSingle();
         var template = filter.Cumulative[0].TemplateFilter;
         template.Should().NotBeNull();
-        template.TemplateId.ModuleName.Should().Be("Murmures.Foo");
+        template.TemplateId.ModuleName.Should().Be("Sample.Foo");
         template.TemplateId.EntityName.Should().Be("FooBar");
         template.TemplateId.PackageId.Should().Be("#" + FooBar.PackageName);
     }
@@ -289,7 +289,7 @@ public class LedgerClientSubscribeTests
         var unrelated = MakeActiveContract("00other", new ProtoIdentifier
         {
             PackageId = "test-pkg",
-            ModuleName = "Murmures.Other",
+            ModuleName = "Sample.Other",
             EntityName = "Other",
         });
         StubGetActiveContracts(matching, unrelated);
@@ -329,7 +329,7 @@ public class LedgerClientSubscribeTests
         var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
         filter.Cumulative.Should().ContainSingle();
         var template = filter.Cumulative[0].TemplateFilter;
-        template.TemplateId.ModuleName.Should().Be("Murmures.Foo");
+        template.TemplateId.ModuleName.Should().Be("Sample.Foo");
         template.TemplateId.EntityName.Should().Be("FooBar");
         template.TemplateId.PackageId.Should().Be("#" + FooBar.PackageName);
     }
@@ -430,7 +430,7 @@ public class LedgerClientSubscribeTests
         var unrelatedTemplate = new ProtoIdentifier
         {
             PackageId = "test-pkg",
-            ModuleName = "Murmures.Other",
+            ModuleName = "Sample.Other",
             EntityName = "Other",
         };
         var reassignment = new Reassignment { UpdateId = "u-mixed", Offset = 300L };
@@ -545,7 +545,7 @@ public class LedgerClientSubscribeTests
     private static readonly ProtoIdentifier FooBarTemplate = new()
     {
         PackageId = "test-pkg",
-        ModuleName = "Murmures.Foo",
+        ModuleName = "Sample.Foo",
         EntityName = "FooBar",
     };
 
@@ -762,7 +762,7 @@ public class LedgerClientSubscribeTests
 
     internal sealed record FooBar(string Owner) : ITemplate
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Murmures.Foo", "FooBar");
+        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
         public static string PackageId => "test-pkg";
         public static string PackageName => "test-package";
         public static Version PackageVersion { get; } = new(0, 1, 0);
@@ -773,7 +773,7 @@ public class LedgerClientSubscribeTests
 
     internal sealed record NoPackageNameTemplate(string Owner) : ITemplate
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Murmures.Foo", "FooBar");
+        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
         public static string PackageId => "test-pkg";
         public static string PackageName => "";
         public static Version PackageVersion { get; } = new(0, 1, 0);
