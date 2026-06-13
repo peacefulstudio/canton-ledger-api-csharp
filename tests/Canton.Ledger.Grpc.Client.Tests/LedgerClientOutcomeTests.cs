@@ -68,8 +68,8 @@ public class LedgerClientOutcomeTests
     public async Task TrySubmitAndWaitForTransaction_returns_DamlError_on_structured_failure()
     {
         var ex = LedgerClientTestFixtures.MakeDamlRpcException(
-            "MURMURES_SWAP_ALREADY_EXECUTED",
-            "swap already executed",
+            "SAMPLE_ALREADY_EXECUTED",
+            "already executed",
             "InvalidGivenCurrentSystemStateOther");
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
@@ -79,8 +79,8 @@ public class LedgerClientOutcomeTests
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>();
         var err = (ExerciseOutcome<TransactionResult>.DamlError)outcome;
         err.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateOther);
-        err.ErrorId.Should().Be("MURMURES_SWAP_ALREADY_EXECUTED");
-        err.Message.Should().Be("swap already executed");
+        err.ErrorId.Should().Be("SAMPLE_ALREADY_EXECUTED");
+        err.Message.Should().Be("already executed");
     }
 
     [Fact]
