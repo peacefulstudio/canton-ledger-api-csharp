@@ -158,7 +158,7 @@ sequenceDiagram
     Auth-->>LC: bearer token
     LC->>Node: CommandService.SubmitAndWaitForTransaction
     Node-->>LC: TransactionResult
-    LC-->>App: ExerciseOutcome&lt;ContractId&lt;Iou&gt;&gt;
+    LC-->>App: ExerciseOutcome#60;ContractId#60;Iou#62;#62;
 ```
 
 The read paths mirror it:
