@@ -17,6 +17,9 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ### Added
 
+- **`NOTICE` file** at the repository root declaring the product, copyright, and Apache-2.0 attribution alongside `LICENSE`.
+- **Relocated the architecture overview to `docs/public/architecture-overview.md`** (was `docs/architecture-overview.md`); the README link now points at the new path.
+
 - Add CI-verified platform support across the full OS × architecture matrix: every shipped package builds and passes the unit test suite on Linux, Windows, and macOS, on both amd64 and arm64 (matching `daml-codegen-csharp` #314).
   Integration tests against Canton localnet continue to run on linux-amd64 only.
 
