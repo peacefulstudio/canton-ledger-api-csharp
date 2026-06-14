@@ -211,7 +211,7 @@ and Daml ecosystems; no CLA required.
 
 ## License
 
-Apache-2.0. © 2026 Peaceful Studio OÜ. See [LICENSE](LICENSE) and [NOTICE](NOTICE)
+Apache-2.0. Copyright 2026 Peaceful Studio OÜ. See [LICENSE](LICENSE) and [NOTICE](NOTICE)
 for details.
 
 ## Related Projects

@@ -1,4 +1,4 @@
-// Copyright © 2026 Peaceful Studio OÜ. All rights reserved.
+// Copyright 2026 Peaceful Studio OÜ
 
 using Canton.Ledger.Auth.TokenGeneration;
 using Microsoft.Extensions.Configuration;

@@ -1,4 +1,4 @@
-// Copyright © 2026 Peaceful Studio OÜ. All rights reserved.
+// Copyright 2026 Peaceful Studio OÜ
 
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;

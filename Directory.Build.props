@@ -12,7 +12,7 @@
     <!-- Package metadata -->
     <Authors>Peaceful Studio OÜ</Authors>
     <Company>Peaceful Studio OÜ</Company>
-    <Copyright>Copyright © 2026 Peaceful Studio OÜ</Copyright>
+    <Copyright>Copyright 2026 Peaceful Studio OÜ</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</RepositoryUrl>
