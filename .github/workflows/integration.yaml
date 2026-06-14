@@ -1,0 +1,161 @@
+# Copyright 2026 Peaceful Studio OÜ
+# SPDX-License-Identifier: Apache-2.0
+
+name: Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: integration (localnet)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      LOCALNET_DIR: ${{ github.workspace }}/canton-localnet
+      LOCALNET_GRPC_URL: http://localhost:11901
+      LOCALNET_JSON_API_URL: http://localhost:11975
+      LOCALNET_TOKEN_URL: http://localhost:8082/realms/AValidator1/protocol/openid-connect/token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Checkout canton-localnet (fixtures + compose stack)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: peacefulstudio/canton-localnet
+          ref: dev
+          path: canton-localnet
+          persist-credentials: false
+
+      - name: Read validator OAuth2 client credentials from LocalNet fixtures
+        run: |
+          set -euo pipefail
+          oauth2_env="${LOCALNET_DIR}/compose/modules/keycloak/env/a-validator-1/on/oauth2.env"
+          read_fixture_value() {
+            value="$(grep -m 1 -oP "^${1}=\K\S+" "${oauth2_env}")" \
+              || { echo "::error::${1} not found in ${oauth2_env}" >&2; return 1; }
+            value="${value%\"}"
+            printf '%s' "${value#\"}"
+          }
+          client_id="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_ID)"
+          client_secret="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_SECRET)"
+          echo "::add-mask::${client_secret}"
+          {
+            echo "LOCALNET_CLIENT_ID=${client_id}"
+            echo "LOCALNET_CLIENT_SECRET=${client_secret}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
+        with:
+          global-json-file: global.json
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: canton-localnet/cli/go.sum
+
+      - name: Show docker / compose versions
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+
+      - name: Build canton-localnet CLI
+        working-directory: canton-localnet/cli
+        run: |
+          set -euo pipefail
+          go build -o "${LOCALNET_DIR}/canton-localnet" ./cmd/canton-localnet
+
+      - name: Bring up LocalNet (one retry on splice bootstrap race)
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          # Splice's SV-validator can lose a startup race on slower runners
+          # — "Ensuring decentralized synchronizer registered failed:
+          # UNAVAILABLE: No active synchronizer serial found". The initial
+          # bring-up is setup, not test signal, so one retry is allowed;
+          # mirrors canton-localnet compose-integration.yaml.
+          if ! "${LOCALNET_DIR}/canton-localnet" up; then
+            echo "::warning::canton-localnet up failed on first attempt — capturing diagnostics, tearing down with volumes, and retrying once"
+            docker ps -a > /tmp/docker-ps-attempt1.txt 2>&1 || true
+            timeout 60 make logs > /tmp/logs-attempt1.txt 2>&1 || true
+            "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::pre-retry teardown failed; second up may fail with leaked state"
+            sleep 30
+            "${LOCALNET_DIR}/canton-localnet" up
+          fi
+
+      - name: Wait for ledger + PQS readiness
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
+
+      - name: Restore
+        run: |
+          set -euo pipefail
+          dotnet restore tests/Canton.Ledger.Grpc.Client.Integration.Tests/Canton.Ledger.Grpc.Client.Integration.Tests.csproj
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          dotnet build --configuration Release --no-restore \
+            tests/Canton.Ledger.Grpc.Client.Integration.Tests/Canton.Ledger.Grpc.Client.Integration.Tests.csproj
+
+      - name: Integration tests
+        env:
+          CANTON_LOCALNET_PROFILE: a-validator-1
+          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
+          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
+          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
+          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
+          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          dotnet test --configuration Release --no-build \
+            --project tests/Canton.Ledger.Grpc.Client.Integration.Tests/Canton.Ledger.Grpc.Client.Integration.Tests.csproj \
+            -- --filter-trait "Category=Integration" --output Detailed
+
+      - name: Capture LocalNet state on failure
+        if: failure()
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          make status > /tmp/localnet-status.txt 2>&1 || true
+          timeout 30 make logs > /tmp/localnet-logs.txt 2>&1 || true
+          docker ps -a > /tmp/docker-ps.txt 2>&1 || true
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-diagnostics
+          path: |
+            /tmp/localnet-status.txt
+            /tmp/localnet-logs.txt
+            /tmp/docker-ps.txt
+            /tmp/docker-ps-attempt1.txt
+            /tmp/logs-attempt1.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Tear down LocalNet
+        if: always()
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::teardown failed (non-fatal in CI; runner is ephemeral)"

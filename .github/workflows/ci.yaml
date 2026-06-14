@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '**.sln'
+      - '**.slnx'
+      - '**.props'
+      - '**.targets'
+      - 'global.json'
+      - 'NuGet.config'
+      - 'coverage.settings.xml'
+      - '.github/workflows/ci.yaml'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: read
+  pull-requests: write
+
+jobs:
+  csharp-ci:
+    uses: peacefulstudio/github-actions/.github/workflows/csharp-ci.yaml@v2
+    with:
+      concurrency-group: csharp-ci-${{ github.ref }}
+      build-matrix: >-
+        [{"name":"ubuntu-amd64","runner":"ubuntu-latest","coverage":true},
+         {"name":"ubuntu-arm64","runner":"ubuntu-24.04-arm","coverage":false},
+         {"name":"windows-amd64","runner":"windows-latest","coverage":false},
+         {"name":"windows-arm64","runner":"windows-11-arm","coverage":false},
+         {"name":"macos-arm64","runner":"macos-latest","coverage":false},
+         {"name":"macos-amd64","runner":"macos-15-intel","coverage":false}]
+    secrets: inherit
