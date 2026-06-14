@@ -10,9 +10,9 @@
     <NoWarn>$(NoWarn);CA1062;CA1852;CA1859</NoWarn>
 
     <!-- Package metadata -->
-    <Authors>Peaceful Studio</Authors>
-    <Company>Peaceful Studio</Company>
-    <Copyright>Copyright © 2026 Peaceful Studio</Copyright>
+    <Authors>Peaceful Studio OÜ</Authors>
+    <Company>Peaceful Studio OÜ</Company>
+    <Copyright>Copyright © 2026 Peaceful Studio OÜ</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/peacefulstudio/canton-ledger-api-csharp</RepositoryUrl>
