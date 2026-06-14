@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
+// Copyright © 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Daml.Runtime.Data;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;

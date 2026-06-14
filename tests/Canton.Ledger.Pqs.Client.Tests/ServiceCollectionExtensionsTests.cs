@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
+// Copyright © 2026 Peaceful Studio OÜ. All rights reserved.
 
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;

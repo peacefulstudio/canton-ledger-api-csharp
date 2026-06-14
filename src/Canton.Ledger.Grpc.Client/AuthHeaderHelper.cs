@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Peaceful Studio OÜ. All rights reserved.
+// Copyright © 2026 Peaceful Studio OÜ. All rights reserved.
 
 using Canton.Ledger.Auth;
 using Grpc.Core;
