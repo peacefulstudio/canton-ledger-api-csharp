@@ -4,8 +4,9 @@
 name: Publish NuGet Packages
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version_override:
@@ -14,7 +15,39 @@ on:
         type: string
 
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      should_publish: ${{ steps.version.outputs.should_publish }}
+    steps:
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            VERSION="$VERSION_OVERRIDE"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::warning::tag '$GITHUB_REF_NAME' is not a version (vMAJOR.MINOR.PATCH[-prerelease]); skipping publish"
+              echo "should_publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "::warning::no tag and no version_override; nothing to publish, skipping"
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+
   publish:
+    needs: resolve-version
+    if: needs.resolve-version.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     environment: nuget-publish
     permissions:
@@ -34,4 +67,4 @@ jobs:
         uses: peacefulstudio/github-actions/.github/actions/csharp-publish@v1
         with:
           api-key: ${{ steps.login.outputs.NUGET_API_KEY }}
-          version_override: ${{ inputs.version_override }}
+          version_override: ${{ needs.resolve-version.outputs.version }}
