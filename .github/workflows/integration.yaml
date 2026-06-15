@@ -81,6 +81,30 @@ jobs:
           set -euo pipefail
           go build -o "${LOCALNET_DIR}/canton-localnet" ./cmd/canton-localnet
 
+      - name: Configure a minimal LocalNet (one authenticated validator)
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          # canton-localnet's default topology loads SV + a/b/c/d validators in
+          # one canton JVM, which OOM-restarts on ubuntu-latest and resets the
+          # JSON API mid-request (broken pipe). The tests only use a-validator-1;
+          # slot selection is config-file only (no CLI flag).
+          cat > canton-localnet.yaml <<'YAML'
+          schemaVersion: preview-1
+          modules:
+            obs: false
+            pqs: false
+          validators:
+            a-validator-1:
+              enabled: true
+            b-validator-1:
+              enabled: false
+            c-validator-1:
+              enabled: false
+            d-validator-1:
+              enabled: false
+          YAML
+
       - name: Bring up LocalNet (one retry on splice bootstrap race)
         working-directory: canton-localnet
         run: |
@@ -99,12 +123,6 @@ jobs:
             "${LOCALNET_DIR}/canton-localnet" up
           fi
 
-      - name: Wait for ledger + PQS readiness
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
-
       - name: Restore
         run: |
           set -euo pipefail
@@ -115,6 +133,12 @@ jobs:
           set -euo pipefail
           dotnet build --configuration Release --no-restore \
             tests/Canton.Ledger.Grpc.Client.Integration.Tests/Canton.Ledger.Grpc.Client.Integration.Tests.csproj
+
+      - name: Wait for ledger + PQS readiness
+        working-directory: canton-localnet
+        run: |
+          set -euo pipefail
+          "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
 
       - name: Integration tests
         env:
