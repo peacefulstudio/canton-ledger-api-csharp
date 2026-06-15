@@ -1,13 +1,30 @@
 # Canton Ledger API for C#
 
+[![CI](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml/badge.svg)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml)
+[![latest stable](https://img.shields.io/github/v/release/peacefulstudio/canton-ledger-api-csharp?label=latest%20stable)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases/latest)
+[![latest preview](https://img.shields.io/github/v/release/peacefulstudio/canton-ledger-api-csharp?include_prereleases&label=latest%20preview)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![.NET](https://img.shields.io/badge/.NET-10.0-white.svg)](https://dotnet.microsoft.com/)
-<!-- Static badge — repo is private, so shields.io's `github/v/release/...` dynamic endpoint can't read it. Bump on each release. -->
-[![Release](https://img.shields.io/badge/Release-v0.1.4-blue.svg)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases/latest)
 
 C# client libraries for interacting with Canton participant nodes via the Ledger API (gRPC) and Participant Query Store (PQS).
 
+## Platform Support
+
+CI builds and tests on every supported OS × architecture. Each badge reflects the latest `main` run.
+
+| Ubuntu | Windows | macOS |
+|---|---|---|
+| [![ubuntu amd64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-ubuntu-amd64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) | [![windows amd64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-windows-amd64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) | [![macos amd64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-macos-amd64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) |
+| [![ubuntu arm64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-ubuntu-arm64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) | [![windows arm64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-windows-arm64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) | [![macos arm64](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/ci-csharp-macos-arm64.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml) |
+
+## Coverage
+
+[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/peacefulstudio/canton-ledger-api-csharp/badges/coverage-csharp.json)](https://github.com/peacefulstudio/canton-ledger-api-csharp/actions/workflows/ci.yaml)
+
 ## Packages
+
+[![latest stable](https://img.shields.io/github/v/release/peacefulstudio/canton-ledger-api-csharp?label=latest%20stable)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases/latest)
+[![latest preview](https://img.shields.io/github/v/release/peacefulstudio/canton-ledger-api-csharp?include_prereleases&label=latest%20preview)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases)
 
 | Package | Description |
 |---------|-------------|
