@@ -186,6 +186,236 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
+    public async Task SubscribeAsync_for_interface_marker_filters_request_by_interface_id()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        var filter = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty[ActAs.Id];
+        filter.Cumulative.Should().ContainSingle();
+        var interfaceFilter = filter.Cumulative[0].InterfaceFilter;
+        interfaceFilter.Should().NotBeNull();
+        interfaceFilter.InterfaceId.ModuleName.Should().Be("Sample.Foo");
+        interfaceFilter.InterfaceId.EntityName.Should().Be("IFoo");
+        interfaceFilter.InterfaceId.PackageId.Should().Be("#" + IFoo.PackageName);
+        interfaceFilter.IncludeInterfaceView.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_yields_Created_matched_by_interface_view()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier
+            {
+                PackageId = "impl-pkg",
+                ModuleName = "Sample.Impl",
+                EntityName = "FooImpl",
+            },
+            CreateArguments = new ProtoRecord(),
+            Offset = 5L,
+        };
+        created.InterfaceViews.Add(new InterfaceView
+        {
+            InterfaceId = new ProtoIdentifier
+            {
+                PackageId = "any-pkg",
+                ModuleName = "Sample.Foo",
+                EntityName = "IFoo",
+            },
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Created = created })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var createdEvent = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Created>().Subject;
+        createdEvent.ContractId.Value.Should().Be("00impl");
+        createdEvent.Offset.Should().Be(5L);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_filters_out_Created_without_matching_view()
+    {
+        var matching = new ProtoCreatedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            CreateArguments = new ProtoRecord(),
+            Offset = 1L,
+        };
+        matching.InterfaceViews.Add(new InterfaceView
+        {
+            InterfaceId = new ProtoIdentifier { PackageId = "any-pkg", ModuleName = "Sample.Foo", EntityName = "IFoo" },
+        });
+        var unrelated = new ProtoCreatedEvent
+        {
+            ContractId = "00other",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Other", EntityName = "Other" },
+            CreateArguments = new ProtoRecord(),
+            Offset = 2L,
+        };
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(
+            new Event { Created = matching },
+            new Event { Created = unrelated })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Created>()
+            .Select(c => c.ContractId.Value)
+            .Should().Equal("00impl");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_yields_Archived_matched_by_implemented_interfaces()
+    {
+        var archived = new ProtoArchivedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Offset = 7L,
+        };
+        archived.ImplementedInterfaces.Add(new ProtoIdentifier
+        {
+            PackageId = "any-pkg",
+            ModuleName = "Sample.Foo",
+            EntityName = "IFoo",
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = archived })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var archivedEvent = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Archived>().Subject;
+        archivedEvent.ContractId.Value.Should().Be("00impl");
+        archivedEvent.Offset.Should().Be(7L);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_filters_out_Archived_without_matching_interface()
+    {
+        var unrelated = new ProtoArchivedEvent
+        {
+            ContractId = "00other",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Offset = 8L,
+        };
+        unrelated.ImplementedInterfaces.Add(new ProtoIdentifier
+        {
+            PackageId = "any-pkg",
+            ModuleName = "Sample.Other",
+            EntityName = "IOther",
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = unrelated })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Archived>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_yields_Exercised_matched_by_implemented_interfaces()
+    {
+        var exercised = new ProtoExercisedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Choice = "Accept",
+            ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            ExerciseResult = new ProtoValue { ContractId = "00new" },
+            Consuming = true,
+            Offset = 9L,
+        };
+        exercised.ImplementedInterfaces.Add(new ProtoIdentifier
+        {
+            PackageId = "any-pkg",
+            ModuleName = "Sample.Foo",
+            EntityName = "IFoo",
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = exercised })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var exercisedEvent = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Exercised>().Subject;
+        exercisedEvent.ContractId.Value.Should().Be("00impl");
+        exercisedEvent.ChoiceName.Should().Be("Accept");
+        exercisedEvent.Consuming.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_filters_out_Exercised_without_matching_interface()
+    {
+        var unrelated = new ProtoExercisedEvent
+        {
+            ContractId = "00other",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Choice = "Accept",
+            ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            ExerciseResult = new ProtoValue { ContractId = "00new" },
+            Consuming = true,
+            Offset = 9L,
+        };
+        unrelated.ImplementedInterfaces.Add(new ProtoIdentifier
+        {
+            PackageId = "any-pkg",
+            ModuleName = "Sample.Other",
+            EntityName = "IOther",
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = unrelated })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Exercised>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_template_marker_still_matches_Archived_and_Exercised_by_template_id()
+    {
+        var transaction = MakeTransaction(
+            new Event
+            {
+                Archived = new ProtoArchivedEvent
+                {
+                    ContractId = "00arch",
+                    TemplateId = FooBarTemplate,
+                    Offset = 10L,
+                },
+            },
+            new Event
+            {
+                Exercised = new ProtoExercisedEvent
+                {
+                    ContractId = "00exer",
+                    TemplateId = FooBarTemplate,
+                    Choice = "Accept",
+                    ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                    ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                    Consuming = true,
+                    Offset = 11L,
+                },
+            });
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<FooBar>.Archived>().Select(a => a.ContractId.Value).Should().Equal("00arch");
+        events.OfType<ContractStreamEvent<FooBar>.Exercised>().Select(e => e.ContractId.Value).Should().Equal("00exer");
+    }
+
+    [Fact]
     public async Task SubscribeAsync_expands_SubmitterInfo_actAs_and_readAs_into_FiltersByParty()
     {
         GetUpdatesRequest? captured = null;
@@ -464,6 +694,35 @@ public class LedgerClientSubscribeTests
         events.Should().ContainSingle();
         events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>()
             .Which.ContractId.Value.Should().Be("00foo");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_drops_Unassigned_event()
+    {
+        var interfaceShapedTemplate = new ProtoIdentifier
+        {
+            PackageId = "iface-pkg",
+            ModuleName = "Sample.Foo",
+            EntityName = "IFoo",
+        };
+        var reassignment = new Reassignment { UpdateId = "u-iface", Offset = 400L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Unassigned = new UnassignedEvent
+            {
+                ContractId = "00iface",
+                TemplateId = interfaceShapedTemplate,
+                Source = "sync-a",
+                Target = "sync-b",
+                Offset = 400L,
+            },
+        });
+        StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Unassigned>().Should().BeEmpty();
     }
 
     [Fact]
@@ -769,6 +1028,16 @@ public class LedgerClientSubscribeTests
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
+    }
+
+    internal sealed record IFoo : IDamlInterface
+    {
+        public static RuntimeIdentifier InterfaceId { get; } = new("iface-pkg", "Sample.Foo", "IFoo");
+        public static string PackageId => "iface-pkg";
+        public static string PackageName => "foo-iface";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public DamlRecord ToRecord() => DamlRecord.Create();
     }
 
     internal sealed record NoPackageNameTemplate(string Owner) : ITemplate

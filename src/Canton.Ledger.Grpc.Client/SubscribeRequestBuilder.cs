@@ -10,10 +10,11 @@ internal static class SubscribeRequestBuilder
 {
     public static GetUpdatesRequest BuildGetUpdatesRequest(
         RuntimeCommands.SubmitterInfo submitter,
-        ProtoIdentifier templateId,
-        long? fromOffset)
+        ProtoIdentifier filterId,
+        long? fromOffset,
+        bool isInterface = false)
     {
-        var eventFormat = BuildTemplateEventFormat(submitter, templateId);
+        var eventFormat = BuildEventFormat(submitter, filterId, isInterface);
         return new GetUpdatesRequest
         {
             BeginExclusive = fromOffset ?? 0L,
@@ -30,22 +31,24 @@ internal static class SubscribeRequestBuilder
 
     public static GetActiveContractsRequest BuildGetActiveContractsRequest(
         RuntimeCommands.SubmitterInfo submitter,
-        ProtoIdentifier templateId,
-        long activeAtOffset)
+        ProtoIdentifier filterId,
+        long activeAtOffset,
+        bool isInterface = false)
     {
         return new GetActiveContractsRequest
         {
             ActiveAtOffset = activeAtOffset,
-            EventFormat = BuildTemplateEventFormat(submitter, templateId),
+            EventFormat = BuildEventFormat(submitter, filterId, isInterface),
         };
     }
 
-    private static EventFormat BuildTemplateEventFormat(
+    private static EventFormat BuildEventFormat(
         RuntimeCommands.SubmitterInfo submitter,
-        ProtoIdentifier templateId)
+        ProtoIdentifier filterId,
+        bool isInterface)
     {
         var eventFormat = new EventFormat { Verbose = true };
-        var filters = BuildTemplateFilters(templateId);
+        var filters = isInterface ? BuildInterfaceFilters(filterId) : BuildTemplateFilters(filterId);
 
         AddFilterForEachParty(eventFormat, submitter.ActAs, filters);
         AddFilterForEachParty(eventFormat, submitter.ReadAs, filters);
@@ -74,6 +77,20 @@ internal static class SubscribeRequestBuilder
             TemplateFilter = new TemplateFilter
             {
                 TemplateId = templateId,
+            },
+        });
+        return filters;
+    }
+
+    private static Filters BuildInterfaceFilters(ProtoIdentifier interfaceId)
+    {
+        var filters = new Filters();
+        filters.Cumulative.Add(new CumulativeFilter
+        {
+            InterfaceFilter = new InterfaceFilter
+            {
+                InterfaceId = interfaceId,
+                IncludeInterfaceView = true,
             },
         });
         return filters;

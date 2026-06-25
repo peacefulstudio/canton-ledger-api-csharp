@@ -9,13 +9,16 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ## [Unreleased]
 
+## [0.1.5-preview.1] - 2026-06-23
+
 ### Changed — BREAKING
 
 - **Bumped `Daml.Ledger.Abstractions` and `Daml.Runtime` to `0.1.8-preview.2`** (public nuget.org releases of the runtime line) and adopted its typed submission surface (#103). `LedgerClient` follows the new `ILedgerClient` contract: the `string actAs` convenience overloads of `TryCreateAsync`, `TryExerciseAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, and `SubscribeActiveAsync` are gone — pass a `Party` (implicitly convertible to `SubmitterInfo`) or a full `SubmitterInfo` instead. `CommandsSubmission.CommandId`/`WorkflowId` are now the `CommandId`/`WorkflowId` value types and `ExerciseCommand` carries `ContractId`/`ChoiceName` value types, so a bare string can no longer be transposed into the wrong slot at a call site.
 - **`DamlValueConverter.ToProtoValue` emits `Numeric` in canonical unpadded decimal form** (`Daml.Runtime.Grpc`), the commitment-grade wire shape per codegen ADR-0011: trailing zeros stripped, at least one fractional digit, never scientific notation — `1.50m` → `"1.5"`, `0m` → `"0.0"`, `42m` → `"42.0"`. The gRPC wire encoder now agrees with the runtime's `DamlJsonSerializer`, so the wire shape no longer depends on the `decimal`'s construction scale (previously `0m` → `"0"`, `1.50m` → `"1.50"`).
-- **Bumped `Peaceful.Extensions.Logging` `0.2.1-preview.1` → `0.2.1-preview.2`** (nuget.org).
 
 ### Added
+
+- **Interface-view extraction on `CreatedContract`** (`Canton.Ledger.Grpc.Client`, #51). `TransactionResultProjector` now maps each `CreatedEvent.interface_views[].interface_id` into the new init-only `CreatedContract.InterfaceIds` (`IReadOnlyList<Identifier>`, from `Daml.Runtime`); `InterfaceIds` is empty when the transaction was not fetched with an interface filter. `ProjectToContractId<TMarker>` is widened to `where TMarker : IDamlType` and matches interface markers (`TMarker : IDamlInterface`) against `InterfaceIds` — module + entity name, package-id-agnostic, mirroring the existing template-id match — returning `None`/empty (never throwing) when no interface view is present, while `ITemplate` markers keep matching `TemplateId` as before. Non-breaking addition. NOTE: the public read-path surface (`ILedgerClient.TryExerciseForCreatedAsync<I>`, `TransactionResultExtensions.Single<I>/All<I>`) is still constrained to `ITemplate` in `Daml.Ledger.Abstractions`/`Daml.Runtime` `0.1.8-preview.4`; widening that surface to `IDamlType` is blocked on an upstream release.
 
 - **`NOTICE` file** at the repository root declaring the product, copyright, and Apache-2.0 attribution alongside `LICENSE`.
 
@@ -30,13 +33,14 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 ### Changed
 
+- **Bumped `Daml.Ledger.Abstractions` and `Daml.Runtime` `0.1.8-preview.2` → `0.1.8-preview.4`** (#51), which adds `CreatedContract.InterfaceIds` and the `IDamlType`/`IDamlInterface` markers consumed by interface-view matching.
 - **Relocated the architecture overview to `docs/public/architecture-overview.md`** (was `docs/architecture-overview.md`); the README link now points at the new path.
 - **`ClientCredentialsProvider` now resolves its token endpoint at construction** (`Canton.Ledger.Auth`, #107). Direct instantiation with misconfigured options — no `TokenEndpoint`/`Domain`, a non-absolute or non-http `TokenEndpoint`, or a `Domain` ending in `/oauth/token` — throws `InvalidOperationException` from the constructor instead of at the first `GetTokenAsync` call. DI users registering through `AddCantonAuth` continue to see the same misconfiguration as an `OptionsValidationException` from the validator below.
 - **`AddCantonAuth` validates options through a dedicated `IValidateOptions<ClientCredentialsOptions>` instead of `ValidateDataAnnotations`** (`Canton.Ledger.Auth`, #107). Misconfiguration now surfaces as a clean `OptionsValidationException` — previously the DataAnnotations property sweep invoked the throwing `TokenGenerationEndpoint` getter and crashed with `TargetInvocationException`. Validation failure messages now come from `ClientCredentialsOptions.Validate` (e.g. "ClientId must not be whitespace." instead of "The ClientId field is required.").
 - **`LedgerClient.TryExerciseAsync<TResult>` and `TrySubmitAndWaitForTransactionAsync` now share a single internal submit path** (`Canton.Ledger.Grpc.Client`). Both route through one private `TrySubmitCoreAsync` that owns command building, header/deadline resolution, the gRPC call, response projection, and the `RpcException` → `DamlError`/`InfraError` mapping; only the `TransactionFormat` differs (`TryExerciseAsync` requests `LedgerEffects` + verbose, the plain submit path keeps the server-default `AcsDelta`). `TryExerciseAsync<TResult>` now unpacks its typed value via `TransactionResult.ExerciseResult<TResult>(choiceName)` instead of walking the raw protobuf. Consequences for `TryExerciseAsync` callers: the exercised event is now located by choice name only (no longer also keyed on the command's contract id), so a transaction containing more than one exercised event with that choice name — e.g. a choice whose body re-exercises the same choice on a child contract — now throws `InvalidOperationException` (the cardinality contract of `ExerciseResult<TResult>`) where the contract-id-keyed lookup previously disambiguated; the "no exercised event" not-found error message changed wording; and a choice that returns no `ExerciseResult` is normalized to `Unit` and yields `One` (previously threw). Caller-requested cancellation still propagates from `TryExerciseAsync` as before. `RpcException` failures are now logged on the shared path for both methods.
 - **Bumped runtime transitive deps.** `Google.Protobuf` 3.35.0 → 3.35.1 (matches `daml-codegen-csharp` 0.1.8-preview.2) and all `Microsoft.Extensions.*` runtime packages (incl. `Http`) 10.0.8 → 10.0.9. No API or behaviour change; the package floors consumers inherit move up accordingly.
-- **`Daml.Ledger.Abstractions` and `Daml.Runtime` now resolve from public nuget.org instead of the `peacefulstudio` GitHub Packages feed.** No remaining dependency maps to the GitHub feed, so `dotnet restore` works without `GITHUB_USERNAME`/`GITHUB_TOKEN` (verified with a cold package cache); the `peaceful` source stays configured for future internal packages.
-- **`Peaceful.Extensions.Logging` now resolves from public nuget.org instead of the `peacefulstudio` GitHub Packages feed, bumped `0.2.0` → `0.2.1-preview.1`.** Consumers no longer need GitHub Packages authentication to restore this transitive dependency — only the still-private `Daml.*` packages keep the `peaceful` feed. The `NuGet.config` source mapping routes `Peaceful.Extensions.*` to nuget.org (the broader `Peaceful.*` pattern stays on the GitHub feed for any internal Peaceful packages).
+- **All dependencies now restore from public nuget.org; the `peacefulstudio` GitHub Packages source is removed from `NuGet.config`.** `Daml.Ledger.Abstractions`/`Daml.Runtime` `0.1.8-preview.4` are now published to nuget.org (they were the last dependency that still required the GitHub feed), so `dotnet restore` no longer needs `GITHUB_USERNAME`/`GITHUB_TOKEN` — verified with a credential-free restore. Re-add the source only if an internal-only `Canton.*`/`Peaceful.*` package is ever consumed.
+- **`Peaceful.Extensions.Logging` now resolves from public nuget.org, bumped `0.2.0` → `0.2.1-preview.2`.** Consumers no longer need GitHub Packages authentication to restore this transitive dependency.
 
 ## [0.1.4] - 2026-06-04
 
@@ -126,7 +130,8 @@ Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Cl
 
 - CI prerelease version strings now use dot-separated SemVer 2.0 identifiers (`${BASE}-${BRANCH}.${RUN}.${SHA}`) so `run_number` compares numerically; prevents `NU1605` downgrade warnings when consuming prereleases. (#24)
 
-[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.5-preview.1...HEAD
+[0.1.5-preview.1]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.4...v0.1.5-preview.1
 [0.1.4]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/peacefulstudio/canton-ledger-api-csharp/compare/v0.1.1...v0.1.2
