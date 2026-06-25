@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using Canton.Ledger.Auth;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
@@ -17,7 +18,6 @@ using Microsoft.Extensions.Options;
 using Peaceful.Extensions.Logging;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
-using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -275,19 +275,19 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     /// <inheritdoc />
-    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryExerciseForCreatedAsync<TTemplate>(
+    public async Task<ExerciseOutcome<ContractId<TMarker>>> TryExerciseForCreatedAsync<TMarker>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
         CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate
+        where TMarker : IDamlType
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
-        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TTemplate).Name);
+        activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(TMarker).Name);
         var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
-        return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
+        return TransactionResultProjector.ProjectToContractId<TMarker>(outcome);
     }
 
     private static RuntimeCommands.CommandsSubmission NewSubmission(
@@ -403,29 +403,29 @@ public sealed partial class LedgerClient : ILedgerClient
         RuntimeCommands.SubmitterInfo submitter,
         long? fromOffset = null,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : IDamlType
     {
-        var templateFilter = DamlValueConverter.ToProtoTemplateNameIdentifier(T.PackageName, T.TemplateId);
-        return SubscribeAsyncCore<T>(submitter, templateFilter, fromOffset, cancellationToken);
+        var filterId = MarkerMatcher<T>.StreamFilterIdentifier();
+        return SubscribeAsyncCore<T>(submitter, filterId, fromOffset, cancellationToken);
     }
 
     private async IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsyncCore<T>(
         RuntimeCommands.SubmitterInfo submitter,
-        ProtoIdentifier templateFilter,
+        ProtoIdentifier filterId,
         long? fromOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
-        where T : ITemplate
+        where T : IDamlType
     {
         using var activity = ActivityHelper.StartActivity<LedgerClient>(ActivitySource);
         activity?.SetTag(LedgerClientActivityTags.TemplateType, typeof(T).Name);
         activity?.SetTag(LedgerClientActivityTags.FromOffset, fromOffset);
         SetSubmitterTags(activity, submitter);
 
-        var templateId = T.TemplateId;
         var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
-            templateFilter,
-            fromOffset);
+            filterId,
+            fromOffset,
+            MarkerMatcher<T>.IsInterface);
 
         LogSubscribeStarted(Logger, typeof(T).Name, fromOffset ?? 0L);
 
@@ -451,7 +451,7 @@ public sealed partial class LedgerClient : ILedgerClient
 
             if (!step.Moved) yield break;
 
-            foreach (var typedEvent in ProjectUpdate<T>(stream.Current, templateId))
+            foreach (var typedEvent in ProjectUpdate<T>(stream.Current))
             {
                 yield return typedEvent;
             }
@@ -459,14 +459,13 @@ public sealed partial class LedgerClient : ILedgerClient
     }
 
     private static IEnumerable<ContractStreamEvent<T>> ProjectUpdate<T>(
-        GetUpdatesResponse response,
-        RuntimeIdentifier templateId)
-        where T : ITemplate
+        GetUpdatesResponse response)
+        where T : IDamlType
     {
         switch (response.UpdateCase)
         {
             case GetUpdatesResponse.UpdateOneofCase.Transaction:
-                foreach (var typedEvent in ContractStreamProjector.ProjectTransactionEvents<T>(response.Transaction, templateId))
+                foreach (var typedEvent in ContractStreamProjector.ProjectTransactionEvents<T>(response.Transaction))
                 {
                     yield return typedEvent;
                 }
@@ -475,7 +474,7 @@ public sealed partial class LedgerClient : ILedgerClient
                 yield return new ContractStreamEvent<T>.Checkpoint(response.OffsetCheckpoint.Offset);
                 break;
             case GetUpdatesResponse.UpdateOneofCase.Reassignment:
-                foreach (var typedEvent in ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment, templateId))
+                foreach (var typedEvent in ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment))
                 {
                     yield return typedEvent;
                 }

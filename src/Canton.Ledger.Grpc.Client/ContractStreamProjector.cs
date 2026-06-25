@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 
 using Com.Daml.Ledger.Api.V2;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
@@ -14,9 +15,8 @@ namespace Canton.Ledger.Grpc.Client;
 internal static class ContractStreamProjector
 {
     public static IEnumerable<ContractStreamEvent<T>> ProjectTransactionEvents<T>(
-        Transaction transaction,
-        RuntimeIdentifier templateId)
-        where T : ITemplate
+        Transaction transaction)
+        where T : IDamlType
     {
         foreach (var evt in transaction.Events)
         {
@@ -25,14 +25,14 @@ internal static class ContractStreamProjector
                 case Event.EventOneofCase.Created:
                     {
                         var created = evt.Created;
-                        if (!IsTemplateMatch(created.TemplateId, templateId)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoCreated(created)) continue;
                         yield return CreatedFromProto<T>(created);
                         break;
                     }
                 case Event.EventOneofCase.Archived:
                     {
                         var archived = evt.Archived;
-                        if (!IsTemplateMatch(archived.TemplateId, templateId)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoArchived(archived)) continue;
                         yield return new ContractStreamEvent<T>.Archived(
                             new ContractId<T>(archived.ContractId),
                             archived.Offset,
@@ -42,7 +42,7 @@ internal static class ContractStreamProjector
                 case Event.EventOneofCase.Exercised:
                     {
                         var exercised = evt.Exercised;
-                        if (!IsTemplateMatch(exercised.TemplateId, templateId)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoExercised(exercised)) continue;
                         var argument = exercised.ChoiceArgument is null
                             ? DamlUnit.Instance
                             : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
@@ -64,9 +64,8 @@ internal static class ContractStreamProjector
     }
 
     public static IEnumerable<ContractStreamEvent<T>> ProjectReassignmentEvents<T>(
-        Reassignment reassignment,
-        RuntimeIdentifier templateId)
-        where T : ITemplate
+        Reassignment reassignment)
+        where T : IDamlType
     {
         foreach (var evt in reassignment.Events)
         {
@@ -77,7 +76,7 @@ internal static class ContractStreamProjector
                         var assigned = evt.Assigned;
                         var created = assigned.CreatedEvent;
                         if (created is null) continue;
-                        if (!IsTemplateMatch(created.TemplateId, templateId)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoCreated(created)) continue;
                         var payload = created.CreateArguments is null
                             ? new DamlRecord(null, [])
                             : DamlValueConverter.FromProtoRecord(created.CreateArguments);
@@ -93,7 +92,7 @@ internal static class ContractStreamProjector
                 case ReassignmentEvent.EventOneofCase.Unassigned:
                     {
                         var unassigned = evt.Unassigned;
-                        if (!IsTemplateMatch(unassigned.TemplateId, templateId)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoUnassigned(unassigned)) continue;
                         yield return new ContractStreamEvent<T>.Unassigned(
                             new ContractId<T>(unassigned.ContractId),
                             unassigned.Offset,
@@ -107,7 +106,7 @@ internal static class ContractStreamProjector
     }
 
     public static ContractStreamEvent<T>.Created CreatedFromProto<T>(ProtoCreatedEvent created)
-        where T : ITemplate
+        where T : IDamlType
     {
         var payload = created.CreateArguments is null
             ? new DamlRecord(null, [])
