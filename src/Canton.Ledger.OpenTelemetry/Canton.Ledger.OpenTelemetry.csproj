@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Canton.Ledger.OpenTelemetry</PackageId>
+    <Description>Opt-in OpenTelemetry wiring for the Canton Ledger API clients. AddCantonLedgerInstrumentation() registers the gRPC, admin, and PQS client ActivitySources plus Npgsql's own PostgreSQL instrumentation. The only assembly in this repo that depends on the OpenTelemetry SDK (ADR 0010) — the client libraries themselves emit only BCL System.Diagnostics.Activity.</Description>
+    <PackageTags>canton;daml;opentelemetry;tracing;observability;client</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Canton.Ledger.OpenTelemetry.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="Npgsql.OpenTelemetry" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
+    <ProjectReference Include="..\Canton.Ledger.Pqs.Client\Canton.Ledger.Pqs.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

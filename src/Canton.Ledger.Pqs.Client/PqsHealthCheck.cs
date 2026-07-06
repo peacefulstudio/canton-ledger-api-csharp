@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -8,9 +9,6 @@ using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Pqs.Client;
 
-/// <summary>
-/// Health check that verifies connectivity to the PQS PostgreSQL database.
-/// </summary>
 internal sealed partial class PqsHealthCheck : IHealthCheck
 {
     private static readonly ILogger<PqsHealthCheck> Logger = StaticLoggerFactory.Create<PqsHealthCheck>();

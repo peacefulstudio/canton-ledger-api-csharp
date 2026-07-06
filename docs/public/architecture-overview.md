@@ -99,7 +99,8 @@ flowchart TD
     APP["Application + generated bindings"] --> CLIENT["Canton.Ledger.Grpc.Client\nLedgerClient / AdminClient"]
     APP --> PQSC["Canton.Ledger.Pqs.Client\nPqsClient"]
     CLIENT --> BRIDGE["Daml.Runtime.Grpc\nDamlValueConverter"]
-    CLIENT --> AUTH["Canton.Ledger.Auth\nITokenProvider"]
+    CLIENT --> KERNEL["Canton.Ledger.Kernel\nITokenProvider · telemetry · retry"]
+    PQSC --> KERNEL
     CLIENT --> STUBS["Canton.Ledger.Grpc\ngenerated gRPC stubs"]
     BRIDGE --> STUBS
     STUBS -- "HTTP/2" --> NODE["Canton participant node"]
@@ -126,13 +127,17 @@ The package applications actually use. Two entry points:
 
 Configuration goes through `LedgerClientOptions` (address, user, limits, timeout), with `Microsoft.Extensions.DependencyInjection` integration: `AddCantonLedger(configuration)` binds the `Canton:Ledger` and `Canton:Auth` configuration sections and registers both clients as singletons (`AddLedgerClient` / `AddAdminClient` register each individually).
 
-### `Canton.Ledger.Auth` — pluggable authentication
+### `Canton.Ledger.Kernel` — the transport-neutral kernel
+
+The kernel bundles the cross-cutting concerns every transport client consumes as a peer (ADR 0006), in three explicit modules: `Kernel.Authentication`, `Kernel.Telemetry`, and `Kernel.Resilience`. `Authentication` sits at the bottom of the kernel's namespace DAG and depends on neither of the other two, so it can later be extracted into its own package non-breakingly.
 
 Authentication is abstracted behind `ITokenProvider` (`GetTokenAsync` → bearer token). Every gRPC call asks the provider for a token and attaches an `Authorization: Bearer …` header. Implementations:
 
 - `ClientCredentialsProvider` — OAuth2 client-credentials flow against a configurable token endpoint (Auth0, Keycloak, or any standard OAuth2 issuer), with thread-safe expiry-aware caching.
 - `StaticTokenProvider` — a pre-provisioned token.
 - `ITokenProvider.None` — unauthenticated participants; no header is sent.
+
+`Kernel.Telemetry.LedgerActivitySource` is the shared `ActivitySource` naming convention every client's spans follow (host-side wiring lives in `Canton.Ledger.OpenTelemetry`, ADR 0010); `Kernel.Resilience` is the opt-in Polly retry pipeline, disabled by default.
 
 ### `Canton.Ledger.Pqs.Client` — the read model
 

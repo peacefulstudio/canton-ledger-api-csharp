@@ -1,11 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
-using FluentAssertions;
+using AwesomeAssertions;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
@@ -16,6 +17,7 @@ using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
+using RpcStatus = Google.Rpc.Status;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -121,8 +123,87 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
-    public async Task SubscribeAsync_filters_out_events_for_unrelated_templates()
+    public async Task SubscribeAsync_Created_event_carries_transaction_synchronizer_id()
     {
+        var transaction = MakeTransaction(MakeCreatedEvent("00abc", FooBarTemplate, offset: 42L));
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var created = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject;
+        created.SynchronizerId.Should().Be(new SynchronizerId(TransactionSynchronizer));
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_Archived_event_carries_transaction_synchronizer_id()
+    {
+        var transaction = MakeTransaction(new Event
+        {
+            Archived = new ProtoArchivedEvent
+            {
+                ContractId = "00abc",
+                TemplateId = FooBarTemplate,
+                Offset = 7L,
+            },
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var archived = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Archived>().Subject;
+        archived.SynchronizerId.Should().Be(new SynchronizerId(TransactionSynchronizer));
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_Exercised_event_carries_transaction_synchronizer_id()
+    {
+        var transaction = MakeTransaction(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00abc",
+                TemplateId = FooBarTemplate,
+                Choice = "Accept",
+                ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                Consuming = true,
+                Offset = 99L,
+            },
+        });
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var exercised = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Exercised>().Subject;
+        exercised.SynchronizerId.Should().Be(new SynchronizerId(TransactionSynchronizer));
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_Created_event_carries_active_contract_synchronizer_id()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        StubGetActiveContracts(MakeActiveContract("00foo", FooBarTemplate));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject
+            .SynchronizerId.Should().Be(new SynchronizerId("sync-1"));
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_unrelated_template_Created_as_Unclassified()
+    {
+        // No-silent-drop (ADR 0003): a Created the client cannot classify to the
+        // subscribed template is surfaced as Unclassified between the matching ones,
+        // never dropped.
         var transaction = MakeTransaction(
             MakeCreatedEvent("00foo", FooBarTemplate, offset: 1L),
             MakeCreatedEvent("00other", new ProtoIdentifier
@@ -137,10 +218,29 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.Should().HaveCount(2);
-        events.OfType<ContractStreamEvent<FooBar>.Created>()
-            .Select(c => c.ContractId.Value)
-            .Should().Equal("00foo", "00foo2");
+        events.Should().HaveCount(3);
+        events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00foo");
+        events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>()
+            .Which.Offset.Should().Be(2L);
+        events[2].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00foo2");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_Created_as_Unclassified_when_transaction_synchronizer_id_missing()
+    {
+        var transaction = MakeTransaction(MakeCreatedEvent("00abc", FooBarTemplate, offset: 42L));
+        transaction.SynchronizerId = string.Empty;
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(42L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -228,6 +328,8 @@ public class LedgerClientSubscribeTests
                 ModuleName = "Sample.Foo",
                 EntityName = "IFoo",
             },
+            ViewStatus = new RpcStatus { Code = 0 },
+            ViewValue = new ProtoRecord(),
         });
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Created = created })));
 
@@ -253,6 +355,8 @@ public class LedgerClientSubscribeTests
         matching.InterfaceViews.Add(new InterfaceView
         {
             InterfaceId = new ProtoIdentifier { PackageId = "any-pkg", ModuleName = "Sample.Foo", EntityName = "IFoo" },
+            ViewStatus = new RpcStatus { Code = 0 },
+            ViewValue = new ProtoRecord(),
         });
         var unrelated = new ProtoCreatedEvent
         {
@@ -512,8 +616,11 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_yields_only_typed_Created_for_matching_template()
+    public async Task SubscribeActiveAsync_surfaces_Created_for_matching_template_and_Unclassified_for_mismatch()
     {
+        // Regression for #179: a snapshot entry whose template doesn't match the
+        // subscribed marker T is surfaced as Unclassified, never silently dropped,
+        // at parity with the live SubscribeAsync stream.
         StubGetLedgerEnd(offset: 10L);
         var matching = MakeActiveContract("00foo", FooBarTemplate);
         var unrelated = MakeActiveContract("00other", new ProtoIdentifier
@@ -521,14 +628,45 @@ public class LedgerClientSubscribeTests
             PackageId = "test-pkg",
             ModuleName = "Sample.Other",
             EntityName = "Other",
-        });
+        }, offset: 99L);
         StubGetActiveContracts(matching, unrelated);
 
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle();
-        events[0].ContractId.Value.Should().Be("00foo");
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00foo");
+        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
+        unclassified.Offset.Should().Be(99L);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_Created_for_matching_interface_and_Unclassified_for_mismatch()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        var matching = MakeActiveContractWithInterfaceView(
+            "00impl",
+            new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            new ProtoIdentifier { PackageId = "any-pkg", ModuleName = "Sample.Foo", EntityName = "IFoo" });
+        var unrelated = MakeActiveContract("00other", new ProtoIdentifier
+        {
+            PackageId = "impl-pkg",
+            ModuleName = "Sample.Other",
+            EntityName = "Other",
+        }, offset: 88L);
+        StubGetActiveContracts(matching, unrelated);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<IFoo>(ActAs, TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<ContractStreamEvent<IFoo>.Created>()
+            .Which.ContractId.Value.Should().Be("00impl");
+        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
+        unclassified.Offset.Should().Be(88L);
     }
 
     [Fact]
@@ -562,6 +700,27 @@ public class LedgerClientSubscribeTests
         template.TemplateId.ModuleName.Should().Be("Sample.Foo");
         template.TemplateId.EntityName.Should().Be("FooBar");
         template.TemplateId.PackageId.Should().Be("#" + FooBar.PackageName);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_for_interface_marker_filters_request_by_interface_id()
+    {
+        StubGetLedgerEnd(offset: 0L);
+        GetActiveContractsRequest? captured = null;
+        StubGetActiveContracts(captureRequest: r => captured = r);
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeActiveAsync<IFoo>(ActAs, TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
+        filter.Cumulative.Should().ContainSingle();
+        var interfaceFilter = filter.Cumulative[0].InterfaceFilter;
+        interfaceFilter.Should().NotBeNull();
+        interfaceFilter.InterfaceId.ModuleName.Should().Be("Sample.Foo");
+        interfaceFilter.InterfaceId.EntityName.Should().Be("IFoo");
+        interfaceFilter.InterfaceId.PackageId.Should().Be("#" + IFoo.PackageName);
+        interfaceFilter.IncludeInterfaceView.Should().BeTrue();
     }
 
     [Fact]
@@ -655,7 +814,7 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
-    public async Task SubscribeAsync_filters_reassignment_events_by_template_id()
+    public async Task SubscribeAsync_surfaces_unrelated_template_reassignment_as_Unclassified()
     {
         var unrelatedTemplate = new ProtoIdentifier
         {
@@ -691,14 +850,20 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle();
-        events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>()
+        events.OfType<ContractStreamEvent<FooBar>.Unassigned>()
+            .Should().ContainSingle()
             .Which.ContractId.Value.Should().Be("00foo");
+        events.OfType<ContractStreamEvent<FooBar>.Unclassified>()
+            .Should().ContainSingle()
+            .Which.Offset.Should().Be(300L);
     }
 
     [Fact]
-    public async Task SubscribeAsync_for_interface_marker_drops_Unassigned_event()
+    public async Task SubscribeAsync_for_interface_marker_surfaces_Unassigned_as_Unclassified()
     {
+        // Regression for #140: UnassignedEvent has no implemented_interfaces field,
+        // so an interface-typed stream cannot classify it — the projector surfaces
+        // it as Unclassified rather than silently dropping it.
         var interfaceShapedTemplate = new ProtoIdentifier
         {
             PackageId = "iface-pkg",
@@ -723,6 +888,10 @@ public class LedgerClientSubscribeTests
         var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.OfType<ContractStreamEvent<IFoo>.Unassigned>().Should().BeEmpty();
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(400L);
+        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -756,8 +925,9 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle();
-        events[0].ContractId.Value.Should().Be("00mid");
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00mid");
     }
 
     [Fact]
@@ -786,8 +956,181 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle();
-        events[0].ContractId.Value.Should().Be("00mid2");
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00mid2");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_Unclassified_when_active_contract_synchronizer_id_missing()
+    {
+        // Regression for #179: an ActiveContract entry that cannot be paired with a
+        // synchronizer id is surfaced as Unclassified, never silently dropped.
+        StubGetLedgerEnd(offset: 0L);
+        var response = new GetActiveContractsResponse
+        {
+            ActiveContract = new ActiveContract
+            {
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00nosync",
+                    TemplateId = FooBarTemplate,
+                    CreateArguments = new ProtoRecord(),
+                    Offset = 15L,
+                },
+                SynchronizerId = string.Empty,
+            },
+        };
+        StubGetActiveContracts(response);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(15L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_Unclassified_when_IncompleteUnassigned_source_missing()
+    {
+        // Regression for #179: same invariant for the IncompleteUnassigned shape,
+        // whose synchronizer id is derived from UnassignedEvent.Source.
+        StubGetLedgerEnd(offset: 0L);
+        var incomplete = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00midnosync",
+                    TemplateId = FooBarTemplate,
+                    CreateArguments = new ProtoRecord(),
+                    Offset = 16L,
+                },
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = "00midnosync",
+                    TemplateId = FooBarTemplate,
+                    Source = string.Empty,
+                    Target = "sync-b",
+                },
+            },
+        };
+        StubGetActiveContracts(incomplete);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(16L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_Unclassified_when_IncompleteAssigned_target_missing()
+    {
+        // Regression for #179: same invariant for the IncompleteAssigned shape,
+        // whose synchronizer id is derived from AssignedEvent.Target.
+        StubGetLedgerEnd(offset: 0L);
+        var incomplete = new GetActiveContractsResponse
+        {
+            IncompleteAssigned = new IncompleteAssigned
+            {
+                AssignedEvent = new AssignedEvent
+                {
+                    Source = "sync-a",
+                    Target = string.Empty,
+                    CreatedEvent = new ProtoCreatedEvent
+                    {
+                        ContractId = "00mid2nosync",
+                        TemplateId = FooBarTemplate,
+                        CreateArguments = new ProtoRecord(),
+                        Offset = 17L,
+                    },
+                },
+            },
+        };
+        StubGetActiveContracts(incomplete);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(17L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_CreatedEvent_kind_when_template_mismatched_and_synchronizer_id_missing()
+    {
+        // Regression for #179 review: template mismatch takes precedence over a
+        // missing synchronizer id, mirroring the live SubscribeAsync ordering
+        // (marker check before synchronizer-id check).
+        StubGetLedgerEnd(offset: 0L);
+        var response = new GetActiveContractsResponse
+        {
+            ActiveContract = new ActiveContract
+            {
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00mismatch",
+                    TemplateId = new ProtoIdentifier
+                    {
+                        PackageId = "test-pkg",
+                        ModuleName = "Sample.Other",
+                        EntityName = "Other",
+                    },
+                    CreateArguments = new ProtoRecord(),
+                    Offset = 21L,
+                },
+                SynchronizerId = string.Empty,
+            },
+        };
+        StubGetActiveContracts(response);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(21L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_IncompleteUnassigned_offset_from_reassignment_event_when_created_event_absent()
+    {
+        // Regression for #179 review: when the created event is absent, the
+        // Unclassified offset should come from the entry's own reassignment
+        // event rather than defaulting to 0.
+        StubGetLedgerEnd(offset: 0L);
+        var incomplete = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = "00noevent",
+                    TemplateId = FooBarTemplate,
+                    Source = "sync-a",
+                    Target = "sync-b",
+                    Offset = 33L,
+                },
+            },
+        };
+        StubGetActiveContracts(incomplete);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(33L);
+        unclassified.Kind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned.ToString());
     }
 
     [Fact]
@@ -799,6 +1142,149 @@ public class LedgerClientSubscribeTests
         var offset = await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
 
         offset.Should().Be(12345L);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_surfaces_Archived_with_empty_implemented_interfaces_as_Unclassified()
+    {
+        // Regression for #142: the participant delivers an ArchivedEvent for a
+        // contract implementing the subscribed interface, but leaves
+        // implemented_interfaces empty despite include_interface_view. The client
+        // cannot classify it, so it must be surfaced, never silently dropped.
+        var archived = new ProtoArchivedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Offset = 71L,
+        };
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = archived })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Archived>().Should().BeEmpty();
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(71L);
+        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_surfaces_Exercised_with_empty_implemented_interfaces_as_Unclassified()
+    {
+        // Regression for #142: same participant gap on an ExercisedEvent.
+        var exercised = new ProtoExercisedEvent
+        {
+            ContractId = "00impl",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
+            Choice = "Accept",
+            ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            Consuming = true,
+            Offset = 93L,
+        };
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = exercised })));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.OfType<ContractStreamEvent<IFoo>.Exercised>().Should().BeEmpty();
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(93L);
+        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_reassignment_Assigned_without_created_event_as_Unclassified()
+    {
+        var reassignment = new Reassignment { UpdateId = "u-noc", Offset = 250L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Assigned = new AssignedEvent { Source = "sync-a", Target = "sync-b", ReassignmentId = "rid" },
+        });
+        StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(250L);
+        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_Assigned_as_Unclassified_when_source_or_target_missing()
+    {
+        var reassignment = new Reassignment { UpdateId = "u-nosync", Offset = 260L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Assigned = new AssignedEvent
+            {
+                Source = "sync-a",
+                Target = string.Empty,
+                ReassignmentId = "rid",
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00nosync",
+                    TemplateId = FooBarTemplate,
+                    CreateArguments = new ProtoRecord(),
+                    Offset = 260L,
+                },
+            },
+        });
+        StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(260L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_Unassigned_as_Unclassified_when_source_or_target_missing()
+    {
+        var reassignment = new Reassignment { UpdateId = "u-nosync2", Offset = 261L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Unassigned = new UnassignedEvent
+            {
+                ContractId = "00nosync2",
+                TemplateId = FooBarTemplate,
+                Source = string.Empty,
+                Target = "sync-b",
+                Offset = 261L,
+            },
+        });
+        StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(261L);
+        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_unrecognized_transaction_event_as_Unclassified()
+    {
+        var transaction = MakeTransaction(new Event());
+
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(1L);
+        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
     }
 
     private static readonly ProtoIdentifier FooBarTemplate = new()
@@ -822,9 +1308,16 @@ public class LedgerClientSubscribeTests
         };
     }
 
+    private const string TransactionSynchronizer = "sync-tx";
+
     private static Transaction MakeTransaction(params Event[] events)
     {
-        var tx = new Transaction { UpdateId = "u-test", Offset = events.Length > 0 ? 1L : 0L };
+        var tx = new Transaction
+        {
+            UpdateId = "u-test",
+            Offset = events.Length > 0 ? 1L : 0L,
+            SynchronizerId = TransactionSynchronizer,
+        };
         tx.Events.Add(events);
         return tx;
     }
@@ -836,7 +1329,7 @@ public class LedgerClientSubscribeTests
             : new GetUpdatesResponse { Transaction = transaction };
     }
 
-    private static GetActiveContractsResponse MakeActiveContract(string contractId, ProtoIdentifier templateId)
+    private static GetActiveContractsResponse MakeActiveContract(string contractId, ProtoIdentifier templateId, long offset = 0L)
     {
         return new GetActiveContractsResponse
         {
@@ -847,10 +1340,24 @@ public class LedgerClientSubscribeTests
                     ContractId = contractId,
                     TemplateId = templateId,
                     CreateArguments = new ProtoRecord(),
+                    Offset = offset,
                 },
                 SynchronizerId = "sync-1",
             },
         };
+    }
+
+    private static GetActiveContractsResponse MakeActiveContractWithInterfaceView(
+        string contractId, ProtoIdentifier templateId, ProtoIdentifier interfaceId)
+    {
+        var response = MakeActiveContract(contractId, templateId);
+        response.ActiveContract.CreatedEvent.InterfaceViews.Add(new InterfaceView
+        {
+            InterfaceId = interfaceId,
+            ViewStatus = new RpcStatus { Code = 0 },
+            ViewValue = new ProtoRecord(),
+        });
+        return response;
     }
 
     private void StubGetUpdates(
@@ -980,10 +1487,6 @@ public class LedgerClientSubscribeTests
         return list;
     }
 
-    /// <summary>
-    /// In-memory <see cref="IAsyncStreamReader{T}"/> for testing — yields a
-    /// fixed sequence then optionally throws on next <c>MoveNext</c>.
-    /// </summary>
     private sealed class FakeStreamReader<T> : IAsyncStreamReader<T>
     {
         private readonly IReadOnlyList<T> _items;
@@ -1025,6 +1528,7 @@ public class LedgerClientSubscribeTests
         public static string PackageId => "test-pkg";
         public static string PackageName => "test-package";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
@@ -1036,6 +1540,7 @@ public class LedgerClientSubscribeTests
         public static string PackageId => "iface-pkg";
         public static string PackageName => "foo-iface";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(InterfaceId, DamlTypeKind.Interface, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create();
     }
@@ -1046,6 +1551,7 @@ public class LedgerClientSubscribeTests
         public static string PackageId => "test-pkg";
         public static string PackageName => "";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));

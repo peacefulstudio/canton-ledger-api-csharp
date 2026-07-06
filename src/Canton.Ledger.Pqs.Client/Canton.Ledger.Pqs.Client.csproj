@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Kernel\Canton.Ledger.Kernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Peaceful.Extensions.Logging" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Npgsql" />

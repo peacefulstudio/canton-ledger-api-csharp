@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Google.Protobuf;

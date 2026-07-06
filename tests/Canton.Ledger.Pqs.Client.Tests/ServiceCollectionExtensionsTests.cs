@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;

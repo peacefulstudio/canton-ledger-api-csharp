@@ -1,9 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
+using Google.Rpc;
 using ProtoArchivedEvent = Com.Daml.Ledger.Api.V2.ArchivedEvent;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
@@ -67,6 +70,32 @@ internal static class MarkerMatcher<TMarker>
         }
 
         return ContractStreamProjector.IsTemplateMatch(unassigned.TemplateId, MarkerIdentity);
+    }
+
+    public static bool TryGetInterfaceViewRecord(ProtoCreatedEvent created, out DamlRecord record)
+    {
+        if (!IsInterface)
+        {
+            throw new InvalidOperationException(
+                $"{typeof(TMarker).FullName} is not a Daml interface marker; interface views only apply to IDamlInterface markers.");
+        }
+
+        foreach (var view in created.InterfaceViews)
+        {
+            if (!ContractStreamProjector.IsTemplateMatch(view.InterfaceId, MarkerIdentity)) continue;
+
+            if (view.ViewStatus is null || view.ViewStatus.Code != (int)Code.Ok || view.ViewValue is null)
+            {
+                record = null!;
+                return false;
+            }
+
+            record = DamlValueConverter.FromProtoRecord(view.ViewValue);
+            return true;
+        }
+
+        record = null!;
+        return false;
     }
 
     private static bool MatchesAnyImplementedInterface(IEnumerable<ProtoIdentifier> implementedInterfaces)

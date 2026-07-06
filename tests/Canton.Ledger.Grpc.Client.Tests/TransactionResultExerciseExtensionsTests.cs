@@ -1,9 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -205,7 +206,8 @@ public class TransactionResultExerciseExtensionsTests
             UpdateId: "u1",
             CompletionOffset: 1L,
             CreatedContracts: [],
-            ArchivedContractIds: [])
+            ArchivedContractIds: [],
+            CommandId: default)
         {
             ExercisedEvents = events,
         };

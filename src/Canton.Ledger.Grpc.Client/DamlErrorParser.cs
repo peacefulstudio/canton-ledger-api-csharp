@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Daml.Runtime.Outcomes;
 using Google.Protobuf;
@@ -8,40 +9,17 @@ using GrpcStatus = Google.Rpc.Status;
 
 namespace Canton.Ledger.Grpc.Client;
 
-/// <summary>
-/// Decodes structured Canton/Daml error information from a gRPC <see cref="RpcException"/>.
-///
-/// Canton attaches a <see cref="GrpcStatus"/> in the <c>grpc-status-details-bin</c> trailer
-/// (rich error model). Inside <c>Status.details</c>, the <see cref="ErrorInfo"/> entry carries:
-/// <list type="bullet">
-///   <item><c>reason</c> — the error ID (e.g. <c>CONTRACT_NOT_FOUND</c>, <c>SAMPLE_ALREADY_EXECUTED</c>);</item>
-///   <item><c>metadata["category"]</c> — the Canton error category name; mapped to <see cref="DamlErrorCategory"/>;</item>
-///   <item><c>metadata</c> — additional structured detail (cookies, definite_answer, etc.).</item>
-/// </list>
-///
-/// When trailers are missing, the trailer is malformed, or no <see cref="ErrorInfo"/> entry
-/// is present, falls back to <see cref="DamlErrorCategory.Unknown"/> and surfaces the raw
-/// <see cref="RpcException.Status"/> message as <c>Message</c> with empty metadata —
-/// information is degraded but never silently dropped.
-/// </summary>
 internal static class DamlErrorParser
 {
     private const string GrpcStatusDetailsBinKey = "grpc-status-details-bin";
     private const string CategoryMetadataKey = "category";
 
-    /// <summary>
-    /// Builds an <see cref="ExerciseOutcome{T}.DamlError"/> from a gRPC failure.
-    /// </summary>
     public static ExerciseOutcome<T>.DamlError ToDamlError<T>(RpcException exception)
     {
         var (category, errorId, message, metadata) = Parse(exception);
         return new ExerciseOutcome<T>.DamlError(category, errorId, message, metadata);
     }
 
-    /// <summary>
-    /// Parses an <see cref="RpcException"/> trailer into structured Canton/Daml error
-    /// fields. Exposed for testing.
-    /// </summary>
     internal static (
         DamlErrorCategory Category,
         string ErrorId,
@@ -83,10 +61,6 @@ internal static class DamlErrorParser
             Metadata: metadata);
     }
 
-    /// <summary>
-    /// Maps the raw <c>ErrorInfo.metadata["category"]</c> value to the enum.
-    /// Returns <see cref="DamlErrorCategory.Unknown"/> for null, empty, or unrecognised values.
-    /// </summary>
     internal static DamlErrorCategory MapCategory(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))

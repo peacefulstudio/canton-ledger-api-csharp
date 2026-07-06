@@ -1,10 +1,11 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics;
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
-using FluentAssertions;
+using AwesomeAssertions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
@@ -109,6 +110,53 @@ public class AdminClientTests
 
         result.Party.Should().Be(partyId);
         result.IsLocal.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task AllocateParty_sets_SynchronizerId_on_the_request_when_synchronizerId_provided()
+    {
+        AllocatePartyRequest? capturedRequest = null;
+        _partyService
+            .AllocatePartyAsync(
+                Arg.Do<AllocatePartyRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new AllocatePartyResponse
+            {
+                PartyDetails = new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = "party::alice", IsLocal = true }
+            }));
+
+        var client = CreateClient();
+        await client.AllocatePartyAsync(
+            "alice",
+            synchronizerId: "global-domain::1220ff",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.SynchronizerId.Should().Be("global-domain::1220ff");
+    }
+
+    [Fact]
+    public async Task AllocateParty_leaves_SynchronizerId_empty_when_synchronizerId_omitted()
+    {
+        AllocatePartyRequest? capturedRequest = null;
+        _partyService
+            .AllocatePartyAsync(
+                Arg.Do<AllocatePartyRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new AllocatePartyResponse
+            {
+                PartyDetails = new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = "party::alice", IsLocal = true }
+            }));
+
+        var client = CreateClient();
+        await client.AllocatePartyAsync("alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.SynchronizerId.Should().BeEmpty();
     }
 
     [Fact]

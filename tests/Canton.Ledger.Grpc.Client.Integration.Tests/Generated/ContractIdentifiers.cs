@@ -17,6 +17,12 @@ namespace Richtypes;
 public static class ContractIdentifiers
 {
     /// <summary>
+    /// Gets the fully qualified template identifier for Asset contracts.
+    /// Format: {packageName}:RichTypes:Asset
+    /// </summary>
+    public static string Asset { get; } = GetTemplateId<Asset>();
+
+    /// <summary>
     /// Gets the fully qualified template identifier for Marker contracts.
     /// Format: {packageName}:RichTypes:Marker
     /// </summary>

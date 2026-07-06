@@ -12,7 +12,7 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml record Outcome.Win
 /// </summary>
-public sealed record Outcome_Win(decimal Prize, string Tier) : IDamlRecord
+public sealed record Outcome_Win([property: DamlFieldAttribute("prize")] decimal Prize, [property: DamlFieldAttribute("tier")] string Tier) : IDamlRecord
 {
     /// <summary>Converts this value to a DamlRecord.</summary>
     public DamlRecord ToRecord() => DamlRecord.Create(

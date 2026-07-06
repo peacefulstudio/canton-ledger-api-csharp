@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
@@ -8,6 +9,7 @@ using Daml.Runtime.Grpc;
 using Daml.Runtime.Outcomes;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
+using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeExercisedEvent = Daml.Runtime.Contracts.ExercisedEvent;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
@@ -20,7 +22,11 @@ internal static class TransactionResultProjector
         var transaction = response.Transaction
             ?? throw new InvalidOperationException(
                 "Server returned a successful response but no Transaction was present.");
+        return Project(transaction);
+    }
 
+    public static TransactionResult Project(Transaction transaction)
+    {
         var createdContracts = new List<CreatedContract>();
         var archivedContractIds = new List<string>();
         var exercisedEvents = new List<RuntimeExercisedEvent>();
@@ -51,11 +57,15 @@ internal static class TransactionResultProjector
             transaction.UpdateId,
             transaction.Offset,
             createdContracts,
-            archivedContractIds)
+            archivedContractIds,
+            ToCommandId(transaction.CommandId))
         {
             ExercisedEvents = exercisedEvents,
         };
     }
+
+    private static RuntimeCommands.CommandId ToCommandId(string commandId) =>
+        commandId.Length == 0 ? default : (RuntimeCommands.CommandId)commandId;
 
     public static ExerciseOutcome<ContractId<TMarker>> ProjectToContractId<TMarker>(
         ExerciseOutcome<TransactionResult> outcome)

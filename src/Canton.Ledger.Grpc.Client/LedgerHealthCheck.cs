@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -6,10 +7,6 @@ using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Grpc.Client;
 
-/// <summary>
-/// Health check that verifies connectivity to the Canton participant node
-/// by calling <see cref="IAdminClient.GetParticipantIdAsync"/>.
-/// </summary>
 internal sealed partial class LedgerHealthCheck : IHealthCheck
 {
     private static readonly ILogger<LedgerHealthCheck> Logger = StaticLoggerFactory.Create<LedgerHealthCheck>();

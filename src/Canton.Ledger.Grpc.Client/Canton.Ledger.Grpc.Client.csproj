@@ -28,7 +28,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Canton.Ledger.Auth\Canton.Ledger.Auth.csproj" />
+    <ProjectReference Include="..\Canton.Ledger.Kernel\Canton.Ledger.Kernel.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Grpc\Canton.Ledger.Grpc.csproj" />
     <ProjectReference Include="..\Daml.Runtime.Grpc\Daml.Runtime.Grpc.csproj" />
   </ItemGroup>

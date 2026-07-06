@@ -14,7 +14,7 @@ public sealed partial record RichRecord
     /// <summary>
     /// Choice argument type for Relabel.
     /// </summary>
-    public sealed record Relabel(string NewLabel) : IDamlRecord
+    public sealed record Relabel([property: DamlFieldAttribute("newLabel")] string NewLabel) : IDamlRecord
     {
         /// <summary>Converts this value to a DamlRecord.</summary>
         public DamlRecord ToRecord() => DamlRecord.Create(

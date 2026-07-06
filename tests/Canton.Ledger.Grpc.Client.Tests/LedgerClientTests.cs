@@ -1,12 +1,13 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics;
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
-using FluentAssertions;
+using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -56,6 +57,27 @@ public class LedgerClientTests
             new ContractId<TestTemplate>(cid),
             new RuntimeCommands.ChoiceName(choice),
             DamlUnit.Instance);
+
+    private static RuntimeCommands.CreateCommand CreateCmd() =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, []));
+
+    private void StubSubmitAndWait(SubmitAndWaitResponse response, Action<SubmitAndWaitRequest>? capture = null)
+    {
+        _commandService
+            .SubmitAndWaitAsync(
+                Arg.Do<SubmitAndWaitRequest>(r => capture?.Invoke(r)),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+    }
     [Fact]
     public void BuildCommands_sets_command_id_and_workflow_id()
     {
@@ -155,23 +177,26 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task SubmitAsync_returns_update_id()
+    public void BuildCommands_pins_synchronizer_id_from_submission()
     {
-        var response = new SubmitAndWaitResponse { UpdateId = "update-123" };
+        var createCommand = new RuntimeCommands.CreateCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, []));
 
-        _commandService
-            .SubmitAndWaitAsync(
-                Arg.Any<SubmitAndWaitRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId)
+            .WithSynchronizerId(new SynchronizerId("sync::pinned"));
 
+        var client = CreateClient();
+        var commands = client.BuildCommands(submission);
+
+        commands.SynchronizerId.Should().Be("sync::pinned");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_synchronizer_id_unset_when_submission_has_none()
+    {
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
             new DamlRecord(null, []));
@@ -181,9 +206,75 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var result = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commands = client.BuildCommands(submission);
 
-        result.Should().Be("update-123");
+        commands.SynchronizerId.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SubmitAndWaitAsync_echoes_supplied_command_id_with_update_id_and_offset()
+    {
+        StubSubmitAndWait(new SubmitAndWaitResponse { UpdateId = "update-123", CompletionOffset = 789L });
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateCmd())
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
+
+        var client = CreateClient();
+        var result = await client.SubmitAndWaitAsync(submission, TestContext.Current.CancellationToken);
+
+        result.CommandId.Should().Be(TestCommandId);
+        result.UpdateId.Should().Be("update-123");
+        result.CompletionOffset.Should().Be(789L);
+    }
+
+    [Fact]
+    public async Task SubmitAndWaitAsync_mints_command_id_when_omitted_sends_it_and_returns_it()
+    {
+        SubmitAndWaitRequest? captured = null;
+        StubSubmitAndWait(new SubmitAndWaitResponse { UpdateId = "u", CompletionOffset = 1L }, r => captured = r);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateCmd())
+            .WithActAs(ActAs);
+
+        var client = CreateClient();
+        var result = await client.SubmitAndWaitAsync(submission, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        Guid.TryParse(captured!.Commands.CommandId, out _).Should().BeTrue(
+            "an omitted command id is minted as a GUID");
+        result.CommandId.Value.Should().Be(captured.Commands.CommandId,
+            "the minted id sent on the wire is the same id surfaced to the caller");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransaction_surfaces_transaction_command_id()
+    {
+        var transaction = new Transaction { UpdateId = "update-123", Offset = 456L, CommandId = "cmd-echoed" };
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateCmd())
+            .WithActAs(ActAs)
+            .WithCommandId(TestCommandId);
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+
+        var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
+        success.Result.CommandId.Should().Be(new RuntimeCommands.CommandId("cmd-echoed"));
     }
 
     [Fact]
@@ -828,6 +919,7 @@ public class LedgerClientTests
         public static string PackageId => "pkg";
         public static string PackageName => "test-package";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
