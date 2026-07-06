@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 module RichTypes where
 
-import DA.Time () -- ensures Time is in scope via stdlib prelude
+import DA.Time ()
 import DA.TextMap (TextMap)
 
 data Profile = Profile
@@ -21,6 +21,23 @@ template Marker
   where
     signatory owner
 
+data HoldingView = HoldingView
+  with
+    amount : Decimal
+  deriving (Eq, Show)
+
+interface Holding where
+  viewtype HoldingView
+
+template Asset
+  with
+    issuer : Party
+    amount : Decimal
+  where
+    signatory issuer
+    interface instance Holding for Asset where
+      view = HoldingView with amount
+
 template RichRecord
   with
     owner : Party
@@ -34,12 +51,13 @@ template RichRecord
     tags : [Text]
     attributes : TextMap Text
     marker : ContractId Marker
+    holdingCid : ContractId Holding
+    holdingCids : [ContractId Holding]
     profile : Profile
     outcome : Outcome
     fee : Numeric 2
   where
     signatory owner
-
     nonconsuming choice Relabel : ContractId RichRecord
       with
         newLabel : Text

@@ -1,8 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 
 namespace Canton.Ledger.Pqs.Client.Tests;

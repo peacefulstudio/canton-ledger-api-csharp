@@ -1,9 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;

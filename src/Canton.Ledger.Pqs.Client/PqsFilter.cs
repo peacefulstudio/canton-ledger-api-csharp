@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Text.RegularExpressions;
 using Npgsql;
@@ -13,12 +14,6 @@ namespace Canton.Ledger.Pqs.Client;
 /// </summary>
 public abstract partial record PqsFilter
 {
-    /// <summary>
-    /// Generates a parameterized SQL WHERE clause fragment.
-    /// </summary>
-    /// <param name="cmd">The NpgsqlCommand to add parameters to.</param>
-    /// <param name="paramIndex">Counter for generating unique parameter names (@p0, @p1, ...).</param>
-    /// <returns>A SQL fragment like <c>payload->>'fieldName' = @p0</c>.</returns>
     internal abstract string ToSqlClause(NpgsqlCommand cmd, ref int paramIndex);
 
     internal sealed record FieldEquals(string FieldName, string Value) : PqsFilter

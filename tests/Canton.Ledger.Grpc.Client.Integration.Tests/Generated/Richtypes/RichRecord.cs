@@ -22,19 +22,22 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml template RichTypes:RichRecord
 /// </summary>
-public sealed partial record RichRecord(Party Owner, long Count, decimal Amount, string Label, bool Active, DateOnly AsOf, DateTimeOffset ObservedAt, string? Note, IReadOnlyList<string> Tags, IReadOnlyDictionary<string, string> Attributes, ContractId<Marker> Marker, Profile Profile, Outcome Outcome, decimal Fee) : ITemplate
+public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] Party Owner, [property: DamlFieldAttribute("count")] long Count, [property: DamlFieldAttribute("amount")] decimal Amount, [property: DamlFieldAttribute("label")] string Label, [property: DamlFieldAttribute("active")] bool Active, [property: DamlFieldAttribute("asOf")] DateOnly AsOf, [property: DamlFieldAttribute("observedAt")] DateTimeOffset ObservedAt, [property: DamlFieldAttribute("note")] string? Note, [property: DamlFieldAttribute("tags")] IReadOnlyList<string> Tags, [property: DamlFieldAttribute("attributes")] IReadOnlyDictionary<string, string> Attributes, [property: DamlFieldAttribute("marker")] ContractId<Marker> Marker, [property: DamlFieldAttribute("holdingCid")] ContractId<IHolding> HoldingCid, [property: DamlFieldAttribute("holdingCids")] IReadOnlyList<ContractId<IHolding>> HoldingCids, [property: DamlFieldAttribute("profile")] Profile Profile, [property: DamlFieldAttribute("outcome")] Outcome Outcome, [property: DamlFieldAttribute("fee")] decimal Fee) : ITemplate
 {
     /// <summary>Gets the template identifier.</summary>
-    public static Identifier TemplateId { get; } = new("9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f", "RichTypes", "RichRecord");
+    public static Identifier TemplateId { get; } = new("3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc", "RichTypes", "RichRecord");
 
     /// <summary>Gets the package ID.</summary>
-    public static string PackageId => "9fbb9c81a2f951e871e72723d952fa879c49a90514647b9b496c52251b63cf8f";
+    public static string PackageId => "3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc";
 
     /// <summary>Gets the package name.</summary>
     public static string PackageName => "richtypes";
 
     /// <summary>Gets the package version.</summary>
     public static Version PackageVersion { get; } = new(0, 0, 1);
+
+    /// <summary>Gets the compile-time Daml type descriptor.</summary>
+    public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
     /// <summary>Converts this value to a DamlRecord.</summary>
     public DamlRecord ToRecord() => DamlRecord.Create(
@@ -49,6 +52,8 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
         DamlField.Create("tags", new DamlList(Tags.Select(x => (DamlValue)new DamlText(x)).ToList())),
         DamlField.Create("attributes", new DamlTextMap(Attributes.ToDictionary(kv => kv.Key, kv => (DamlValue)new DamlText(kv.Value)))),
         DamlField.Create("marker", Marker.ToDamlValue()),
+        DamlField.Create("holdingCid", HoldingCid.ToDamlValue()),
+        DamlField.Create("holdingCids", new DamlList(HoldingCids.Select(x => (DamlValue)x.ToDamlValue()).ToList())),
         DamlField.Create("profile", Profile.ToRecord()),
         DamlField.Create("outcome", Outcome.ToVariant()),
         DamlField.Create("fee", new DamlNumeric(Fee))
@@ -67,6 +72,8 @@ public sealed partial record RichRecord(Party Owner, long Count, decimal Amount,
         Tags: (IReadOnlyList<string>)record.GetRequiredField("tags").As<DamlList>().Values.Select(x => x.As<DamlText>().Value).ToList(),
         Attributes: record.GetRequiredField("attributes").As<DamlTextMap>().Values.ToDictionary(kv => kv.Key, kv => kv.Value.As<DamlText>().Value),
         Marker: new ContractId<Marker>(record.GetRequiredField("marker").As<DamlContractId>().Value),
+        HoldingCid: new ContractId<IHolding>(record.GetRequiredField("holdingCid").As<DamlContractId>().Value),
+        HoldingCids: (IReadOnlyList<ContractId<IHolding>>)record.GetRequiredField("holdingCids").As<DamlList>().Values.Select(x => new ContractId<IHolding>(x.As<DamlContractId>().Value)).ToList(),
         Profile: Profile.FromRecord(record.GetRequiredField("profile").As<DamlRecord>()),
         Outcome: Outcome.FromVariant(record.GetRequiredField("outcome").As<DamlVariant>()),
         Fee: record.GetRequiredField("fee").As<DamlNumeric>().Value
@@ -239,7 +246,6 @@ public static class RichRecordExtensions
 /// the static analyzer could not resolve). When the template's
 /// <c>observer</c> clause is statically resolvable, an
 /// <c>Observers(payload)</c> documentation helper is also emitted.
-/// Closes peacefulstudio/daml-codegen-csharp#68.
 /// </summary>
 public static class RichRecordSubmissionExtensions
 {

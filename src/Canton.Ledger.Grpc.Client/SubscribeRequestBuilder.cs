@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
@@ -25,6 +26,24 @@ internal static class SubscribeRequestBuilder
                     EventFormat = eventFormat,
                     TransactionShape = TransactionShape.LedgerEffects,
                 },
+            },
+        };
+    }
+
+    public static UpdateFormat BuildTransactionUpdateFormat(RuntimeCommands.SubmitterInfo submitter)
+    {
+        var eventFormat = new EventFormat { Verbose = true };
+        var wildcard = new Filters();
+
+        AddFilterForEachParty(eventFormat, submitter.ActAs, wildcard);
+        AddFilterForEachParty(eventFormat, submitter.ReadAs, wildcard);
+
+        return new UpdateFormat
+        {
+            IncludeTransactions = new TransactionFormat
+            {
+                EventFormat = eventFormat,
+                TransactionShape = TransactionShape.LedgerEffects,
             },
         };
     }

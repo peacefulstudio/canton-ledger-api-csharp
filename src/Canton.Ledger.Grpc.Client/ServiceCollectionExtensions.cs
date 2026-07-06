@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
 using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -114,7 +115,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers <see cref="ILedgerClient"/> as a singleton, binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section, and auto-registers <see cref="ITokenProvider"/> as a
-    /// <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
+    /// <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
     /// If an <see cref="ITokenProvider"/> is already registered, the existing registration is kept.
     /// </summary>
     /// <param name="services">The service collection.</param>
@@ -123,7 +124,7 @@ public static class ServiceCollectionExtensions
     /// (e.g., <c>configuration.GetSection("Canton:Ledger")</c>).
     /// </param>
     /// <param name="authConfiguration">
-    /// A configuration section containing <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsOptions"/> values
+    /// A configuration section containing <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsOptions"/> values
     /// (e.g., <c>configuration.GetSection("Canton:Auth")</c>).
     /// </param>
     /// <returns>The service collection for chaining.</returns>
@@ -176,7 +177,7 @@ public static class ServiceCollectionExtensions
     /// <summary>
     /// Registers <see cref="IAdminClient"/> as a singleton, binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section, and auto-registers <see cref="ITokenProvider"/> as a
-    /// <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
+    /// <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
     /// If an <see cref="ITokenProvider"/> is already registered, the existing registration is kept.
     /// </summary>
     /// <param name="services">The service collection.</param>
@@ -185,7 +186,7 @@ public static class ServiceCollectionExtensions
     /// (e.g., <c>configuration.GetSection("Canton:Ledger")</c>).
     /// </param>
     /// <param name="authConfiguration">
-    /// A configuration section containing <see cref="Canton.Ledger.Auth.TokenGeneration.ClientCredentialsOptions"/> values
+    /// A configuration section containing <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsOptions"/> values
     /// (e.g., <c>configuration.GetSection("Canton:Auth")</c>).
     /// </param>
     /// <returns>The service collection for chaining.</returns>

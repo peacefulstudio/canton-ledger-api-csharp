@@ -1,11 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
@@ -136,9 +137,15 @@ public class TransactionResultProjectorTests
         public static string PackageId => "iface-pkg";
         public static string PackageName => "token-api";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(InterfaceId, DamlTypeKind.Interface, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create();
     }
 
-    internal sealed record BareDamlType : IDamlType;
+    internal sealed record BareDamlType : IDamlType
+    {
+        public static DamlTypeDescriptor DamlTypeId =>
+            throw new NotSupportedException(
+                "BareDamlType is a degenerate test double: it implements IDamlType but is neither a template nor an interface.");
+    }
 }

@@ -1,9 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Auth;
-using Canton.Ledger.Auth.TokenGeneration;
+using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Daml.Ledger.Abstractions;
-using FluentAssertions;
+using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;

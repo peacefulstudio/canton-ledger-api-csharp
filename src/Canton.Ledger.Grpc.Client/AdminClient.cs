@@ -1,7 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics;
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Google.Protobuf;
@@ -22,9 +24,9 @@ public sealed partial class AdminClient : IAdminClient
     /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
     /// Register with <c>tracing.AddSource(AdminClient.ActivitySourceName)</c>.
     /// </summary>
-    public static string ActivitySourceName => typeof(AdminClient).FullName!;
+    public static string ActivitySourceName => LedgerActivitySource.NameFor<AdminClient>();
 
-    private static readonly ActivitySource ActivitySource = new(typeof(AdminClient).FullName!);
+    private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<AdminClient>();
     private static readonly ILogger<AdminClient> Logger = StaticLoggerFactory.Create<AdminClient>();
 
     private readonly GrpcChannel _channel;
@@ -34,6 +36,8 @@ public sealed partial class AdminClient : IAdminClient
     private readonly PackageService.PackageServiceClient _packageService;
     private readonly LedgerClientOptions _options;
     private readonly ITokenProvider? _tokenProvider;
+    private readonly string _serverAddress;
+    private readonly int _serverPort;
 
     /// <summary>
     /// Creates a new AdminClient with the specified options and token provider.
@@ -53,6 +57,7 @@ public sealed partial class AdminClient : IAdminClient
 
         _options = options;
         _tokenProvider = tokenProvider;
+        (_serverAddress, _serverPort) = ActivityHelper.ParseServerEndpoint(_options.GrpcAddress);
 
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
         {
@@ -77,10 +82,6 @@ public sealed partial class AdminClient : IAdminClient
     [LoggerMessage(Level = LogLevel.Warning, Message = "AdminClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddAdminClient overload that accepts authConfiguration.")]
     private static partial void LogUnauthenticatedMode(ILogger logger);
 
-    /// <summary>
-    /// Creates a new AdminClient with injected gRPC channel and service clients.
-    /// This constructor is intended for testing scenarios.
-    /// </summary>
     internal AdminClient(
         LedgerClientOptions options,
         GrpcChannel channel,
@@ -97,30 +98,42 @@ public sealed partial class AdminClient : IAdminClient
         _packageManagementService = packageManagementService ?? new PackageManagementService.PackageManagementServiceClient(channel);
         _packageService = packageService ?? new PackageService.PackageServiceClient(channel);
         _tokenProvider = tokenProvider;
+        (_serverAddress, _serverPort) = ActivityHelper.ParseServerEndpoint(options.GrpcAddress);
     }
 
     /// <inheritdoc />
     public async Task<string> GetParticipantIdAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "GetParticipantId", _serverAddress, _serverPort);
 
-        var response = await _partyService.GetParticipantIdAsync(
-            new GetParticipantIdRequest(),
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _partyService.GetParticipantIdAsync(
+                new GetParticipantIdRequest(),
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        return response.ParticipantId;
+            return response.ParticipantId;
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
     public async Task<PartyDetails> AllocatePartyAsync(
         string partyIdHint,
         string? displayName = null,
+        string? synchronizerId = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
-        activity?.SetTag("partyIdHint", partyIdHint);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "AllocateParty", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.CantonPartyIdHint, partyIdHint);
 
         LogAllocatingParty(Logger, partyIdHint);
 
@@ -128,18 +141,30 @@ public sealed partial class AdminClient : IAdminClient
         {
             PartyIdHint = partyIdHint
         };
+        if (!string.IsNullOrEmpty(synchronizerId))
+        {
+            request.SynchronizerId = synchronizerId;
+        }
 
-        var response = await _partyService.AllocatePartyAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _partyService.AllocatePartyAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        var details = response.PartyDetails;
+            var details = response.PartyDetails;
 
-        LogPartyAllocated(Logger, details.Party);
+            LogPartyAllocated(Logger, details.Party);
 
-        return new PartyDetails(details.Party, details.IsLocal);
+            return new PartyDetails(details.Party, details.IsLocal);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Allocating party with hint: {PartyIdHint}")]
@@ -153,20 +178,29 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<string> partyIds,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "GetParties", _serverAddress, _serverPort);
 
         var request = new GetPartiesRequest();
         request.Parties.AddRange(partyIds);
 
-        var response = await _partyService.GetPartiesAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _partyService.GetPartiesAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        return response.PartyDetails
-            .Select(p => new PartyDetails(p.Party, p.IsLocal))
-            .ToList();
+            return response.PartyDetails
+                .Select(p => new PartyDetails(p.Party, p.IsLocal))
+                .ToList();
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -175,7 +209,8 @@ public sealed partial class AdminClient : IAdminClient
         string? pageToken = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "ListKnownParties", _serverAddress, _serverPort);
 
         var request = new ListKnownPartiesRequest
         {
@@ -183,15 +218,23 @@ public sealed partial class AdminClient : IAdminClient
             PageToken = pageToken ?? string.Empty
         };
 
-        var response = await _partyService.ListKnownPartiesAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _partyService.ListKnownPartiesAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        return response.PartyDetails
-            .Select(p => new PartyDetails(p.Party, p.IsLocal))
-            .ToList();
+            return response.PartyDetails
+                .Select(p => new PartyDetails(p.Party, p.IsLocal))
+                .ToList();
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -201,8 +244,9 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight>? rights = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
-        activity?.SetTag("userId", userId);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(UserManagementService.Descriptor, "CreateUser", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
 
         LogCreatingUser(Logger, userId);
 
@@ -219,15 +263,23 @@ public sealed partial class AdminClient : IAdminClient
             request.Rights.AddRange(rights.Select(ToProtoRight));
         }
 
-        var response = await _userService.CreateUserAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _userService.CreateUserAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        LogUserCreated(Logger, userId);
+            LogUserCreated(Logger, userId);
 
-        return FromProtoUser(response.User);
+            return FromProtoUser(response.User);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Creating user: {UserId}")]
@@ -241,7 +293,8 @@ public sealed partial class AdminClient : IAdminClient
         string userId,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(UserManagementService.Descriptor, "GetUser", _serverAddress, _serverPort);
 
         try
         {
@@ -257,6 +310,11 @@ public sealed partial class AdminClient : IAdminClient
         {
             return null;
         }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -265,18 +323,28 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(UserManagementService.Descriptor, "GrantUserRights", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
 
         var request = new GrantUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
-        await _userService.GrantUserRightsAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            await _userService.GrantUserRightsAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        LogRightsGranted(Logger, userId);
+            LogRightsGranted(Logger, userId);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rights granted to user {UserId}")]
@@ -288,18 +356,28 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(UserManagementService.Descriptor, "RevokeUserRights", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
 
         var request = new RevokeUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
-        await _userService.RevokeUserRightsAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            await _userService.RevokeUserRightsAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        LogRightsRevoked(Logger, userId);
+            LogRightsRevoked(Logger, userId);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rights revoked from user {UserId}")]
@@ -311,7 +389,8 @@ public sealed partial class AdminClient : IAdminClient
         string? pageToken = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(UserManagementService.Descriptor, "ListUsers", _serverAddress, _serverPort);
 
         var request = new ListUsersRequest
         {
@@ -319,36 +398,53 @@ public sealed partial class AdminClient : IAdminClient
             PageToken = pageToken ?? string.Empty
         };
 
-        var response = await _userService.ListUsersAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _userService.ListUsersAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        return response.Users.Select(FromProtoUser).ToList();
+            return response.Users.Select(FromProtoUser).ToList();
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "ListKnownPackages", _serverAddress, _serverPort);
 
-        var response = await _packageManagementService.ListKnownPackagesAsync(
-            new ListKnownPackagesRequest(),
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _packageManagementService.ListKnownPackagesAsync(
+                new ListKnownPackagesRequest(),
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        return response.PackageDetails
-            .Select(p => new PackageDetails(
-                p.PackageId,
-                p.Name,
-                p.Version,
-                (long)p.PackageSize,
-                (p.KnownSince ?? throw new InvalidOperationException(
-                    $"Package '{p.PackageId}' is missing the required known_since timestamp.")).ToDateTimeOffset()))
-            .ToList();
+            return response.PackageDetails
+                .Select(p => new PackageDetails(
+                    p.PackageId,
+                    p.Name,
+                    p.Version,
+                    (long)p.PackageSize,
+                    (p.KnownSince ?? throw new InvalidOperationException(
+                        $"Package '{p.PackageId}' is missing the required known_since timestamp.")).ToDateTimeOffset()))
+                .ToList();
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -358,23 +454,36 @@ public sealed partial class AdminClient : IAdminClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
 
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
-        activity?.SetTag("packageId", packageId);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PackageService.Descriptor, "GetPackage", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.DamlPackageId, packageId);
 
-        var response = await _packageService.GetPackageAsync(
-            new GetPackageRequest { PackageId = packageId },
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            var response = await _packageService.GetPackageAsync(
+                new GetPackageRequest { PackageId = packageId },
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        if (!System.Enum.IsDefined(response.HashFunction))
-            throw new InvalidOperationException(
-                $"Package '{packageId}' was returned with unrecognized hash function value {(int)response.HashFunction}.");
+            if (!System.Enum.IsDefined(response.HashFunction))
+            {
+                var error = new InvalidOperationException(
+                    $"Package '{packageId}' was returned with unrecognized hash function value {(int)response.HashFunction}.");
+                activity.RecordException(error);
+                throw error;
+            }
 
-        return new PackageArchive(
-            response.ArchivePayload.ToByteArray(),
-            response.Hash,
-            response.HashFunction.ToString());
+            return new PackageArchive(
+                response.ArchivePayload.ToByteArray(),
+                response.Hash,
+                response.HashFunction.ToString());
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -382,7 +491,8 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<string>? packageNamePrefixes = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PackageService.Descriptor, "ListVettedPackages", _serverAddress, _serverPort);
 
         var request = new ListVettedPackagesRequest();
 
@@ -392,30 +502,42 @@ public sealed partial class AdminClient : IAdminClient
 
         var vettedPackages = new List<VettedPackage>();
 
-        do
+        try
         {
-            var response = await _packageService.ListVettedPackagesAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+            do
+            {
+                var response = await _packageService.ListVettedPackagesAsync(
+                    request,
+                    headers: await GetHeadersAsync(cancellationToken),
+                    deadline: GetDeadline(),
+                    cancellationToken: cancellationToken);
 
-            if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
-                throw new InvalidOperationException(
-                    $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
+                if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
+                {
+                    var error = new InvalidOperationException(
+                        $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
+                    activity.RecordException(error);
+                    throw error;
+                }
 
-            vettedPackages.AddRange(response.VettedPackages.SelectMany(group =>
-                group.Packages.Select(p => new VettedPackage(
-                    p.PackageId,
-                    p.PackageName,
-                    p.PackageVersion,
-                    group.ParticipantId,
-                    group.SynchronizerId))));
+                vettedPackages.AddRange(response.VettedPackages.SelectMany(group =>
+                    group.Packages.Select(p => new VettedPackage(
+                        p.PackageId,
+                        p.PackageName,
+                        p.PackageVersion,
+                        group.ParticipantId,
+                        group.SynchronizerId))));
 
-            request.PageToken = response.NextPageToken;
-        } while (request.PageToken.Length > 0);
+                request.PageToken = response.NextPageToken;
+            } while (request.PageToken.Length > 0);
 
-        return vettedPackages;
+            return vettedPackages;
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -426,8 +548,9 @@ public sealed partial class AdminClient : IAdminClient
     {
         ThrowIfNullOrEmpty(darFile);
 
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
-        activity?.SetTag("submissionId", submissionId);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "UploadDarFile", _serverAddress, _serverPort);
+        activity?.SetTag(LedgerClientActivityTags.CantonSubmissionId, submissionId);
 
         LogUploadingDar(Logger, darFile.Length);
 
@@ -437,13 +560,21 @@ public sealed partial class AdminClient : IAdminClient
             SubmissionId = submissionId ?? string.Empty
         };
 
-        await _packageManagementService.UploadDarFileAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            await _packageManagementService.UploadDarFileAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        LogDarUploaded(Logger, darFile.Length);
+            LogDarUploaded(Logger, darFile.Length);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Uploading DAR file ({DarSize} bytes)")]
@@ -459,20 +590,29 @@ public sealed partial class AdminClient : IAdminClient
     {
         ThrowIfNullOrEmpty(darFile);
 
-        using var activity = ActivityHelper.StartActivity<AdminClient>(ActivitySource);
+        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
+        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "ValidateDarFile", _serverAddress, _serverPort);
 
         var request = new ValidateDarFileRequest
         {
             DarFile = ByteString.CopyFrom(darFile)
         };
 
-        await _packageManagementService.ValidateDarFileAsync(
-            request,
-            headers: await GetHeadersAsync(cancellationToken),
-            deadline: GetDeadline(),
-            cancellationToken: cancellationToken);
+        try
+        {
+            await _packageManagementService.ValidateDarFileAsync(
+                request,
+                headers: await GetHeadersAsync(cancellationToken),
+                deadline: GetDeadline(),
+                cancellationToken: cancellationToken);
 
-        LogDarValidated(Logger, darFile.Length);
+            LogDarValidated(Logger, darFile.Length);
+        }
+        catch (RpcException ex)
+        {
+            activity.RecordGrpcError(ex);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "DAR file validated ({DarSize} bytes)")]

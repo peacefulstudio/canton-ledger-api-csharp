@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Grpc.Client;
 using Daml.Ledger.Abstractions;
@@ -67,6 +68,13 @@ public class RichTypesRoundTripTests
         var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
         Assert.False(string.IsNullOrWhiteSpace(markerCid.Value), "created Marker ContractId is empty");
 
+        var firstAssetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var firstAssetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(firstAssetOutcome).Result;
+        var secondAssetOutcome = await client.CreateAsync(new Asset(owner, 250m), owner, TestContext.Current.CancellationToken);
+        var secondAssetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(secondAssetOutcome).Result;
+        var holdingCid = new ContractId<IHolding>(firstAssetCid.Value);
+        var holdingCids = new[] { holdingCid, new ContractId<IHolding>(secondAssetCid.Value) };
+
         var observedAt = new DateTimeOffset(2026, 5, 29, 13, 30, 0, TimeSpan.Zero);
         var asOf = new DateOnly(2026, 5, 29);
         var payload = new RichRecord(
@@ -81,6 +89,8 @@ public class RichTypesRoundTripTests
             Tags: ExpectedTags,
             Attributes: new Dictionary<string, string> { ["k1"] = "v1", ["k2"] = "v2" },
             Marker: markerCid,
+            HoldingCid: holdingCid,
+            HoldingCids: holdingCids,
             Profile: new Profile(Nickname: "cdg", Level: 7L),
             Outcome: new Outcome.Win(new Outcome_Win(Prize: 250.50m, Tier: "gold")),
             Fee: 0.05m);
@@ -106,6 +116,10 @@ public class RichTypesRoundTripTests
         Assert.Equal("v2", readBack.Attributes["k2"]);
         Assert.Equal(2, readBack.Attributes.Count);
         Assert.Equal(markerCid.Value, readBack.Marker.Value);
+        Assert.Equal(holdingCid.Value, readBack.HoldingCid.Value);
+        Assert.Equal(
+            holdingCids.Select(cid => cid.Value),
+            readBack.HoldingCids.Select(cid => cid.Value));
         Assert.Equal("cdg", readBack.Profile.Nickname);
         Assert.Equal(7L, readBack.Profile.Level);
         var win = Assert.IsType<Outcome.Win>(readBack.Outcome);
@@ -142,6 +156,10 @@ public class RichTypesRoundTripTests
         var markerOutcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
         var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
 
+        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var assetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(assetOutcome).Result;
+        var holdingCid = new ContractId<IHolding>(assetCid.Value);
+
         var payload = new RichRecord(
             Owner: owner,
             Count: 1L,
@@ -154,6 +172,8 @@ public class RichTypesRoundTripTests
             Tags: Array.Empty<string>(),
             Attributes: new Dictionary<string, string>(),
             Marker: markerCid,
+            HoldingCid: holdingCid,
+            HoldingCids: new[] { holdingCid },
             Profile: new Profile(Nickname: "cdg", Level: 1L),
             Outcome: new Outcome.Pending(),
             Fee: 1.00m);
@@ -185,9 +205,9 @@ public class RichTypesRoundTripTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner, cts.Token))
         {
-            if (evt.ContractId.Value == contractIdValue)
+            if (evt is ContractStreamEvent<RichRecord>.Created created && created.ContractId.Value == contractIdValue)
             {
-                return evt;
+                return created;
             }
         }
         return null;

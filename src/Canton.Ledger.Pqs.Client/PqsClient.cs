@@ -1,8 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime.Contracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,9 +22,9 @@ public sealed partial class PqsClient : IPqsClient
     /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
     /// Register with <c>tracing.AddSource(PqsClient.ActivitySourceName)</c>.
     /// </summary>
-    public static string ActivitySourceName => typeof(PqsClient).FullName!;
+    public static string ActivitySourceName => LedgerActivitySource.NameFor<PqsClient>();
 
-    private static readonly ActivitySource ActivitySource = new(typeof(PqsClient).FullName!);
+    private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<PqsClient>();
 
     /// <summary>
     /// Default <see cref="JsonSerializerOptions"/> used for deserializing PQS contract payloads.
@@ -135,7 +137,7 @@ public sealed partial class PqsClient : IPqsClient
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
         using var activity = ActivitySource.StartActivity("PqsExists");
-        activity?.SetTag("pqs.template", templateId);
+        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
 
         LogQueryStart(Logger, templateId);
 
@@ -164,13 +166,11 @@ public sealed partial class PqsClient : IPqsClient
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogQueryError(Logger, ex, templateId);
+            activity.RecordException(ex);
             throw;
         }
     }
 
-    /// <summary>
-    /// Builds the full SQL query and captures filter parameters in a single pass.
-    /// </summary>
     internal static (string Sql, IReadOnlyList<(string Name, string Value)> Parameters) BuildFilteredQuery(
         PqsFilter filter)
     {
@@ -201,7 +201,7 @@ public sealed partial class PqsClient : IPqsClient
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
         using var activity = ActivitySource.StartActivity("PqsQuery");
-        activity?.SetTag("pqs.template", templateId);
+        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
 
         LogQueryStart(Logger, templateId);
 
@@ -222,7 +222,7 @@ public sealed partial class PqsClient : IPqsClient
             }
 
             LogQueryResult(Logger, contracts.Count, templateId);
-            activity?.SetTag("pqs.result.count", contracts.Count);
+            activity?.SetTag(PqsClientActivityTags.CantonPqsResultCount, contracts.Count);
             return contracts;
         }
         catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
@@ -233,6 +233,7 @@ public sealed partial class PqsClient : IPqsClient
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogQueryError(Logger, ex, templateId);
+            activity.RecordException(ex);
             throw;
         }
     }
@@ -246,7 +247,7 @@ public sealed partial class PqsClient : IPqsClient
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
         using var activity = ActivitySource.StartActivity("PqsQueryOne");
-        activity?.SetTag("pqs.template", templateId);
+        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
 
         LogQueryStart(Logger, templateId);
 
@@ -278,16 +279,14 @@ public sealed partial class PqsClient : IPqsClient
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogQueryError(Logger, ex, templateId);
+            activity.RecordException(ex);
             throw;
         }
     }
 
-    /// <summary>
-    /// PQS's <c>active()</c> function raises P0001 "Identifier not found" when no contracts
-    /// of a given template type have ever been created. This is semantically equivalent
-    /// to "no results" rather than an error. This commonly occurs when querying a template
-    /// type before any contracts of that type have been created on the ledger.
-    /// </summary>
+    // Workaround for PQS's active() function: it raises P0001 "Identifier not found" when no
+    // contracts of a given template type have ever been created, which is semantically "no
+    // results" rather than an error.
     internal static bool IsTemplateNotFoundError(PostgresException ex) =>
         ex.SqlState == "P0001" && ex.MessageText.StartsWith("Identifier not found:", StringComparison.Ordinal);
 

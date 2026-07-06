@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
 using Com.Daml.Ledger.Api.V2;
@@ -215,11 +216,6 @@ public static class DamlValueConverter
         };
     }
 
-    /// <summary>
-    /// Canonical unpadded numeric wire format (codegen ADR-0011): one forced fractional digit
-    /// followed by 27 optional fractional digits — 28 in total, matching the maximum scale of
-    /// <see cref="decimal"/>, so no representable value is ever rounded on the wire.
-    /// </summary>
     private const string CanonicalNumericFormat = "0.0###########################";
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>

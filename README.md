@@ -14,7 +14,7 @@ C# client libraries for interacting with Canton participant nodes via the Ledger
 | [`Canton.Ledger.Grpc`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc) | Generated gRPC stubs from Canton Ledger API protos |
 | [`Canton.Ledger.Grpc.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc.Client) | High-level client with `Daml.Runtime` integration |
 | [`Canton.Ledger.Pqs.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Pqs.Client) | Type-safe query client for the Participant Query Store (PQS) |
-| [`Canton.Ledger.Auth`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Auth) | Bearer-token providers (`ITokenProvider`) for the clients — OAuth2 client-credentials with automatic refresh, static token, or unauthenticated |
+| [`Canton.Ledger.Kernel`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Kernel) | Transport-neutral client kernel the clients consume as peers — token providers (`ITokenProvider`, OAuth2 client-credentials/static/unauthenticated), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline |
 
 Packages are published to [GitHub Packages](https://github.com/orgs/peacefulstudio/packages?repo_name=canton-ledger-api-csharp).
 
@@ -86,10 +86,10 @@ var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 
 ### Authentication
 
-`Canton.Ledger.Auth` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register a token provider before adding the clients:
+`Canton.Ledger.Kernel` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register a token provider before adding the clients:
 
 ```csharp
-using Canton.Ledger.Auth;
+using Canton.Ledger.Kernel.Authentication;
 
 // OAuth2 client-credentials with automatic refresh and caching
 services.AddCantonAuth(configuration.GetSection("Canton:Auth"));
@@ -111,7 +111,7 @@ services.AddCantonStaticAuth("eyJ...");
 }
 ```
 
-When no `ITokenProvider` is registered, the clients run unauthenticated (`ITokenProvider.None`) and log a warning at construction. See the [`Canton.Ledger.Auth` README](src/Canton.Ledger.Auth/README.md) for the full options reference, including custom token endpoints (e.g. Keycloak).
+When no `ITokenProvider` is registered, the clients run unauthenticated (`ITokenProvider.None`) and log a warning at construction. See the [`Canton.Ledger.Kernel` README](src/Canton.Ledger.Kernel/README.md) for the full options reference, including custom token endpoints (e.g. Keycloak).
 
 ## Features
 
@@ -133,10 +133,11 @@ When no `ITokenProvider` is registered, the clients run unauthenticated (`IToken
 - Composable `Filter.Or` / `Filter.And` combinators
 - OpenTelemetry tracing via `ActivitySource`
 
-### Auth (`Canton.Ledger.Auth`)
-- OAuth2 client-credentials flow with thread-safe TTL token caching and automatic refresh
+### Client kernel (`Canton.Ledger.Kernel`)
+- `Authentication`: OAuth2 client-credentials flow with thread-safe TTL token caching and automatic refresh
 - Static token and unauthenticated modes behind a single `ITokenProvider` abstraction
 - `IServiceCollection` integration with options validation at startup
+- `Telemetry`: the shared `ActivitySource` naming convention; `Resilience`: the opt-in Polly retry pipeline
 
 ## Integration with Daml Code Generation
 

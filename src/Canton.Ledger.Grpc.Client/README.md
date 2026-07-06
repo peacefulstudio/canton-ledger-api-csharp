@@ -6,13 +6,14 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 
 | Type | Purpose |
 |------|---------|
-| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `ExerciseAsync`, `SubmitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
+| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `ExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
+| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `Submit` and `CompletionStreamAsync` |
 | `IAdminClient` | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
 | `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout` |
 
 ## Authentication
 
-Clients receive an `ITokenProvider` from `Canton.Ledger.Auth`. Four modes:
+Clients receive an `ITokenProvider` from `Canton.Ledger.Kernel`. Four modes:
 
 ### 1. Convention-based (recommended) — `AddCantonLedger`
 
@@ -85,6 +86,30 @@ await ledgerClient.ExerciseAsync(
     actAs: "Alice::1234...");
 ```
 
+### Async Submission + Completions
+
+`Submit` is a true fire path: it returns once the participant accepts the commands (yielding the `command_id`), not when the transaction commits. The verdict arrives separately on `CompletionStreamAsync`, surfaced as `IAsyncEnumerable<Completion>`. The client keeps no pending-set — you correlate completions by `command_id`/`submission_id` and own your offset.
+
+```csharp
+// Capture the offset BEFORE submitting — a completion can be emitted
+// before the stream is opened.
+var beginOffset = await ledgerClient.GetLedgerEndAsync();
+
+// Submit returns the effective CommandId — minted for you when the submission omits one.
+CommandId commandId = await ledgerClient.Submit(submission);
+
+await foreach (var completion in ledgerClient.CompletionStreamAsync(actAs, beginOffset, ct))
+{
+    if (completion.CommandId != commandId.Value) continue;
+    if (completion.Status is null or { Code: 0 }) { /* accepted */ }
+    break;
+}
+```
+
+> `Submit` and `SubmitAndWaitAsync` report the effective `CommandId` back to you — the one you supplied, or the one minted here when you omit it. To retry safely after a transport failure, resubmit with that same `CommandId`; re-invoking with a fresh, command_id-less submission mints a *new* id and double-submits, because the participant may have accepted the first attempt before the failure surfaced.
+
+To submit and wait for the transaction in one call instead, use `SubmitAndWaitAsync` (renamed from the former `SubmitAsync`).
+
 ### Party Management
 
 ```csharp
@@ -136,7 +161,7 @@ tracing.AddSource(AdminClient.ActivitySourceName);
 
 ## Related Packages
 
-- `Canton.Ledger.Auth` — Authentication providers (`ITokenProvider`)
+- `Canton.Ledger.Kernel` — Transport-neutral client kernel: authentication providers (`ITokenProvider`), telemetry convention, retry pipeline
 - `Canton.Ledger.Grpc` — Low-level gRPC stubs
 - `Canton.Ledger.Pqs.Client` — PQS query client
 - `Daml.Runtime` — Runtime types for generated Daml contracts

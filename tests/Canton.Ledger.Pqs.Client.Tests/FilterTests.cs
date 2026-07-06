@@ -1,8 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
-using FluentAssertions;
+using AwesomeAssertions;
 using Npgsql;
 using Xunit;
 
@@ -266,15 +267,16 @@ public class FilterTests
     }
 
     internal sealed record SampleTemplate(
-        string Initiator,
-        string Counterparty,
-        long NumSwaps,
-        string Status) : ITemplate
+        [property: DamlFieldAttribute("initiator")] string Initiator,
+        [property: DamlFieldAttribute("counterparty")] string Counterparty,
+        [property: DamlFieldAttribute("numSwaps")] long NumSwaps,
+        [property: DamlFieldAttribute("status")] string Status) : ITemplate
     {
         public static Identifier TemplateId { get; } = new("pkg123", "Test.Module", "SampleTemplate");
         public static string PackageId => "pkg123";
         public static string PackageName => "test-package";
         public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("initiator", new DamlParty(Initiator)),

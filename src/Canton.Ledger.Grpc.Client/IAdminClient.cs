@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -18,11 +19,18 @@ public interface IAdminClient : IDisposable
     /// </summary>
     /// <param name="partyIdHint">A hint for the party ID (may be modified by the ledger).</param>
     /// <param name="displayName">Optional display name for the party.</param>
+    /// <param name="synchronizerId">
+    /// Optional id of the synchronizer to allocate the party on. Required when the participant
+    /// is connected to more than one synchronizer — otherwise Canton rejects the request with
+    /// <c>PARTY_ALLOCATION_CANNOT_DETERMINE_SYNCHRONIZER</c>. When <see langword="null"/> the
+    /// participant falls back to its single connected synchronizer (the prior behaviour).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The allocated party details.</returns>
     Task<PartyDetails> AllocatePartyAsync(
         string partyIdHint,
         string? displayName = null,
+        string? synchronizerId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

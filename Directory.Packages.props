@@ -24,19 +24,25 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.9" />
     <!-- Integration with Daml codegen runtime -->
-    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.1.8-preview.5" />
-    <PackageVersion Include="Daml.Runtime" Version="0.1.8-preview.5" />
+    <PackageVersion Include="Daml.Ledger.Abstractions" Version="0.3.0-preview.1" />
+    <PackageVersion Include="Daml.Runtime" Version="0.3.0-preview.1" />
     <!-- Database (PQS) -->
     <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <!-- OpenTelemetry (Canton.Ledger.OpenTelemetry only, ADR 0010) -->
+    <PackageVersion Include="OpenTelemetry" Version="1.16.0" />
+    <PackageVersion Include="Npgsql.OpenTelemetry" Version="10.0.3" />
     <!-- Peaceful Extensions -->
-    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.2.1-preview.2" />
+    <PackageVersion Include="Peaceful.Extensions.Logging" Version="0.2.1-preview.3" />
     <!-- Auth -->
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
+    <!-- Resilience (transport-neutral retry seam, ADR 0006) -->
+    <PackageVersion Include="Polly.Core" Version="8.7.0" />
     <!-- Testing -->
+    <PackageVersion Include="OpenTelemetry.Exporter.InMemory" Version="1.16.0" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.7.0" />
-    <PackageVersion Include="Peaceful.Canton.Localnet.Testing" Version="0.6.9.1-preview.1" />
+    <PackageVersion Include="Peaceful.Canton.Localnet.Testing" Version="0.6.10.1-preview.1" />
     <PackageVersion Include="xunit.v3.mtp-v2" Version="3.2.2" />
-    <PackageVersion Include="FluentAssertions" Version="8.10.0" />
+    <PackageVersion Include="AwesomeAssertions" Version="9.4.0" />
     <PackageVersion Include="NSubstitute" Version="5.3.0" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.8.0" />
   </ItemGroup>

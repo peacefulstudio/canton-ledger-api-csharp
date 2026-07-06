@@ -1,4 +1,5 @@
 // Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
 
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
@@ -14,10 +15,23 @@ namespace Canton.Ledger.Grpc.Client;
 
 internal static class ContractStreamProjector
 {
+    internal static class UnclassifiedKind
+    {
+        public const string CreatedEvent = "created-event";
+        public const string ArchivedEvent = "archived-event";
+        public const string ExercisedEvent = "exercised-event";
+        public const string AssignedEvent = "assigned-event";
+        public const string UnassignedEvent = "unassigned-event";
+        public const string MissingSynchronizerId = "missing-synchronizer-id";
+        public const string InterfaceViewUnavailable = "interface-view-unavailable";
+    }
+
     public static IEnumerable<ContractStreamEvent<T>> ProjectTransactionEvents<T>(
         Transaction transaction)
         where T : IDamlType
     {
+        var hasSynchronizerId = !string.IsNullOrWhiteSpace(transaction.SynchronizerId);
+        var synchronizerId = hasSynchronizerId ? new SynchronizerId(transaction.SynchronizerId) : default;
         foreach (var evt in transaction.Events)
         {
             switch (evt.EventCase)
@@ -25,24 +39,52 @@ internal static class ContractStreamProjector
                 case Event.EventOneofCase.Created:
                     {
                         var created = evt.Created;
-                        if (!MarkerMatcher<T>.MatchesProtoCreated(created)) continue;
-                        yield return CreatedFromProto<T>(created);
+                        if (!MarkerMatcher<T>.MatchesProtoCreated(created))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.CreatedEvent);
+                            break;
+                        }
+                        if (!hasSynchronizerId)
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
+                            break;
+                        }
+                        yield return CreatedFromProto<T>(created, synchronizerId);
                         break;
                     }
                 case Event.EventOneofCase.Archived:
                     {
                         var archived = evt.Archived;
-                        if (!MarkerMatcher<T>.MatchesProtoArchived(archived)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoArchived(archived))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(archived.Offset, UnclassifiedKind.ArchivedEvent);
+                            break;
+                        }
+                        if (!hasSynchronizerId)
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(archived.Offset, UnclassifiedKind.MissingSynchronizerId);
+                            break;
+                        }
                         yield return new ContractStreamEvent<T>.Archived(
                             new ContractId<T>(archived.ContractId),
                             archived.Offset,
+                            synchronizerId,
                             LedgerWireConversions.ToPartyList(archived.WitnessParties));
                         break;
                     }
                 case Event.EventOneofCase.Exercised:
                     {
                         var exercised = evt.Exercised;
-                        if (!MarkerMatcher<T>.MatchesProtoExercised(exercised)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoExercised(exercised))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(exercised.Offset, UnclassifiedKind.ExercisedEvent);
+                            break;
+                        }
+                        if (!hasSynchronizerId)
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(exercised.Offset, UnclassifiedKind.MissingSynchronizerId);
+                            break;
+                        }
                         var argument = exercised.ChoiceArgument is null
                             ? DamlUnit.Instance
                             : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
@@ -56,9 +98,13 @@ internal static class ContractStreamProjector
                             result,
                             exercised.Consuming,
                             exercised.Offset,
+                            synchronizerId,
                             LedgerWireConversions.ToPartyList(exercised.WitnessParties));
                         break;
                     }
+                default:
+                    yield return new ContractStreamEvent<T>.Unclassified(transaction.Offset, evt.EventCase.ToString());
+                    break;
             }
         }
     }
@@ -75,11 +121,26 @@ internal static class ContractStreamProjector
                     {
                         var assigned = evt.Assigned;
                         var created = assigned.CreatedEvent;
-                        if (created is null) continue;
-                        if (!MarkerMatcher<T>.MatchesProtoCreated(created)) continue;
-                        var payload = created.CreateArguments is null
-                            ? new DamlRecord(null, [])
-                            : DamlValueConverter.FromProtoRecord(created.CreateArguments);
+                        if (created is null)
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(reassignment.Offset, UnclassifiedKind.AssignedEvent);
+                            break;
+                        }
+                        if (!MarkerMatcher<T>.MatchesProtoCreated(created))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.AssignedEvent);
+                            break;
+                        }
+                        if (string.IsNullOrWhiteSpace(assigned.Source) || string.IsNullOrWhiteSpace(assigned.Target))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
+                            break;
+                        }
+                        if (!TryResolveCreatedPayload<T>(created, out var payload))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.InterfaceViewUnavailable);
+                            break;
+                        }
                         yield return new ContractStreamEvent<T>.Assigned(
                             new ContractId<T>(created.ContractId),
                             payload,
@@ -92,7 +153,16 @@ internal static class ContractStreamProjector
                 case ReassignmentEvent.EventOneofCase.Unassigned:
                     {
                         var unassigned = evt.Unassigned;
-                        if (!MarkerMatcher<T>.MatchesProtoUnassigned(unassigned)) continue;
+                        if (!MarkerMatcher<T>.MatchesProtoUnassigned(unassigned))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(unassigned.Offset, UnclassifiedKind.UnassignedEvent);
+                            break;
+                        }
+                        if (string.IsNullOrWhiteSpace(unassigned.Source) || string.IsNullOrWhiteSpace(unassigned.Target))
+                        {
+                            yield return new ContractStreamEvent<T>.Unclassified(unassigned.Offset, UnclassifiedKind.MissingSynchronizerId);
+                            break;
+                        }
                         yield return new ContractStreamEvent<T>.Unassigned(
                             new ContractId<T>(unassigned.ContractId),
                             unassigned.Offset,
@@ -101,21 +171,42 @@ internal static class ContractStreamProjector
                             LedgerWireConversions.ToPartyList(unassigned.WitnessParties));
                         break;
                     }
+                default:
+                    yield return new ContractStreamEvent<T>.Unclassified(reassignment.Offset, evt.EventCase.ToString());
+                    break;
             }
         }
     }
 
-    public static ContractStreamEvent<T>.Created CreatedFromProto<T>(ProtoCreatedEvent created)
+    public static ContractStreamEvent<T> CreatedFromProto<T>(
+        ProtoCreatedEvent created,
+        SynchronizerId synchronizerId)
         where T : IDamlType
     {
-        var payload = created.CreateArguments is null
-            ? new DamlRecord(null, [])
-            : DamlValueConverter.FromProtoRecord(created.CreateArguments);
+        if (!TryResolveCreatedPayload<T>(created, out var payload))
+        {
+            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.InterfaceViewUnavailable);
+        }
         return new ContractStreamEvent<T>.Created(
             new ContractId<T>(created.ContractId),
             payload,
             created.Offset,
+            synchronizerId,
             LedgerWireConversions.ToPartyList(created.WitnessParties));
+    }
+
+    private static bool TryResolveCreatedPayload<T>(ProtoCreatedEvent created, out DamlRecord payload)
+        where T : IDamlType
+    {
+        if (MarkerMatcher<T>.IsInterface)
+        {
+            return MarkerMatcher<T>.TryGetInterfaceViewRecord(created, out payload);
+        }
+
+        payload = created.CreateArguments is null
+            ? new DamlRecord(null, [])
+            : DamlValueConverter.FromProtoRecord(created.CreateArguments);
+        return true;
     }
 
     public static bool IsTemplateMatch(ProtoIdentifier? proto, RuntimeIdentifier expected)
@@ -125,15 +216,32 @@ internal static class ContractStreamProjector
             && string.Equals(proto.EntityName, expected.EntityName, StringComparison.Ordinal);
     }
 
-    public static ProtoCreatedEvent? ExtractCreatedEvent(GetActiveContractsResponse response) =>
-        response.ContractEntryCase switch
+    public static ContractStreamEvent<T> ProjectActiveContractEntry<T>(GetActiveContractsResponse response)
+        where T : IDamlType
+    {
+        var (created, synchronizerId, fallbackOffset) = response.ContractEntryCase switch
         {
             GetActiveContractsResponse.ContractEntryOneofCase.ActiveContract
-                => response.ActiveContract?.CreatedEvent,
+                => (response.ActiveContract?.CreatedEvent, response.ActiveContract?.SynchronizerId, 0L),
             GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned
-                => response.IncompleteUnassigned?.CreatedEvent,
+                => (response.IncompleteUnassigned?.CreatedEvent, response.IncompleteUnassigned?.UnassignedEvent?.Source, response.IncompleteUnassigned?.UnassignedEvent?.Offset ?? 0L),
             GetActiveContractsResponse.ContractEntryOneofCase.IncompleteAssigned
-                => response.IncompleteAssigned?.AssignedEvent?.CreatedEvent,
-            _ => null,
+                => (response.IncompleteAssigned?.AssignedEvent?.CreatedEvent, response.IncompleteAssigned?.AssignedEvent?.Target, 0L),
+            _ => (null, null, 0L),
         };
+
+        if (created is null)
+        {
+            return new ContractStreamEvent<T>.Unclassified(fallbackOffset, response.ContractEntryCase.ToString());
+        }
+        if (!MarkerMatcher<T>.MatchesProtoCreated(created))
+        {
+            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.CreatedEvent);
+        }
+        if (string.IsNullOrWhiteSpace(synchronizerId))
+        {
+            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
+        }
+        return CreatedFromProto<T>(created, new SynchronizerId(synchronizerId));
+    }
 }
