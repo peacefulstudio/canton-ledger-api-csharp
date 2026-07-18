@@ -13,24 +13,39 @@ internal static class SubscribeRequestBuilder
         RuntimeCommands.SubmitterInfo submitter,
         ProtoIdentifier filterId,
         long? fromOffset,
-        bool isInterface = false)
+        long? toOffset,
+        bool isInterface = false,
+        TransactionShape transactionShape = TransactionShape.AcsDelta)
     {
-        var eventFormat = BuildEventFormat(submitter, filterId, isInterface);
-        return new GetUpdatesRequest
+        var request = new GetUpdatesRequest
         {
             BeginExclusive = fromOffset ?? 0L,
             UpdateFormat = new UpdateFormat
             {
                 IncludeTransactions = new TransactionFormat
                 {
-                    EventFormat = eventFormat,
-                    TransactionShape = TransactionShape.LedgerEffects,
+                    EventFormat = BuildEventFormat(submitter, filterId, isInterface),
+                    TransactionShape = transactionShape,
                 },
+                IncludeReassignments = BuildEventFormat(submitter, filterId, isInterface),
             },
         };
+
+        if (toOffset is { } endInclusive)
+        {
+            request.EndInclusive = endInclusive;
+        }
+
+        return request;
     }
 
-    public static UpdateFormat BuildTransactionUpdateFormat(RuntimeCommands.SubmitterInfo submitter)
+    public static UpdateFormat BuildTransactionUpdateFormat(RuntimeCommands.SubmitterInfo submitter) =>
+        new UpdateFormat
+        {
+            IncludeTransactions = BuildTransactionFormat(submitter),
+        };
+
+    public static TransactionFormat BuildTransactionFormat(RuntimeCommands.SubmitterInfo submitter)
     {
         var eventFormat = new EventFormat { Verbose = true };
         var wildcard = new Filters();
@@ -38,13 +53,10 @@ internal static class SubscribeRequestBuilder
         AddFilterForEachParty(eventFormat, submitter.ActAs, wildcard);
         AddFilterForEachParty(eventFormat, submitter.ReadAs, wildcard);
 
-        return new UpdateFormat
+        return new TransactionFormat
         {
-            IncludeTransactions = new TransactionFormat
-            {
-                EventFormat = eventFormat,
-                TransactionShape = TransactionShape.LedgerEffects,
-            },
+            EventFormat = eventFormat,
+            TransactionShape = TransactionShape.LedgerEffects,
         };
     }
 
@@ -60,6 +72,12 @@ internal static class SubscribeRequestBuilder
             EventFormat = BuildEventFormat(submitter, filterId, isInterface),
         };
     }
+
+    public static EventFormat BuildReassignmentEventFormat(
+        RuntimeCommands.SubmitterInfo submitter,
+        ProtoIdentifier filterId,
+        bool isInterface) =>
+        BuildEventFormat(submitter, filterId, isInterface);
 
     private static EventFormat BuildEventFormat(
         RuntimeCommands.SubmitterInfo submitter,

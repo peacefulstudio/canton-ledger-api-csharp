@@ -49,4 +49,35 @@ public class RetryPipelineFactoryTests
 
         attempts.Should().Be(3);
     }
+
+    [Fact]
+    public async Task Create_applies_jitter_so_repeated_first_retry_delays_are_not_identical()
+    {
+        var observedDelays = new List<TimeSpan>();
+
+        var pipeline = RetryPipelineFactory.Create(
+            new RetryOptions
+            {
+                Enabled = true,
+                MaxRetryAttempts = 1,
+                Delay = TimeSpan.FromMilliseconds(5)
+            },
+            onRetry: attempt => observedDelays.Add(attempt.RetryDelay));
+
+        for (var i = 0; i < 25; i++)
+        {
+            try
+            {
+                await pipeline.ExecuteAsync(
+                    _ => throw new InvalidOperationException("transient"),
+                    TestContext.Current.CancellationToken);
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        observedDelays.Should().HaveCount(25);
+        observedDelays.Distinct().Should().HaveCountGreaterThan(1);
+    }
 }

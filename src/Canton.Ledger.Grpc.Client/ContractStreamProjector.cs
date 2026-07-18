@@ -7,176 +7,217 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
 using Daml.Runtime.Streams;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client;
 
-internal static class ContractStreamProjector
+internal static partial class ContractStreamProjector
 {
-    internal static class UnclassifiedKind
-    {
-        public const string CreatedEvent = "created-event";
-        public const string ArchivedEvent = "archived-event";
-        public const string ExercisedEvent = "exercised-event";
-        public const string AssignedEvent = "assigned-event";
-        public const string UnassignedEvent = "unassigned-event";
-        public const string MissingSynchronizerId = "missing-synchronizer-id";
-        public const string InterfaceViewUnavailable = "interface-view-unavailable";
-    }
-
     public static IEnumerable<ContractStreamEvent<T>> ProjectTransactionEvents<T>(
-        Transaction transaction)
+        Transaction transaction,
+        ILogger? logger = null)
         where T : IDamlType
     {
         var hasSynchronizerId = !string.IsNullOrWhiteSpace(transaction.SynchronizerId);
         var synchronizerId = hasSynchronizerId ? new SynchronizerId(transaction.SynchronizerId) : default;
         foreach (var evt in transaction.Events)
         {
-            switch (evt.EventCase)
+            var offset = TransactionEventOffset(evt, transaction.Offset);
+            ContractStreamEvent<T> projected;
+            try
             {
-                case Event.EventOneofCase.Created:
-                    {
-                        var created = evt.Created;
-                        if (!MarkerMatcher<T>.MatchesProtoCreated(created))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.CreatedEvent);
-                            break;
-                        }
-                        if (!hasSynchronizerId)
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
-                            break;
-                        }
-                        yield return CreatedFromProto<T>(created, synchronizerId);
-                        break;
-                    }
-                case Event.EventOneofCase.Archived:
-                    {
-                        var archived = evt.Archived;
-                        if (!MarkerMatcher<T>.MatchesProtoArchived(archived))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(archived.Offset, UnclassifiedKind.ArchivedEvent);
-                            break;
-                        }
-                        if (!hasSynchronizerId)
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(archived.Offset, UnclassifiedKind.MissingSynchronizerId);
-                            break;
-                        }
-                        yield return new ContractStreamEvent<T>.Archived(
-                            new ContractId<T>(archived.ContractId),
-                            archived.Offset,
-                            synchronizerId,
-                            LedgerWireConversions.ToPartyList(archived.WitnessParties));
-                        break;
-                    }
-                case Event.EventOneofCase.Exercised:
-                    {
-                        var exercised = evt.Exercised;
-                        if (!MarkerMatcher<T>.MatchesProtoExercised(exercised))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(exercised.Offset, UnclassifiedKind.ExercisedEvent);
-                            break;
-                        }
-                        if (!hasSynchronizerId)
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(exercised.Offset, UnclassifiedKind.MissingSynchronizerId);
-                            break;
-                        }
-                        var argument = exercised.ChoiceArgument is null
-                            ? DamlUnit.Instance
-                            : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
-                        var result = exercised.ExerciseResult is null
-                            ? DamlUnit.Instance
-                            : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
-                        yield return new ContractStreamEvent<T>.Exercised(
-                            new ContractId<T>(exercised.ContractId),
-                            exercised.Choice,
-                            argument,
-                            result,
-                            exercised.Consuming,
-                            exercised.Offset,
-                            synchronizerId,
-                            LedgerWireConversions.ToPartyList(exercised.WitnessParties));
-                        break;
-                    }
-                default:
-                    yield return new ContractStreamEvent<T>.Unclassified(transaction.Offset, evt.EventCase.ToString());
-                    break;
+                projected = ProjectTransactionEvent<T>(evt, hasSynchronizerId, synchronizerId, transaction.Offset);
             }
+            catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
+            {
+                projected = DecodeFailureEvent<T>(offset, logger, decodeFailure);
+            }
+            yield return projected;
         }
     }
 
+    private static ContractStreamEvent<T> ProjectTransactionEvent<T>(
+        Event evt,
+        bool hasSynchronizerId,
+        SynchronizerId synchronizerId,
+        long transactionOffset)
+        where T : IDamlType
+    {
+        switch (evt.EventCase)
+        {
+            case Event.EventOneofCase.Created:
+                {
+                    var created = evt.Created;
+                    if (!MarkerMatcher<T>.MatchesProtoCreated(created))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.CreatedEvent);
+                    }
+                    if (!hasSynchronizerId)
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.MissingSynchronizerId);
+                    }
+                    return CreatedFromProto<T>(created, synchronizerId);
+                }
+            case Event.EventOneofCase.Archived:
+                {
+                    var archived = evt.Archived;
+                    if (!MarkerMatcher<T>.MatchesProtoArchived(archived))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(archived.Offset), UnclassifiedKind.ArchivedEvent);
+                    }
+                    if (!hasSynchronizerId)
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(archived.Offset), UnclassifiedKind.MissingSynchronizerId);
+                    }
+                    return new ContractStreamEvent<T>.Archived(
+                        new ContractId<T>(archived.ContractId),
+                        LedgerOffset.At(archived.Offset),
+                        synchronizerId,
+                        LedgerWireConversions.ToPartyList(archived.WitnessParties));
+                }
+            case Event.EventOneofCase.Exercised:
+                {
+                    var exercised = evt.Exercised;
+                    if (!MarkerMatcher<T>.MatchesProtoExercised(exercised))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(exercised.Offset), UnclassifiedKind.ExercisedEvent);
+                    }
+                    if (!hasSynchronizerId)
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(exercised.Offset), UnclassifiedKind.MissingSynchronizerId);
+                    }
+                    var argument = exercised.ChoiceArgument is null
+                        ? DamlUnit.Instance
+                        : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
+                    var result = exercised.ExerciseResult is null
+                        ? DamlUnit.Instance
+                        : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
+                    return new ContractStreamEvent<T>.Exercised(
+                        new ContractId<T>(exercised.ContractId),
+                        exercised.Choice,
+                        argument,
+                        result,
+                        exercised.Consuming,
+                        LedgerOffset.At(exercised.Offset),
+                        synchronizerId,
+                        LedgerWireConversions.ToPartyList(exercised.WitnessParties));
+                }
+            default:
+                return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(transactionOffset), UnclassifiedKind.Unknown, evt.EventCase.ToString());
+        }
+    }
+
+    private static long TransactionEventOffset(Event evt, long transactionOffset) => evt.EventCase switch
+    {
+        Event.EventOneofCase.Created => evt.Created.Offset,
+        Event.EventOneofCase.Archived => evt.Archived.Offset,
+        Event.EventOneofCase.Exercised => evt.Exercised.Offset,
+        _ => transactionOffset,
+    };
+
+    private static ContractStreamEvent<T> DecodeFailureEvent<T>(long offset, ILogger? logger, Exception decodeFailure)
+        where T : IDamlType
+    {
+        LogEventDecodeFailed(logger ?? NullLogger.Instance, typeof(T).Name, offset, decodeFailure);
+        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(offset), UnclassifiedKind.DecodeFailure);
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not decode event at offset {Offset} on the {TemplateType} stream — surfaced as Unclassified (decode-failure)")]
+    private static partial void LogEventDecodeFailed(ILogger logger, string templateType, long offset, Exception exception);
+
     public static IEnumerable<ContractStreamEvent<T>> ProjectReassignmentEvents<T>(
-        Reassignment reassignment)
+        Reassignment reassignment,
+        ILogger? logger = null)
         where T : IDamlType
     {
         foreach (var evt in reassignment.Events)
         {
-            switch (evt.EventCase)
+            var offset = ReassignmentEventOffset(evt, reassignment.Offset);
+            ContractStreamEvent<T> projected;
+            try
             {
-                case ReassignmentEvent.EventOneofCase.Assigned:
-                    {
-                        var assigned = evt.Assigned;
-                        var created = assigned.CreatedEvent;
-                        if (created is null)
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(reassignment.Offset, UnclassifiedKind.AssignedEvent);
-                            break;
-                        }
-                        if (!MarkerMatcher<T>.MatchesProtoCreated(created))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.AssignedEvent);
-                            break;
-                        }
-                        if (string.IsNullOrWhiteSpace(assigned.Source) || string.IsNullOrWhiteSpace(assigned.Target))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
-                            break;
-                        }
-                        if (!TryResolveCreatedPayload<T>(created, out var payload))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.InterfaceViewUnavailable);
-                            break;
-                        }
-                        yield return new ContractStreamEvent<T>.Assigned(
-                            new ContractId<T>(created.ContractId),
-                            payload,
-                            created.Offset,
-                            new SynchronizerId(assigned.Source),
-                            new SynchronizerId(assigned.Target),
-                            LedgerWireConversions.ToPartyList(created.WitnessParties));
-                        break;
-                    }
-                case ReassignmentEvent.EventOneofCase.Unassigned:
-                    {
-                        var unassigned = evt.Unassigned;
-                        if (!MarkerMatcher<T>.MatchesProtoUnassigned(unassigned))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(unassigned.Offset, UnclassifiedKind.UnassignedEvent);
-                            break;
-                        }
-                        if (string.IsNullOrWhiteSpace(unassigned.Source) || string.IsNullOrWhiteSpace(unassigned.Target))
-                        {
-                            yield return new ContractStreamEvent<T>.Unclassified(unassigned.Offset, UnclassifiedKind.MissingSynchronizerId);
-                            break;
-                        }
-                        yield return new ContractStreamEvent<T>.Unassigned(
-                            new ContractId<T>(unassigned.ContractId),
-                            unassigned.Offset,
-                            new SynchronizerId(unassigned.Source),
-                            new SynchronizerId(unassigned.Target),
-                            LedgerWireConversions.ToPartyList(unassigned.WitnessParties));
-                        break;
-                    }
-                default:
-                    yield return new ContractStreamEvent<T>.Unclassified(reassignment.Offset, evt.EventCase.ToString());
-                    break;
+                projected = ProjectReassignmentEvent<T>(evt, reassignment.Offset);
             }
+            catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
+            {
+                projected = DecodeFailureEvent<T>(offset, logger, decodeFailure);
+            }
+            yield return projected;
         }
     }
+
+    private static ContractStreamEvent<T> ProjectReassignmentEvent<T>(
+        ReassignmentEvent evt,
+        long reassignmentOffset)
+        where T : IDamlType
+    {
+        switch (evt.EventCase)
+        {
+            case ReassignmentEvent.EventOneofCase.Assigned:
+                {
+                    var assigned = evt.Assigned;
+                    var created = assigned.CreatedEvent;
+                    if (created is null)
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(reassignmentOffset), UnclassifiedKind.AssignedEvent);
+                    }
+                    if (!MarkerMatcher<T>.MatchesProtoCreated(created))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.AssignedEvent);
+                    }
+                    if (string.IsNullOrWhiteSpace(assigned.Source) || string.IsNullOrWhiteSpace(assigned.Target))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.MissingSynchronizerId);
+                    }
+                    if (!TryResolveCreatedPayload<T>(created, out var payload))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.InterfaceViewUnavailable);
+                    }
+                    return new ContractStreamEvent<T>.Assigned(
+                        new ContractId<T>(created.ContractId),
+                        payload,
+                        LedgerOffset.At(created.Offset),
+                        new SynchronizerId(assigned.Source),
+                        new SynchronizerId(assigned.Target),
+                        assigned.ReassignmentId,
+                        (long)assigned.ReassignmentCounter,
+                        LedgerWireConversions.ToPartyList(created.WitnessParties));
+                }
+            case ReassignmentEvent.EventOneofCase.Unassigned:
+                {
+                    var unassigned = evt.Unassigned;
+                    if (!MarkerMatcher<T>.MatchesProtoUnassigned(unassigned))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(unassigned.Offset), UnclassifiedKind.UnassignedEvent);
+                    }
+                    if (string.IsNullOrWhiteSpace(unassigned.Source) || string.IsNullOrWhiteSpace(unassigned.Target))
+                    {
+                        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(unassigned.Offset), UnclassifiedKind.MissingSynchronizerId);
+                    }
+                    return new ContractStreamEvent<T>.Unassigned(
+                        new ContractId<T>(unassigned.ContractId),
+                        LedgerOffset.At(unassigned.Offset),
+                        new SynchronizerId(unassigned.Source),
+                        new SynchronizerId(unassigned.Target),
+                        unassigned.ReassignmentId,
+                        (long)unassigned.ReassignmentCounter,
+                        LedgerWireConversions.ToPartyList(unassigned.WitnessParties));
+                }
+            default:
+                return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(reassignmentOffset), UnclassifiedKind.Unknown, evt.EventCase.ToString());
+        }
+    }
+
+    private static long ReassignmentEventOffset(ReassignmentEvent evt, long reassignmentOffset) => evt.EventCase switch
+    {
+        ReassignmentEvent.EventOneofCase.Assigned => evt.Assigned.CreatedEvent?.Offset ?? reassignmentOffset,
+        ReassignmentEvent.EventOneofCase.Unassigned => evt.Unassigned.Offset,
+        _ => reassignmentOffset,
+    };
 
     public static ContractStreamEvent<T> CreatedFromProto<T>(
         ProtoCreatedEvent created,
@@ -185,12 +226,12 @@ internal static class ContractStreamProjector
     {
         if (!TryResolveCreatedPayload<T>(created, out var payload))
         {
-            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.InterfaceViewUnavailable);
+            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.InterfaceViewUnavailable);
         }
         return new ContractStreamEvent<T>.Created(
             new ContractId<T>(created.ContractId),
             payload,
-            created.Offset,
+            LedgerOffset.At(created.Offset),
             synchronizerId,
             LedgerWireConversions.ToPartyList(created.WitnessParties));
     }
@@ -209,14 +250,16 @@ internal static class ContractStreamProjector
         return true;
     }
 
-    public static bool IsTemplateMatch(ProtoIdentifier? proto, RuntimeIdentifier expected)
-    {
-        if (proto is null) return false;
-        return string.Equals(proto.ModuleName, expected.ModuleName, StringComparison.Ordinal)
-            && string.Equals(proto.EntityName, expected.EntityName, StringComparison.Ordinal);
-    }
+    public static bool IsTemplateMatch(ProtoIdentifier? proto, RuntimeIdentifier expected) =>
+        proto is not null && MatchesModuleEntity(proto.ModuleName, proto.EntityName, expected);
 
-    public static ContractStreamEvent<T> ProjectActiveContractEntry<T>(GetActiveContractsResponse response)
+    internal static bool MatchesModuleEntity(string moduleName, string entityName, RuntimeIdentifier expected) =>
+        string.Equals(moduleName, expected.ModuleName, StringComparison.Ordinal)
+        && string.Equals(entityName, expected.EntityName, StringComparison.Ordinal);
+
+    public static IEnumerable<ContractStreamEvent<T>> ProjectActiveContractEntry<T>(
+        GetActiveContractsResponse response,
+        ILogger? logger = null)
         where T : IDamlType
     {
         var (created, synchronizerId, fallbackOffset) = response.ContractEntryCase switch
@@ -230,18 +273,56 @@ internal static class ContractStreamProjector
             _ => (null, null, 0L),
         };
 
+        var createdEvent = ClassifyActiveCreated<T>(response.ContractEntryCase, created, synchronizerId, fallbackOffset, logger);
+        yield return createdEvent;
+
+        if (response.ContractEntryCase == GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned
+            && createdEvent is ContractStreamEvent<T>.Created
+            && response.IncompleteUnassigned?.UnassignedEvent is { } unassigned)
+        {
+            if (string.IsNullOrWhiteSpace(unassigned.Source) || string.IsNullOrWhiteSpace(unassigned.Target))
+            {
+                yield return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(unassigned.Offset), UnclassifiedKind.MissingSynchronizerId);
+                yield break;
+            }
+            yield return new ContractStreamEvent<T>.Unassigned(
+                new ContractId<T>(unassigned.ContractId),
+                LedgerOffset.At(unassigned.Offset),
+                new SynchronizerId(unassigned.Source),
+                new SynchronizerId(unassigned.Target),
+                unassigned.ReassignmentId,
+                (long)unassigned.ReassignmentCounter,
+                LedgerWireConversions.ToPartyList(unassigned.WitnessParties));
+        }
+    }
+
+    private static ContractStreamEvent<T> ClassifyActiveCreated<T>(
+        GetActiveContractsResponse.ContractEntryOneofCase entryCase,
+        ProtoCreatedEvent? created,
+        string? synchronizerId,
+        long fallbackOffset,
+        ILogger? logger)
+        where T : IDamlType
+    {
         if (created is null)
         {
-            return new ContractStreamEvent<T>.Unclassified(fallbackOffset, response.ContractEntryCase.ToString());
+            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(fallbackOffset), UnclassifiedKind.Unknown, entryCase.ToString());
         }
         if (!MarkerMatcher<T>.MatchesProtoCreated(created))
         {
-            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.CreatedEvent);
+            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.CreatedEvent);
         }
         if (string.IsNullOrWhiteSpace(synchronizerId))
         {
-            return new ContractStreamEvent<T>.Unclassified(created.Offset, UnclassifiedKind.MissingSynchronizerId);
+            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(created.Offset), UnclassifiedKind.MissingSynchronizerId);
         }
-        return CreatedFromProto<T>(created, new SynchronizerId(synchronizerId));
+        try
+        {
+            return CreatedFromProto<T>(created, new SynchronizerId(synchronizerId));
+        }
+        catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
+        {
+            return DecodeFailureEvent<T>(created.Offset, logger, decodeFailure);
+        }
     }
 }

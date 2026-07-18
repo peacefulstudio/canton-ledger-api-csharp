@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Canton.Ledger.Kernel</PackageId>
-    <Description>Transport-neutral client kernel for Canton participant nodes (ADR 0006): OAuth2 client-credentials token provider, OpenTelemetry ActivitySource naming convention, and an opt-in Polly retry pipeline, consumed as peers by both the gRPC and (future) HTTP clients.</Description>
+    <Description>Transport-neutral client kernel for Canton participant nodes: OAuth2 client-credentials token provider, OpenTelemetry ActivitySource naming convention, and an opt-in Polly retry pipeline, consumed as peers by both the gRPC and (future) HTTP clients.</Description>
     <PackageTags>canton;daml;auth;oauth2;token;client-credentials;opentelemetry;resilience;polly</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -10,6 +10,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Canton.Ledger.Kernel.Tests" />
+    <InternalsVisibleTo Include="Canton.Ledger.Grpc.Client" />
+    <InternalsVisibleTo Include="Canton.Ledger.Rest.Client" />
+    <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client" />
+    <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client.Tests" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Peaceful.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Polly.Core" />
     <PackageReference Include="Microsoft.Extensions.Options" />

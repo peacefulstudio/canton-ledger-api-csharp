@@ -10,8 +10,9 @@ using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Peaceful.Extensions.Logging;
+using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -26,8 +27,9 @@ public sealed partial class AdminClient : IAdminClient
     /// </summary>
     public static string ActivitySourceName => LedgerActivitySource.NameFor<AdminClient>();
 
+    internal const int MaxPagesPerPaginatedCall = 10_000;
+
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<AdminClient>();
-    private static readonly ILogger<AdminClient> Logger = StaticLoggerFactory.Create<AdminClient>();
 
     private readonly GrpcChannel _channel;
     private readonly PartyManagementService.PartyManagementServiceClient _partyService;
@@ -36,51 +38,42 @@ public sealed partial class AdminClient : IAdminClient
     private readonly PackageService.PackageServiceClient _packageService;
     private readonly LedgerClientOptions _options;
     private readonly ITokenProvider? _tokenProvider;
-    private readonly string _serverAddress;
-    private readonly int _serverPort;
+    private readonly LedgerCallInvoker _invoker;
+    private readonly ILogger<AdminClient> _logger;
 
     /// <summary>
     /// Creates a new AdminClient with the specified options and token provider.
+    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
     /// </summary>
-    public AdminClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider)
-        : this(options.Value, tokenProvider)
+    public AdminClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider, ILogger<AdminClient>? logger = null)
+        : this(options.Value, tokenProvider, logger)
     {
     }
 
     /// <summary>
     /// Creates a new AdminClient with the specified options and token provider.
+    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
     /// </summary>
-    public AdminClient(LedgerClientOptions options, ITokenProvider tokenProvider)
+    public AdminClient(LedgerClientOptions options, ITokenProvider tokenProvider, ILogger<AdminClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(tokenProvider);
 
         _options = options;
         _tokenProvider = tokenProvider;
-        (_serverAddress, _serverPort) = ActivityHelper.ParseServerEndpoint(_options.GrpcAddress);
+        _logger = logger ?? NullLogger<AdminClient>.Instance;
+        _invoker = new LedgerCallInvoker(_options, _tokenProvider);
 
-        _channel = GrpcChannel.ForAddress(_options.GrpcAddress, new GrpcChannelOptions
-        {
-            MaxReceiveMessageSize = _options.MaxMessageSize,
-            MaxSendMessageSize = _options.MaxMessageSize
-        });
+        _channel = LedgerGrpcChannel.Create(_options);
 
         _partyService = new PartyManagementService.PartyManagementServiceClient(_channel);
         _userService = new UserManagementService.UserManagementServiceClient(_channel);
         _packageManagementService = new PackageManagementService.PackageManagementServiceClient(_channel);
         _packageService = new PackageService.PackageServiceClient(_channel);
 
-        LogInitialized(Logger, _options.GrpcAddress);
-
-        if (ReferenceEquals(_tokenProvider, ITokenProvider.None))
-            LogUnauthenticatedMode(Logger);
+        CallContextHelper.LogStartupDiagnostics(
+            _logger, _tokenProvider, _options.GrpcAddress, nameof(AdminClient), "AddAdminClient");
     }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "AdminClient initialized with endpoint {Endpoint}")]
-    private static partial void LogInitialized(ILogger logger, string endpoint);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "AdminClient running in unauthenticated mode. If this is unintentional, register an ITokenProvider or use the AddAdminClient overload that accepts authConfiguration.")]
-    private static partial void LogUnauthenticatedMode(ILogger logger);
 
     internal AdminClient(
         LedgerClientOptions options,
@@ -89,7 +82,8 @@ public sealed partial class AdminClient : IAdminClient
         UserManagementService.UserManagementServiceClient userService,
         ITokenProvider? tokenProvider = null,
         PackageManagementService.PackageManagementServiceClient? packageManagementService = null,
-        PackageService.PackageServiceClient? packageService = null)
+        PackageService.PackageServiceClient? packageService = null,
+        ILogger<AdminClient>? logger = null)
     {
         _options = options;
         _channel = channel;
@@ -98,73 +92,45 @@ public sealed partial class AdminClient : IAdminClient
         _packageManagementService = packageManagementService ?? new PackageManagementService.PackageManagementServiceClient(channel);
         _packageService = packageService ?? new PackageService.PackageServiceClient(channel);
         _tokenProvider = tokenProvider;
-        (_serverAddress, _serverPort) = ActivityHelper.ParseServerEndpoint(options.GrpcAddress);
+        _logger = logger ?? NullLogger<AdminClient>.Instance;
+        _invoker = new LedgerCallInvoker(options, tokenProvider);
     }
 
     /// <inheritdoc />
-    public async Task<string> GetParticipantIdAsync(CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "GetParticipantId", _serverAddress, _serverPort);
-
-        try
-        {
-            var response = await _partyService.GetParticipantIdAsync(
-                new GetParticipantIdRequest(),
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            return response.ParticipantId;
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
-    }
+    public Task<string> GetParticipantIdAsync(CancellationToken cancellationToken = default) =>
+        _invoker.InvokeTracedAsync<AdminClient, GetParticipantIdResponse, string>(
+            ActivitySource,
+            PartyManagementService.Descriptor,
+            "GetParticipantId",
+            (headers, deadline, token) => _partyService.GetParticipantIdAsync(new GetParticipantIdRequest(), headers, deadline, token),
+            response => response.ParticipantId,
+            cancellationToken);
 
     /// <inheritdoc />
     public async Task<PartyDetails> AllocatePartyAsync(
         string partyIdHint,
-        string? displayName = null,
         string? synchronizerId = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "AllocateParty", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.CantonPartyIdHint, partyIdHint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(partyIdHint);
 
-        LogAllocatingParty(Logger, partyIdHint);
+        LogAllocatingParty(_logger, partyIdHint);
 
-        var request = new AllocatePartyRequest
-        {
-            PartyIdHint = partyIdHint
-        };
+        var request = new AllocatePartyRequest { PartyIdHint = partyIdHint };
         if (!string.IsNullOrEmpty(synchronizerId))
-        {
             request.SynchronizerId = synchronizerId;
-        }
 
-        try
-        {
-            var response = await _partyService.AllocatePartyAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        var details = await _invoker.InvokeTracedAsync<AdminClient, AllocatePartyResponse, PartyDetails>(
+            ActivitySource,
+            PartyManagementService.Descriptor,
+            "AllocateParty",
+            (headers, deadline, token) => _partyService.AllocatePartyAsync(request, headers, deadline, token),
+            response => new PartyDetails(response.PartyDetails.Party, response.PartyDetails.IsLocal),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonPartyIdHint, partyIdHint)).ConfigureAwait(false);
 
-            var details = response.PartyDetails;
-
-            LogPartyAllocated(Logger, details.Party);
-
-            return new PartyDetails(details.Party, details.IsLocal);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogPartyAllocated(_logger, details.Party);
+        return details;
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Allocating party with hint: {PartyIdHint}")]
@@ -174,67 +140,48 @@ public sealed partial class AdminClient : IAdminClient
     private static partial void LogPartyAllocated(ILogger logger, string partyId);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<PartyDetails>> GetPartiesAsync(
+    public Task<IReadOnlyList<PartyDetails>> GetPartiesAsync(
         IEnumerable<string> partyIds,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "GetParties", _serverAddress, _serverPort);
+        ArgumentNullException.ThrowIfNull(partyIds);
 
         var request = new GetPartiesRequest();
         request.Parties.AddRange(partyIds);
 
-        try
-        {
-            var response = await _partyService.GetPartiesAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            return response.PartyDetails
-                .Select(p => new PartyDetails(p.Party, p.IsLocal))
-                .ToList();
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        return _invoker.InvokeTracedAsync<AdminClient, GetPartiesResponse, IReadOnlyList<PartyDetails>>(
+            ActivitySource,
+            PartyManagementService.Descriptor,
+            "GetParties",
+            (headers, deadline, token) => _partyService.GetPartiesAsync(request, headers, deadline, token),
+            response => response.PartyDetails.Select(p => new PartyDetails(p.Party, p.IsLocal)).ToList(),
+            cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<PartyDetails>> ListKnownPartiesAsync(
+    public Task<IReadOnlyList<PartyDetails>> ListKnownPartiesAsync(
         int pageSize = 100,
-        string? pageToken = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PartyManagementService.Descriptor, "ListKnownParties", _serverAddress, _serverPort);
+        var request = new ListKnownPartiesRequest { PageSize = pageSize };
 
-        var request = new ListKnownPartiesRequest
-        {
-            PageSize = pageSize,
-            PageToken = pageToken ?? string.Empty
-        };
-
-        try
-        {
-            var response = await _partyService.ListKnownPartiesAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            return response.PartyDetails
-                .Select(p => new PartyDetails(p.Party, p.IsLocal))
-                .ToList();
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        return _invoker.ExecuteTracedAsync<AdminClient, IReadOnlyList<PartyDetails>>(
+            ActivitySource,
+            PartyManagementService.Descriptor,
+            "ListKnownParties",
+            (activity, token) => FetchAllPagesAsync(
+                activity,
+                "ListKnownParties",
+                async pageToken =>
+                {
+                    request.PageToken = pageToken;
+                    return await _invoker.InvokeAsync(
+                        (headers, deadline, callToken) => _partyService.ListKnownPartiesAsync(request, headers, deadline, callToken),
+                        token).ConfigureAwait(false);
+                },
+                response => response.NextPageToken,
+                response => response.PartyDetails.Select(p => new PartyDetails(p.Party, p.IsLocal))),
+            cancellationToken);
     }
 
     /// <inheritdoc />
@@ -244,42 +191,27 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight>? rights = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(UserManagementService.Descriptor, "CreateUser", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(primaryParty);
 
-        LogCreatingUser(Logger, userId);
+        LogCreatingUser(_logger, userId);
 
-        var user = new User
-        {
-            Id = userId,
-            PrimaryParty = primaryParty
-        };
-
+        var user = new User { Id = userId, PrimaryParty = primaryParty };
         var request = new CreateUserRequest { User = user };
-
         if (rights != null)
-        {
             request.Rights.AddRange(rights.Select(ToProtoRight));
-        }
 
-        try
-        {
-            var response = await _userService.CreateUserAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        var details = await _invoker.InvokeTracedAsync<AdminClient, CreateUserResponse, UserDetails>(
+            ActivitySource,
+            UserManagementService.Descriptor,
+            "CreateUser",
+            (headers, deadline, token) => _userService.CreateUserAsync(request, headers, deadline, token),
+            response => FromProtoUser(response.User),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
 
-            LogUserCreated(Logger, userId);
-
-            return FromProtoUser(response.User);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogUserCreated(_logger, userId);
+        return details;
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Creating user: {UserId}")]
@@ -293,27 +225,22 @@ public sealed partial class AdminClient : IAdminClient
         string userId,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(UserManagementService.Descriptor, "GetUser", _serverAddress, _serverPort);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
 
         try
         {
-            var response = await _userService.GetUserAsync(
-                new GetUserRequest { UserId = userId },
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            return FromProtoUser(response.User);
+            return await _invoker.InvokeTracedAsync<AdminClient, GetUserResponse, UserDetails?>(
+                ActivitySource,
+                UserManagementService.Descriptor,
+                "GetUser",
+                (headers, deadline, token) => _userService.GetUserAsync(new GetUserRequest { UserId = userId }, headers, deadline, token),
+                response => FromProtoUser(response.User),
+                cancellationToken,
+                isExpectedFailure: IsNotFound).ConfigureAwait(false);
         }
-        catch (RpcException ex) when (ex.StatusCode == StatusCode.NotFound)
+        catch (RpcException ex) when (IsNotFound(ex))
         {
             return null;
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
         }
     }
 
@@ -323,28 +250,21 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(UserManagementService.Descriptor, "GrantUserRights", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(rights);
 
         var request = new GrantUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
-        try
-        {
-            await _userService.GrantUserRightsAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        await _invoker.InvokeTracedAsync<AdminClient, GrantUserRightsResponse>(
+            ActivitySource,
+            UserManagementService.Descriptor,
+            "GrantUserRights",
+            (headers, deadline, token) => _userService.GrantUserRightsAsync(request, headers, deadline, token),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
 
-            LogRightsGranted(Logger, userId);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogRightsGranted(_logger, userId);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rights granted to user {UserId}")]
@@ -356,188 +276,200 @@ public sealed partial class AdminClient : IAdminClient
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(UserManagementService.Descriptor, "RevokeUserRights", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(rights);
 
         var request = new RevokeUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
-        try
-        {
-            await _userService.RevokeUserRightsAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        await _invoker.InvokeTracedAsync<AdminClient, RevokeUserRightsResponse>(
+            ActivitySource,
+            UserManagementService.Descriptor,
+            "RevokeUserRights",
+            (headers, deadline, token) => _userService.RevokeUserRightsAsync(request, headers, deadline, token),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
 
-            LogRightsRevoked(Logger, userId);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogRightsRevoked(_logger, userId);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rights revoked from user {UserId}")]
     private static partial void LogRightsRevoked(ILogger logger, string userId);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UserDetails>> ListUsersAsync(
-        int pageSize = 100,
-        string? pageToken = null,
+    public async Task<IReadOnlyList<UserRight>?> ListUserRightsAsync(
+        string userId,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(UserManagementService.Descriptor, "ListUsers", _serverAddress, _serverPort);
-
-        var request = new ListUsersRequest
-        {
-            PageSize = pageSize,
-            PageToken = pageToken ?? string.Empty
-        };
+        ArgumentNullException.ThrowIfNull(userId);
 
         try
         {
-            var response = await _userService.ListUsersAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            return response.Users.Select(FromProtoUser).ToList();
+            return await _invoker.InvokeTracedAsync<AdminClient, ListUserRightsResponse, IReadOnlyList<UserRight>?>(
+                ActivitySource,
+                UserManagementService.Descriptor,
+                "ListUserRights",
+                (headers, deadline, token) => _userService.ListUserRightsAsync(new ListUserRightsRequest { UserId = userId }, headers, deadline, token),
+                response => response.Rights.Select(FromProtoRight).ToList(),
+                cancellationToken,
+                configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId),
+                isExpectedFailure: IsNotFound).ConfigureAwait(false);
         }
-        catch (RpcException ex)
+        catch (RpcException ex) when (IsNotFound(ex))
         {
-            activity.RecordGrpcError(ex);
-            throw;
+            return null;
         }
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(
+    public Task<IReadOnlyList<UserDetails>> ListUsersAsync(
+        int pageSize = 100,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "ListKnownPackages", _serverAddress, _serverPort);
+        var request = new ListUsersRequest { PageSize = pageSize };
 
-        try
-        {
-            var response = await _packageManagementService.ListKnownPackagesAsync(
-                new ListKnownPackagesRequest(),
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        return _invoker.ExecuteTracedAsync<AdminClient, IReadOnlyList<UserDetails>>(
+            ActivitySource,
+            UserManagementService.Descriptor,
+            "ListUsers",
+            (activity, token) => FetchAllPagesAsync(
+                activity,
+                "ListUsers",
+                async pageToken =>
+                {
+                    request.PageToken = pageToken;
+                    return await _invoker.InvokeAsync(
+                        (headers, deadline, callToken) => _userService.ListUsersAsync(request, headers, deadline, callToken),
+                        token).ConfigureAwait(false);
+                },
+                response => response.NextPageToken,
+                response => response.Users.Select(FromProtoUser)),
+            cancellationToken);
+    }
 
-            return response.PackageDetails
+    /// <inheritdoc />
+    public Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(
+        CancellationToken cancellationToken = default) =>
+        _invoker.InvokeTracedAsync<AdminClient, ListKnownPackagesResponse, IReadOnlyList<PackageDetails>>(
+            ActivitySource,
+            PackageManagementService.Descriptor,
+            "ListKnownPackages",
+            (headers, deadline, token) => _packageManagementService.ListKnownPackagesAsync(new ListKnownPackagesRequest(), headers, deadline, token),
+            response => response.PackageDetails
                 .Select(p => new PackageDetails(
                     p.PackageId,
                     p.Name,
                     p.Version,
-                    (long)p.PackageSize,
+                    p.PackageSize <= long.MaxValue
+                        ? (long)p.PackageSize
+                        : throw new InvalidOperationException(
+                            $"Package '{p.PackageId}' reports a size of {p.PackageSize} bytes, which exceeds the supported maximum of {long.MaxValue}."),
                     (p.KnownSince ?? throw new InvalidOperationException(
                         $"Package '{p.PackageId}' is missing the required known_since timestamp.")).ToDateTimeOffset()))
-                .ToList();
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
-    }
+                .ToList(),
+            cancellationToken);
 
     /// <inheritdoc />
-    public async Task<PackageArchive> GetPackageAsync(
+    public Task<PackageArchive> GetPackageAsync(
         string packageId,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
 
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PackageService.Descriptor, "GetPackage", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.DamlPackageId, packageId);
-
-        try
-        {
-            var response = await _packageService.GetPackageAsync(
-                new GetPackageRequest { PackageId = packageId },
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            if (!System.Enum.IsDefined(response.HashFunction))
-            {
-                var error = new InvalidOperationException(
-                    $"Package '{packageId}' was returned with unrecognized hash function value {(int)response.HashFunction}.");
-                activity.RecordException(error);
-                throw error;
-            }
-
-            return new PackageArchive(
-                response.ArchivePayload.ToByteArray(),
+        return _invoker.InvokeTracedAsync<AdminClient, GetPackageResponse, PackageArchive>(
+            ActivitySource,
+            PackageService.Descriptor,
+            "GetPackage",
+            (headers, deadline, token) => _packageService.GetPackageAsync(new GetPackageRequest { PackageId = packageId }, headers, deadline, token),
+            response => new PackageArchive(
+                response.ArchivePayload.Memory,
                 response.Hash,
-                response.HashFunction.ToString());
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+                MapHashFunction(response.HashFunction)),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.DamlPackageId, packageId));
     }
 
+    private static HashFunction MapHashFunction(WireHashFunction hashFunction) => hashFunction switch
+    {
+        WireHashFunction.Sha256 => HashFunction.Sha256,
+        _ => HashFunction.Unrecognized,
+    };
+
     /// <inheritdoc />
-    public async Task<IReadOnlyList<VettedPackage>> ListVettedPackagesAsync(
+    public Task<IReadOnlyList<VettedPackage>> ListVettedPackagesAsync(
         IEnumerable<string>? packageNamePrefixes = null,
         CancellationToken cancellationToken = default)
     {
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PackageService.Descriptor, "ListVettedPackages", _serverAddress, _serverPort);
-
         var request = new ListVettedPackagesRequest();
 
         var prefixes = packageNamePrefixes?.ToList();
         if (prefixes is { Count: > 0 })
             request.PackageMetadataFilter = new PackageMetadataFilter { PackageNamePrefixes = { prefixes } };
 
-        var vettedPackages = new List<VettedPackage>();
-
-        try
-        {
-            do
-            {
-                var response = await _packageService.ListVettedPackagesAsync(
-                    request,
-                    headers: await GetHeadersAsync(cancellationToken),
-                    deadline: GetDeadline(),
-                    cancellationToken: cancellationToken);
-
-                if (response.NextPageToken.Length > 0 && response.NextPageToken == request.PageToken)
+        return _invoker.ExecuteTracedAsync<AdminClient, IReadOnlyList<VettedPackage>>(
+            ActivitySource,
+            PackageService.Descriptor,
+            "ListVettedPackages",
+            (activity, token) => FetchAllPagesAsync(
+                activity,
+                "ListVettedPackages",
+                async pageToken =>
                 {
-                    var error = new InvalidOperationException(
-                        $"ListVettedPackages pagination is not progressing: the server returned the page token '{response.NextPageToken}' that was just sent.");
-                    activity.RecordException(error);
-                    throw error;
-                }
-
-                vettedPackages.AddRange(response.VettedPackages.SelectMany(group =>
+                    request.PageToken = pageToken;
+                    return await _invoker.InvokeAsync(
+                        (headers, deadline, callToken) => _packageService.ListVettedPackagesAsync(request, headers, deadline, callToken),
+                        token).ConfigureAwait(false);
+                },
+                response => response.NextPageToken,
+                response => response.VettedPackages.SelectMany(group =>
                     group.Packages.Select(p => new VettedPackage(
                         p.PackageId,
                         p.PackageName,
                         p.PackageVersion,
                         group.ParticipantId,
-                        group.SynchronizerId))));
+                        group.SynchronizerId)))),
+            cancellationToken);
+    }
 
-                request.PageToken = response.NextPageToken;
-            } while (request.PageToken.Length > 0);
+    private static async Task<IReadOnlyList<TItem>> FetchAllPagesAsync<TResponse, TItem>(
+        Activity? activity,
+        string grpcMethodName,
+        Func<string, Task<TResponse>> fetchPage,
+        Func<TResponse, string> readNextPageToken,
+        Func<TResponse, IEnumerable<TItem>> readItems)
+    {
+        var items = new List<TItem>();
+        var pageToken = string.Empty;
+        var seenPageTokens = new HashSet<string>(StringComparer.Ordinal);
+        var fetchedPages = 0;
 
-            return vettedPackages;
-        }
-        catch (RpcException ex)
+        do
         {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+            var response = await fetchPage(pageToken).ConfigureAwait(false);
+            fetchedPages++;
+            var nextPageToken = readNextPageToken(response);
+
+            if (nextPageToken.Length > 0 && !seenPageTokens.Add(nextPageToken))
+            {
+                var error = new InvalidOperationException(
+                    $"{grpcMethodName} pagination is not progressing: the server returned the page token '{nextPageToken}' that was already used earlier in this call.");
+                activity.RecordException(error);
+                throw error;
+            }
+
+            items.AddRange(readItems(response));
+            pageToken = nextPageToken;
+
+            if (pageToken.Length > 0 && fetchedPages >= MaxPagesPerPaginatedCall)
+            {
+                var error = new InvalidOperationException(
+                    $"{grpcMethodName} pagination did not complete after {MaxPagesPerPaginatedCall} pages; aborting instead of following an unbounded page-token stream.");
+                activity.RecordException(error);
+                throw error;
+            }
+        } while (pageToken.Length > 0);
+
+        return items;
     }
 
     /// <inheritdoc />
@@ -548,11 +480,7 @@ public sealed partial class AdminClient : IAdminClient
     {
         ThrowIfNullOrEmpty(darFile);
 
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "UploadDarFile", _serverAddress, _serverPort);
-        activity?.SetTag(LedgerClientActivityTags.CantonSubmissionId, submissionId);
-
-        LogUploadingDar(Logger, darFile.Length);
+        LogUploadingDar(_logger, darFile.Length);
 
         var request = new UploadDarFileRequest
         {
@@ -560,21 +488,15 @@ public sealed partial class AdminClient : IAdminClient
             SubmissionId = submissionId ?? string.Empty
         };
 
-        try
-        {
-            await _packageManagementService.UploadDarFileAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
+        await _invoker.InvokeTracedAsync<AdminClient, UploadDarFileResponse>(
+            ActivitySource,
+            PackageManagementService.Descriptor,
+            "UploadDarFile",
+            (headers, deadline, token) => _packageManagementService.UploadDarFileAsync(request, headers, deadline, token),
+            cancellationToken,
+            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonSubmissionId, submissionId)).ConfigureAwait(false);
 
-            LogDarUploaded(Logger, darFile.Length);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogDarUploaded(_logger, darFile.Length);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Uploading DAR file ({DarSize} bytes)")]
@@ -590,33 +512,22 @@ public sealed partial class AdminClient : IAdminClient
     {
         ThrowIfNullOrEmpty(darFile);
 
-        using var activity = LedgerActivitySource.StartActivity<AdminClient>(ActivitySource);
-        activity.SetGrpcCallTags(PackageManagementService.Descriptor, "ValidateDarFile", _serverAddress, _serverPort);
+        var request = new ValidateDarFileRequest { DarFile = ByteString.CopyFrom(darFile) };
 
-        var request = new ValidateDarFileRequest
-        {
-            DarFile = ByteString.CopyFrom(darFile)
-        };
+        await _invoker.InvokeTracedAsync<AdminClient, ValidateDarFileResponse>(
+            ActivitySource,
+            PackageManagementService.Descriptor,
+            "ValidateDarFile",
+            (headers, deadline, token) => _packageManagementService.ValidateDarFileAsync(request, headers, deadline, token),
+            cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            await _packageManagementService.ValidateDarFileAsync(
-                request,
-                headers: await GetHeadersAsync(cancellationToken),
-                deadline: GetDeadline(),
-                cancellationToken: cancellationToken);
-
-            LogDarValidated(Logger, darFile.Length);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+        LogDarValidated(_logger, darFile.Length);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "DAR file validated ({DarSize} bytes)")]
     private static partial void LogDarValidated(ILogger logger, int darSize);
+
+    private static bool IsNotFound(RpcException exception) => exception.StatusCode == StatusCode.NotFound;
 
     private static void ThrowIfNullOrEmpty(byte[] darFile)
     {
@@ -631,22 +542,26 @@ public sealed partial class AdminClient : IAdminClient
         UserRight.ReadAs readAs => new Right { CanReadAs = new Right.Types.CanReadAs { Party = readAs.Party } },
         UserRight.ParticipantAdmin => new Right { ParticipantAdmin = new Right.Types.ParticipantAdmin() },
         UserRight.IdentityProviderAdmin => new Right { IdentityProviderAdmin = new Right.Types.IdentityProviderAdmin() },
+        UserRight.ReadAsAnyParty => new Right { CanReadAsAnyParty = new Right.Types.CanReadAsAnyParty() },
+        UserRight.ExecuteAs executeAs => new Right { CanExecuteAs = new Right.Types.CanExecuteAs { Party = executeAs.Party } },
+        UserRight.ExecuteAsAnyParty => new Right { CanExecuteAsAnyParty = new Right.Types.CanExecuteAsAnyParty() },
         _ => throw new NotSupportedException($"Unknown right type: {right.GetType().Name}")
     };
 
-    internal static UserDetails FromProtoUser(User user) =>
-        new(user.Id, user.PrimaryParty, Array.Empty<UserRight>());
-
-    private Task<Metadata?> GetHeadersAsync(CancellationToken cancellationToken) =>
-        AuthHeaderHelper.GetHeadersAsync(_tokenProvider, cancellationToken);
-
-    private DateTime? GetDeadline()
+    internal static UserRight FromProtoRight(Right right) => right.KindCase switch
     {
-        if (_options.Timeout == null)
-            return null;
+        Right.KindOneofCase.ParticipantAdmin => new UserRight.ParticipantAdmin(),
+        Right.KindOneofCase.CanActAs => new UserRight.ActAs(right.CanActAs.Party),
+        Right.KindOneofCase.CanReadAs => new UserRight.ReadAs(right.CanReadAs.Party),
+        Right.KindOneofCase.IdentityProviderAdmin => new UserRight.IdentityProviderAdmin(),
+        Right.KindOneofCase.CanReadAsAnyParty => new UserRight.ReadAsAnyParty(),
+        Right.KindOneofCase.CanExecuteAs => new UserRight.ExecuteAs(right.CanExecuteAs.Party),
+        Right.KindOneofCase.CanExecuteAsAnyParty => new UserRight.ExecuteAsAnyParty(),
+        _ => throw new NotSupportedException($"Unknown right kind: {right.KindCase}")
+    };
 
-        return DateTime.UtcNow.Add(_options.Timeout.Value);
-    }
+    internal static UserDetails FromProtoUser(User user) =>
+        new(user.Id, user.PrimaryParty);
 
     /// <summary>
     /// Releases the underlying gRPC channel.

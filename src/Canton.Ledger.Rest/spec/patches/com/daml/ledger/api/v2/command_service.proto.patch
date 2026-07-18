@@ -1,0 +1,46 @@
+--- a/com/daml/ledger/api/v2/command_service.proto
++++ b/com/daml/ledger/api/v2/command_service.proto
+@@ -10,7 +10,9 @@
+ import "com/daml/ledger/api/v2/reassignment_commands.proto";
+ import "com/daml/ledger/api/v2/transaction.proto";
+ import "com/daml/ledger/api/v2/transaction_filter.proto";
++import "google/api/annotations.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "CommandServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2";
+@@ -23,15 +25,30 @@
+ service CommandService {
+   // Submits a single composite command and waits for its result.
+   // Propagates the gRPC error of failed submissions including Daml interpretation errors.
+-  rpc SubmitAndWait(SubmitAndWaitRequest) returns (SubmitAndWaitResponse);
++  rpc SubmitAndWait(SubmitAndWaitRequest) returns (SubmitAndWaitResponse) {
++    option (google.api.http) = {
++      post: "/v2/commands/submit-and-wait"
++      body: "commands"
++    };
++  }
+ 
+   // Submits a single composite command, waits for its result, and returns the transaction.
+   // Propagates the gRPC error of failed submissions including Daml interpretation errors.
+-  rpc SubmitAndWaitForTransaction(SubmitAndWaitForTransactionRequest) returns (SubmitAndWaitForTransactionResponse);
++  rpc SubmitAndWaitForTransaction(SubmitAndWaitForTransactionRequest) returns (SubmitAndWaitForTransactionResponse) {
++    option (google.api.http) = {
++      post: "/v2/commands/submit-and-wait-for-transaction"
++      body: "*"
++    };
++  }
+ 
+   // Submits a single composite reassignment command, waits for its result, and returns the reassignment.
+   // Propagates the gRPC error of failed submission.
+-  rpc SubmitAndWaitForReassignment(SubmitAndWaitForReassignmentRequest) returns (SubmitAndWaitForReassignmentResponse);
++  rpc SubmitAndWaitForReassignment(SubmitAndWaitForReassignmentRequest) returns (SubmitAndWaitForReassignmentResponse) {
++    option (google.api.http) = {
++      post: "/v2/commands/submit-and-wait-for-reassignment"
++      body: "*"
++    };
++  }
+ }
+ 
+ // These commands are executed as a single atomic transaction.

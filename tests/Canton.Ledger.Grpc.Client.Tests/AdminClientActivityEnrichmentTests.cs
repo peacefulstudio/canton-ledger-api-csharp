@@ -12,6 +12,7 @@ using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
 using Status = Grpc.Core.Status;
+using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
@@ -136,7 +137,7 @@ public class AdminClientActivityEnrichmentTests
         {
             ArchivePayload = Google.Protobuf.ByteString.CopyFrom([1, 2, 3]),
             Hash = "hash-123",
-            HashFunction = HashFunction.Sha256,
+            HashFunction = WireHashFunction.Sha256,
         };
         _packageService
             .GetPackageAsync(

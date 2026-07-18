@@ -532,6 +532,28 @@ public class DamlValueConverterTests
     }
 
     [Fact]
+    public void FromProtoValue_parses_numeric_beyond_decimal_range_without_overflow()
+    {
+        var beyondDecimalRange = "1000000000000000000000000000000.0";
+
+        var result = DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = beyondDecimalRange });
+
+        result.Should().BeOfType<DamlNumeric>();
+        DamlValueConverter.ToProtoValue(result).Numeric.Should().Be(beyondDecimalRange);
+    }
+
+    [Fact]
+    public void FromProtoValue_preserves_numeric_precision_beyond_decimal_significand()
+    {
+        var beyondDecimalPrecision = "0.12345678901234567890123456789012345";
+
+        var result = DamlValueConverter.FromProtoValue(new ProtoValue { Numeric = beyondDecimalPrecision });
+
+        result.Should().BeOfType<DamlNumeric>();
+        DamlValueConverter.ToProtoValue(result).Numeric.Should().Be(beyondDecimalPrecision);
+    }
+
+    [Fact]
     public void FromProtoValue_converts_date()
     {
         var original = new DamlDate(new DateOnly(2024, 1, 1));

@@ -5,11 +5,13 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Canton.Ledger.Kernel.Telemetry;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Pqs.Client;
 
@@ -48,31 +50,60 @@ public sealed partial class PqsClient : IPqsClient
         return options;
     }
 
-    private static readonly ILogger<PqsClient> Logger = StaticLoggerFactory.Create<PqsClient>();
-
     private readonly PqsClientOptions _options;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly ILogger<PqsClient> _logger;
+    private readonly Func<CancellationToken, ValueTask<NpgsqlConnection>> _openConnectionAsync;
 
     /// <summary>
-    /// Creates a new PqsClient using options from dependency injection.
+    /// Creates a new PqsClient from explicit options.
+    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
     /// </summary>
-    public PqsClient(IOptions<PqsClientOptions> options)
+    public PqsClient(PqsClientOptions options, ILogger<PqsClient>? logger = null)
+        : this(options, openConnectionAsync: null, logger)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        _options = options.Value;
-        ArgumentException.ThrowIfNullOrWhiteSpace(_options.ConnectionString);
-        _jsonOptions = _options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
     }
 
     /// <summary>
-    /// Creates a new PqsClient with the specified options.
+    /// Creates a new PqsClient using options from dependency injection.
+    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
     /// </summary>
-    public PqsClient(PqsClientOptions options)
+    public PqsClient(IOptions<PqsClientOptions> options, ILogger<PqsClient>? logger = null)
+        : this((options ?? throw new ArgumentNullException(nameof(options))).Value, logger)
+    {
+    }
+
+    internal PqsClient(
+        PqsClientOptions options,
+        Func<CancellationToken, ValueTask<NpgsqlConnection>>? openConnectionAsync,
+        ILogger<PqsClient>? logger)
+    {
+        _options = ValidateOptions(options);
+        _jsonOptions = options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
+        _logger = logger ?? NullLogger<PqsClient>.Instance;
+        _openConnectionAsync = openConnectionAsync ?? OpenConnectionFromOptionsAsync;
+    }
+
+    private async ValueTask<NpgsqlConnection> OpenConnectionFromOptionsAsync(CancellationToken cancellationToken)
+    {
+        var connection = new NpgsqlConnection(_options.ConnectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static PqsClientOptions ValidateOptions(PqsClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ConnectionString);
-        _options = options;
-        _jsonOptions = _options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
+        return options;
     }
 
     /// <inheritdoc />
@@ -81,10 +112,23 @@ public sealed partial class PqsClient : IPqsClient
         where T : ITemplate
     {
         return ExecuteQueryManyAsync<T>(
-            "SELECT contract_id, payload FROM active(@templateId)",
+            "SELECT contract_id, payload FROM active(@typeId)",
             configureParams: null,
             cancellationToken);
     }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
+        CancellationToken cancellationToken = default)
+        where TInterface : IDamlInterface, IHasView<TView>
+        where TView : IDamlRecord =>
+        ExecuteProjectingQueryManyAsync(
+            "SELECT contract_id, payload FROM active(@typeId)",
+            GetDamlTypeId<TInterface>(),
+            configureParams: null,
+            (contractId, payloadJson) =>
+                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson, _jsonOptions),
+            cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
@@ -123,52 +167,34 @@ public sealed partial class PqsClient : IPqsClient
         where T : ITemplate
     {
         return ExecuteQueryOneAsync<T>(
-            "SELECT contract_id, payload FROM active(@templateId) WHERE contract_id = @contractId LIMIT 1",
+            "SELECT contract_id, payload FROM active(@typeId) WHERE contract_id = @contractId LIMIT 1",
             cmd => cmd.Parameters.AddWithValue("@contractId", contractId.Value),
             cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<bool> ExistsAsync<T>(
+    public Task<bool> ExistsAsync<T>(
         ContractId<T> contractId,
         CancellationToken cancellationToken = default)
         where T : ITemplate
     {
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
-        using var activity = ActivitySource.StartActivity("PqsExists");
-        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
+        return ExecuteWithDiagnosticsAsync(
+            "PqsExists",
+            "SELECT 1 FROM active(@typeId) WHERE contract_id = @contractId LIMIT 1",
+            templateId,
+            cmd => cmd.Parameters.AddWithValue("@contractId", contractId.Value),
+            notFoundResult: false,
+            async (command, _) =>
+            {
+                var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                var exists = result is not null;
 
-        LogQueryStart(Logger, templateId);
-
-        try
-        {
-            await using var connection = new NpgsqlConnection(_options.ConnectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var command = new NpgsqlCommand(
-                "SELECT 1 FROM active(@templateId) WHERE contract_id = @contractId LIMIT 1",
-                connection);
-            command.Parameters.AddWithValue("@templateId", templateId);
-            command.Parameters.AddWithValue("@contractId", contractId.Value);
-
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            var exists = result is not null;
-
-            LogQueryOneResult(Logger, exists ? "found" : "not found", templateId);
-            return exists;
-        }
-        catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
-        {
-            LogTemplateNotFound(Logger, templateId);
-            return false;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogQueryError(Logger, ex, templateId);
-            activity.RecordException(ex);
-            throw;
-        }
+                LogQueryOneResult(_logger, exists ? "found" : "not found", templateId);
+                return exists;
+            },
+            cancellationToken);
     }
 
     internal static (string Sql, IReadOnlyList<(string Name, string Value)> Parameters) BuildFilteredQuery(
@@ -177,7 +203,7 @@ public sealed partial class PqsClient : IPqsClient
         using var tempCmd = new NpgsqlCommand();
         var paramIndex = 0;
         var whereClause = filter.ToSqlClause(tempCmd, ref paramIndex);
-        var sql = $"SELECT contract_id, payload FROM active(@templateId) WHERE {whereClause}";
+        var sql = $"SELECT contract_id, payload FROM active(@typeId) WHERE {whereClause}";
 
         var parameters = new List<(string Name, string Value)>(tempCmd.Parameters.Count);
         foreach (NpgsqlParameter p in tempCmd.Parameters)
@@ -192,53 +218,51 @@ public sealed partial class PqsClient : IPqsClient
             cmd.Parameters.AddWithValue(name, value);
     }
 
-    private async Task<IReadOnlyList<Contract<T>>> ExecuteQueryManyAsync<T>(
+    private Task<IReadOnlyList<Contract<T>>> ExecuteQueryManyAsync<T>(
         string sql,
         Action<NpgsqlCommand>? configureParams,
         CancellationToken cancellationToken)
-        where T : ITemplate
+        where T : ITemplate =>
+        ExecuteProjectingQueryManyAsync(
+            sql,
+            TemplateExtensions.GetTemplateId<T>(),
+            configureParams,
+            (contractId, payloadJson) => DeserializeContract<T>(contractId, payloadJson, _jsonOptions),
+            cancellationToken);
+
+    private Task<IReadOnlyList<TItem>> ExecuteProjectingQueryManyAsync<TItem>(
+        string sql,
+        string identifier,
+        Action<NpgsqlCommand>? configureParams,
+        Func<string, string, TItem> project,
+        CancellationToken cancellationToken)
     {
-        var templateId = TemplateExtensions.GetTemplateId<T>();
-
-        using var activity = ActivitySource.StartActivity("PqsQuery");
-        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
-
-        LogQueryStart(Logger, templateId);
-
-        try
-        {
-            await using var connection = new NpgsqlConnection(_options.ConnectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var command = new NpgsqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@templateId", templateId);
-            configureParams?.Invoke(command);
-
-            var contracts = new List<Contract<T>>();
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+        return ExecuteWithDiagnosticsAsync<IReadOnlyList<TItem>>(
+            "PqsQuery",
+            sql,
+            identifier,
+            configureParams,
+            notFoundResult: [],
+            async (command, activity) =>
             {
-                contracts.Add(DeserializeContract<T>(reader.GetString(0), reader.GetString(1)));
-            }
+                var items = new List<TItem>();
+                var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                await using (reader.ConfigureAwait(false))
+                {
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        items.Add(project(reader.GetString(0), reader.GetString(1)));
+                    }
 
-            LogQueryResult(Logger, contracts.Count, templateId);
-            activity?.SetTag(PqsClientActivityTags.CantonPqsResultCount, contracts.Count);
-            return contracts;
-        }
-        catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
-        {
-            LogTemplateNotFound(Logger, templateId);
-            return [];
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogQueryError(Logger, ex, templateId);
-            activity.RecordException(ex);
-            throw;
-        }
+                    LogQueryResult(_logger, items.Count, identifier);
+                    activity?.SetTag(PqsClientActivityTags.CantonPqsResultCount, items.Count);
+                    return items;
+                }
+            },
+            cancellationToken);
     }
 
-    private async Task<Contract<T>?> ExecuteQueryOneAsync<T>(
+    private Task<Contract<T>?> ExecuteQueryOneAsync<T>(
         string sql,
         Action<NpgsqlCommand>? configureParams,
         CancellationToken cancellationToken)
@@ -246,53 +270,85 @@ public sealed partial class PqsClient : IPqsClient
     {
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
-        using var activity = ActivitySource.StartActivity("PqsQueryOne");
-        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, templateId);
+        return ExecuteWithDiagnosticsAsync<Contract<T>?>(
+            "PqsQueryOne",
+            sql,
+            templateId,
+            configureParams,
+            notFoundResult: null,
+            async (command, _) =>
+            {
+                var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                await using (reader.ConfigureAwait(false))
+                {
+                    if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        var contract = DeserializeContract<T>(reader.GetString(0), reader.GetString(1), _jsonOptions);
+                        LogQueryOneResult(_logger, "found", templateId);
+                        return contract;
+                    }
 
-        LogQueryStart(Logger, templateId);
+                    LogQueryOneResult(_logger, "not found", templateId);
+                    return null;
+                }
+            },
+            cancellationToken);
+    }
+
+    private async Task<TResult> ExecuteWithDiagnosticsAsync<TResult>(
+        string activityName,
+        string sql,
+        string typeId,
+        Action<NpgsqlCommand>? configureParams,
+        TResult notFoundResult,
+        Func<NpgsqlCommand, Activity?, Task<TResult>> runQuery,
+        CancellationToken cancellationToken)
+    {
+        using var activity = ActivitySource.StartActivity(activityName);
+        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, typeId);
+
+        LogQueryStart(_logger, typeId);
 
         try
         {
-            await using var connection = new NpgsqlConnection(_options.ConnectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            await using var command = new NpgsqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@templateId", templateId);
-            configureParams?.Invoke(command);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (await reader.ReadAsync(cancellationToken))
+            var connection = await _openConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using (connection.ConfigureAwait(false))
             {
-                var contract = DeserializeContract<T>(reader.GetString(0), reader.GetString(1));
-                LogQueryOneResult(Logger, "found", templateId);
-                return contract;
-            }
+                var command = new NpgsqlCommand(sql, connection);
+                await using (command.ConfigureAwait(false))
+                {
+                    command.Parameters.AddWithValue("@typeId", typeId);
+                    configureParams?.Invoke(command);
 
-            LogQueryOneResult(Logger, "not found", templateId);
-            return null;
+                    return await runQuery(command, activity).ConfigureAwait(false);
+                }
+            }
         }
-        catch (PostgresException ex) when (IsTemplateNotFoundError(ex))
+        catch (PostgresException ex) when (IsTypeNotFoundError(ex))
         {
-            LogTemplateNotFound(Logger, templateId);
-            return null;
+            LogTypeNotFound(_logger, typeId);
+            return notFoundResult;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogQueryError(Logger, ex, templateId);
+            LogQueryError(_logger, ex, typeId);
             activity.RecordException(ex);
             throw;
         }
     }
 
     // Workaround for PQS's active() function: it raises P0001 "Identifier not found" when no
-    // contracts of a given template type have ever been created, which is semantically "no
+    // contracts of a given type have ever been created, which is semantically "no
     // results" rather than an error.
-    internal static bool IsTemplateNotFoundError(PostgresException ex) =>
+    internal static bool IsTypeNotFoundError(PostgresException ex) =>
         ex.SqlState == "P0001" && ex.MessageText.StartsWith("Identifier not found:", StringComparison.Ordinal);
 
-    private Contract<T> DeserializeContract<T>(string contractId, string payloadJson) where T : ITemplate
+    internal static Contract<T> DeserializeContract<T>(
+        string contractId,
+        string payloadJson,
+        JsonSerializerOptions jsonOptions) where T : ITemplate
     {
-        var payload = JsonSerializer.Deserialize<T>(payloadJson, _jsonOptions)
+        var payload = JsonSerializer.Deserialize<T>(payloadJson, jsonOptions)
             ?? throw new InvalidOperationException(
                 $"Failed to deserialize PQS payload for contract '{contractId}' " +
                 $"as template '{typeof(T).FullName ?? typeof(T).Name}'.");
@@ -300,20 +356,57 @@ public sealed partial class PqsClient : IPqsClient
         return new Contract<T>(new ContractId<T>(contractId), payload);
     }
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Querying active contracts for template {TemplateId}")]
-    private static partial void LogQueryStart(ILogger logger, string templateId);
+    internal static InterfaceContract<TInterface, TView> DeserializeInterfaceContract<TInterface, TView>(
+        string contractId,
+        string payloadJson,
+        JsonSerializerOptions jsonOptions)
+        where TInterface : IDamlInterface, IHasView<TView>
+        where TView : IDamlRecord
+    {
+        var view = JsonSerializer.Deserialize<TView>(payloadJson, jsonOptions)
+            ?? throw new InvalidOperationException(
+                $"Failed to deserialize PQS interface view for contract '{contractId}' " +
+                $"as view '{typeof(TView).FullName ?? typeof(TView).Name}'.");
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Found {Count} active contracts for {TemplateId}")]
-    private static partial void LogQueryResult(ILogger logger, int count, string templateId);
+        return new InterfaceContract<TInterface, TView>(new ContractId<TInterface>(contractId), view);
+    }
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Query for {TemplateId}: {Result}")]
-    private static partial void LogQueryOneResult(ILogger logger, string result, string templateId);
+    /// <summary>
+    /// Builds the package-name-qualified identifier PQS <c>active()</c> expects
+    /// (<c>{packageName}:{moduleName}:{entityName}</c>) from a Daml type's compile-time
+    /// <see cref="DamlTypeDescriptor"/>, resolving a template id or an interface id uniformly.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the descriptor carries an empty package name — a silent fall-back would produce
+    /// an identifier that matches nothing in PQS.
+    /// </exception>
+    internal static string GetDamlTypeId<T>() where T : IDamlType
+    {
+        var descriptor = T.DamlTypeId;
+        if (string.IsNullOrEmpty(descriptor.PackageName))
+        {
+            throw new InvalidOperationException(
+                $"Daml type '{typeof(T).FullName}' has an empty static PackageName; "
+                + "cannot build the package-name identifier required by PQS active().");
+        }
+
+        return $"{descriptor.PackageName}:{descriptor.Identifier.ModuleName}:{descriptor.Identifier.EntityName}";
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Querying active contracts for type {DamlTypeId}")]
+    private static partial void LogQueryStart(ILogger logger, string damlTypeId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Found {Count} active contracts for {DamlTypeId}")]
+    private static partial void LogQueryResult(ILogger logger, int count, string damlTypeId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Query for {DamlTypeId}: {Result}")]
+    private static partial void LogQueryOneResult(ILogger logger, string result, string damlTypeId);
 
     [LoggerMessage(Level = LogLevel.Warning,
-        Message = "Template {TemplateId} not registered in PQS — returning empty result. " +
-                  "This may indicate the template has never been instantiated or PQS has not indexed it yet.")]
-    private static partial void LogTemplateNotFound(ILogger logger, string templateId);
+        Message = "Type {DamlTypeId} not registered in PQS — returning empty result. " +
+                  "This may indicate the type has never been instantiated or PQS has not indexed it yet.")]
+    private static partial void LogTypeNotFound(ILogger logger, string damlTypeId);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "PQS query failed for template {TemplateId}")]
-    private static partial void LogQueryError(ILogger logger, Exception ex, string templateId);
+    [LoggerMessage(Level = LogLevel.Error, Message = "PQS query failed for type {DamlTypeId}")]
+    private static partial void LogQueryError(ILogger logger, Exception ex, string damlTypeId);
 }

@@ -17,6 +17,7 @@
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
   <ItemGroup>

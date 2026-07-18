@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/crypto.proto
++++ b/com/daml/ledger/api/v2/crypto.proto
+@@ -5,6 +5,7 @@
+ 
+ package com.daml.ledger.api.v2;
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "CryptoOuterClass";
+ option java_package = "com.daml.ledger.api.v2";

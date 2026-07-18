@@ -69,7 +69,8 @@ public class D1CoreSurfaceRoundTripTests
 
         var synchronizer = Assert.Single(synchronizers);
         Assert.False(string.IsNullOrWhiteSpace(synchronizer.SynchronizerId), "synchronizer id must not be empty");
-        Assert.False(string.IsNullOrWhiteSpace(synchronizer.Permission), "permission must not be empty");
+        Assert.NotEqual(SynchronizerPermissionLevel.Unrecognized, synchronizer.Permission);
+        Assert.NotEqual(SynchronizerPermissionLevel.Unspecified, synchronizer.Permission);
     }
 
     [Fact]
@@ -102,13 +103,12 @@ public class D1CoreSurfaceRoundTripTests
             .WithActAs(owner)
             .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()));
 
-        var submitOutcome = await client.TrySubmitAndWaitForTransactionAsync(
-            submission, TestContext.Current.CancellationToken);
+        var submitOutcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
         var submitted = Assert.IsType<ExerciseOutcome<TransactionResult>.One>(submitOutcome).Result;
         var createdContractId = Assert.Single(submitted.CreatedContracts).ContractId;
 
         var byOffset = await client.GetUpdateByOffsetAsync(
-            submitted.CompletionOffset, owner, TestContext.Current.CancellationToken);
+            submitted.CompletionOffset.Value, owner, TestContext.Current.CancellationToken);
         Assert.Equal(submitted.UpdateId, byOffset.UpdateId);
         Assert.Contains(byOffset.CreatedContracts, c => c.ContractId == createdContractId);
 

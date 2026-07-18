@@ -4,11 +4,14 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Xunit;
 
 namespace Canton.Ledger.Pqs.Client.Tests;
 
+[Collection("PqsClient global ActivitySource")]
 public class ServiceCollectionExtensionsTests
 {
     private static IConfiguration ConfigWith(string? connectionString) =>
@@ -28,7 +31,7 @@ public class ServiceCollectionExtensionsTests
 
         var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(IPqsClient)).Subject;
         descriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        descriptor.ImplementationType.Should().Be<PqsClient>();
+        descriptor.ImplementationFactory.Should().NotBeNull();
     }
 
     [Fact]
@@ -94,7 +97,7 @@ public class ServiceCollectionExtensionsTests
 
         var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(IPqsClient)).Subject;
         descriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        descriptor.ImplementationType.Should().Be<PqsClient>();
+        descriptor.ImplementationFactory.Should().NotBeNull();
     }
 
     [Fact]
@@ -185,5 +188,39 @@ public class ServiceCollectionExtensionsTests
         var client = provider.GetRequiredService<IPqsClient>();
 
         client.Should().BeOfType<PqsClient>();
+    }
+
+    [Fact]
+    public void AddPqsClient_resolves_client_when_an_NpgsqlDataSource_is_registered()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(NpgsqlDataSource.Create("Host=localhost;Database=pqs"));
+        services.AddPqsClient(o => o.ConnectionString = "Host=localhost;Database=pqs");
+
+        using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IPqsClient>();
+
+        client.Should().BeOfType<PqsClient>();
+    }
+
+    [Fact]
+    public async Task AddPqsClient_delivers_PqsClient_logs_to_the_registered_ILoggerFactory()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = new ServiceCollection();
+        services.AddSingleton<ILoggerFactory>(loggerFactory);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+        services.AddPqsClient(o => o.ConnectionString = "not a valid connection string");
+
+        var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IPqsClient>();
+
+        var act = async () => await client.QueryAsync<FilterTests.SampleTemplate>(TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<ArgumentException>();
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(PqsClient).FullName
+            && r.Level == LogLevel.Error
+            && r.Message.Contains("PQS query failed"));
     }
 }

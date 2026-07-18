@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -28,6 +29,24 @@ public class TransactionResultExerciseExtensionsTests
         var result = MakeResult(("ComputeReport", record));
 
         result.ExerciseResult<DamlRecord>("ComputeReport").Should().BeSameAs(record);
+    }
+
+    [Fact]
+    public void ExerciseResult_returns_null_when_unit_shaped_result_decodes_to_null()
+    {
+        var result = MakeResult(("Acknowledge", DamlUnit.Instance));
+
+        result.ExerciseResult<DamlRecord>("Acknowledge").Should().BeNull();
+    }
+
+    [Fact]
+    public void AllExerciseResults_returns_null_elements_when_unit_shaped_results_decode_to_null()
+    {
+        var result = MakeResult(
+            ("Acknowledge", DamlUnit.Instance),
+            ("Acknowledge", DamlUnit.Instance));
+
+        result.AllExerciseResults<DamlRecord>("Acknowledge").Should().Equal(new DamlRecord?[] { null, null });
     }
 
     [Fact]
@@ -204,7 +223,7 @@ public class TransactionResultExerciseExtensionsTests
 
         return new TransactionResult(
             UpdateId: "u1",
-            CompletionOffset: 1L,
+            CompletionOffset: LedgerOffset.At(1),
             CreatedContracts: [],
             ArchivedContractIds: [],
             CommandId: default)

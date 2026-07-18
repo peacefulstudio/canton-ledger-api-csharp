@@ -15,14 +15,15 @@ public static class HealthCheckBuilderExtensions
 {
     /// <summary>
     /// Adds a health check that verifies connectivity to the Canton participant node
-    /// by retrieving the participant ID via the admin API.
-    /// Requires <see cref="IAdminClient"/> to be registered in the service collection
-    /// (e.g., via <see cref="ServiceCollectionExtensions.AddAdminClient(IServiceCollection, IConfiguration)"/>).
+    /// by querying the ledger end via <see cref="ILedgerReader.GetLedgerEndAsync"/>.
+    /// Requires <see cref="ILedgerClient"/> to be registered in the service collection
+    /// (e.g., via <see cref="ServiceCollectionExtensions.AddLedgerClient(IServiceCollection, IConfiguration)"/>).
     /// </summary>
     /// <remarks>
-    /// Despite the method name, this health check depends on <see cref="IAdminClient"/>
-    /// (not <see cref="ILedgerClient"/>) because it calls
-    /// <see cref="IAdminClient.GetParticipantIdAsync"/> to verify connectivity.
+    /// <see cref="ILedgerReader.GetLedgerEndAsync"/> is not gated behind <c>participant_admin</c>,
+    /// so the check succeeds for a reachable participant regardless of whether the caller holds
+    /// admin rights — unlike a probe against an admin-only endpoint, which would report a
+    /// healthy, least-privilege deployment as unreachable.
     /// </remarks>
     public static IHealthChecksBuilder AddLedgerClient(
         this IHealthChecksBuilder builder,

@@ -143,6 +143,37 @@ public class ClientCredentialsOptionsTests
     }
 
     [Fact]
+    public void TokenAcquisitionTimeout_default_is_30_seconds()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "https://auth.example.com"
+        };
+
+        options.TokenAcquisitionTimeout.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_fails_when_TokenAcquisitionTimeout_is_not_positive(int seconds)
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "https://auth.example.com",
+            TokenAcquisitionTimeout = TimeSpan.FromSeconds(seconds)
+        };
+
+        var results = Validate(options);
+
+        results.Should().Contain(r => r.MemberNames.Contains(nameof(ClientCredentialsOptions.TokenAcquisitionTimeout)));
+    }
+
+    [Fact]
     public void TokenGenerationEndpoint_throws_when_neither_Domain_nor_endpoint_set()
     {
         var options = new ClientCredentialsOptions
@@ -221,7 +252,6 @@ public class ClientCredentialsOptionsTests
     [Theory]
     [InlineData("https://auth.example.com", "https://auth.example.com/oauth/token")]
     [InlineData("https://auth.example.com/", "https://auth.example.com/oauth/token")]
-    [InlineData("http://auth.example.com", "http://auth.example.com/oauth/token")]
     [InlineData("HTTPS://auth.example.com", "https://auth.example.com/oauth/token")]
     [InlineData("auth.example.com:8443", "https://auth.example.com:8443/oauth/token")]
     [InlineData("https://auth.example.com:8443", "https://auth.example.com:8443/oauth/token")]
@@ -343,6 +373,160 @@ public class ClientCredentialsOptionsTests
         var results = Validate(options);
 
         results.Should().Contain(r => r.MemberNames.Contains("TokenEndpoint"));
+    }
+
+    [Fact]
+    public void AllowInsecureTokenEndpoint_defaults_to_false()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "auth.example.com"
+        };
+
+        options.AllowInsecureTokenEndpoint.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_fails_for_http_TokenEndpoint_without_AllowInsecureTokenEndpoint()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            TokenEndpoint = new Uri("http://idp.internal/oauth/token")
+        };
+
+        var results = Validate(options);
+
+        results.Should().ContainSingle(r =>
+            r.MemberNames.Contains(nameof(ClientCredentialsOptions.TokenEndpoint))
+            && r.MemberNames.Contains(nameof(ClientCredentialsOptions.AllowInsecureTokenEndpoint)));
+        results.Should().ContainSingle(r =>
+            r.ErrorMessage!.Contains("plaintext http") && r.ErrorMessage.Contains("client secret"));
+    }
+
+    [Fact]
+    public void Validate_passes_for_http_TokenEndpoint_when_AllowInsecureTokenEndpoint_is_set()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            TokenEndpoint = new Uri("http://localhost:8080/oauth/token"),
+            AllowInsecureTokenEndpoint = true
+        };
+
+        Validate(options).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Validate_fails_for_http_Domain_without_AllowInsecureTokenEndpoint()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "http://idp.internal"
+        };
+
+        var results = Validate(options);
+
+        results.Should().ContainSingle(r =>
+            r.MemberNames.Contains(nameof(ClientCredentialsOptions.Domain))
+            && r.MemberNames.Contains(nameof(ClientCredentialsOptions.AllowInsecureTokenEndpoint)));
+    }
+
+    [Fact]
+    public void Validate_passes_for_http_Domain_when_AllowInsecureTokenEndpoint_is_set()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "http://localhost:8080",
+            AllowInsecureTokenEndpoint = true
+        };
+
+        Validate(options).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TokenGenerationEndpoint_throws_for_http_TokenEndpoint_without_AllowInsecureTokenEndpoint()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            TokenEndpoint = new Uri("http://idp.internal/oauth/token")
+        };
+
+        var act = () => options.TokenGenerationEndpoint;
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*plaintext http*AllowInsecureTokenEndpoint*");
+    }
+
+    [Fact]
+    public void TokenGenerationEndpoint_returns_http_TokenEndpoint_when_AllowInsecureTokenEndpoint_is_set()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            TokenEndpoint = new Uri("http://localhost:8080/oauth/token"),
+            AllowInsecureTokenEndpoint = true
+        };
+
+        options.TokenGenerationEndpoint.Should().Be(new Uri("http://localhost:8080/oauth/token"));
+    }
+
+    [Fact]
+    public void TokenGenerationEndpoint_throws_for_http_Domain_without_AllowInsecureTokenEndpoint()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "http://idp.internal"
+        };
+
+        var act = () => options.TokenGenerationEndpoint;
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*plaintext http*AllowInsecureTokenEndpoint*");
+    }
+
+    [Fact]
+    public void TokenGenerationEndpoint_composes_http_Domain_when_AllowInsecureTokenEndpoint_is_set()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            Domain = "http://localhost:8080",
+            AllowInsecureTokenEndpoint = true
+        };
+
+        options.TokenGenerationEndpoint.Should().Be(new Uri("http://localhost:8080/oauth/token"));
+    }
+
+    [Fact]
+    public void Validate_fails_for_uppercase_HTTP_TokenEndpoint_without_AllowInsecureTokenEndpoint()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "id",
+            ClientSecret = "secret",
+            TokenEndpoint = new Uri("HTTP://idp.internal/oauth/token")
+        };
+
+        var results = Validate(options);
+
+        results.Should().ContainSingle(r =>
+            r.MemberNames.Contains(nameof(ClientCredentialsOptions.TokenEndpoint))
+            && r.MemberNames.Contains(nameof(ClientCredentialsOptions.AllowInsecureTokenEndpoint)));
     }
 
     private static List<ValidationResult> Validate(ClientCredentialsOptions options)

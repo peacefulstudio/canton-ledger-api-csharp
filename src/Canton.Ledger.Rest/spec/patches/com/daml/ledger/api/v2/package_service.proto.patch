@@ -1,0 +1,51 @@
+--- a/com/daml/ledger/api/v2/package_service.proto
++++ b/com/daml/ledger/api/v2/package_service.proto
+@@ -6,7 +6,9 @@
+ package com.daml.ledger.api.v2;
+ 
+ import "com/daml/ledger/api/v2/package_reference.proto";
++import "google/api/annotations.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "PackageServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2";
+@@ -53,17 +55,34 @@
+ // Allows clients to query the Daml-LF packages that are supported by the server.
+ service PackageService {
+   // Returns the identifiers of all supported packages.
+-  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
++  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse) {
++    option (google.api.http) = {
++      get: "/v2/packages"
++    };
++  }
+ 
+   // Returns the contents of a single package.
+-  rpc GetPackage(GetPackageRequest) returns (GetPackageResponse);
++  rpc GetPackage(GetPackageRequest) returns (GetPackageResponse) {
++    option (google.api.http) = {
++      get: "/v2/packages/{package_id}"
++    };
++  }
+ 
+   // Returns the status of a single package.
+-  rpc GetPackageStatus(GetPackageStatusRequest) returns (GetPackageStatusResponse);
++  rpc GetPackageStatus(GetPackageStatusRequest) returns (GetPackageStatusResponse) {
++    option (google.api.http) = {
++      get: "/v2/packages/{package_id}/status"
++    };
++  }
+ 
+   // Lists which participant node vetted what packages on which synchronizer.
+   // Can be called by any authenticated user.
+-  rpc ListVettedPackages(ListVettedPackagesRequest) returns (ListVettedPackagesResponse);
++  rpc ListVettedPackages(ListVettedPackagesRequest) returns (ListVettedPackagesResponse) {
++    option (google.api.http) = {
++      post: "/v2/package-vetting/list"
++      body: "*"
++    };
++  }
+ }
+ 
+ message ListPackagesRequest {}

@@ -1,6 +1,6 @@
 # Canton.Ledger.OpenTelemetry
 
-Opt-in OpenTelemetry wiring for the Canton Ledger API clients (ADR 0010). The gRPC (`Canton.Ledger.Grpc.Client`) and PQS (`Canton.Ledger.Pqs.Client`) clients emit only BCL `System.Diagnostics.Activity` spans and take no OpenTelemetry dependency — this package is the only assembly in the repo that references the OpenTelemetry SDK, and a consumer who never references it pays no OpenTelemetry cost at all.
+Opt-in OpenTelemetry wiring for the Canton Ledger API clients. The gRPC (`Canton.Ledger.Grpc.Client`) and PQS (`Canton.Ledger.Pqs.Client`) clients emit only BCL `System.Diagnostics.Activity` spans and take no OpenTelemetry dependency — this package is the only assembly in the repo that references the OpenTelemetry SDK, and a consumer who never references it pays no OpenTelemetry cost at all.
 
 ## Key Types
 

@@ -1,0 +1,15 @@
+# Copyright 2026 Peaceful Studio OÜ
+# SPDX-License-Identifier: Apache-2.0
+
+version: v2
+inputs:
+  - directory: .
+    paths:
+      - com/daml/ledger/api/v2
+plugins:
+  - remote: buf.build/community/google-gnostic-openapi:v0.7.0
+    out: gen
+    opt:
+      - title=Canton Ledger API (proto-derived)
+      - version=3.4.11
+      - naming=proto

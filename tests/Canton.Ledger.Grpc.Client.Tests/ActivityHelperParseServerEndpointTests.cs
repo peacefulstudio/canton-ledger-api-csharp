@@ -21,4 +21,36 @@ public class ActivityHelperParseServerEndpointTests
         address.Should().Be(expectedAddress);
         port.Should().Be(expectedPort);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not a url")]
+    [InlineData("/relative/path")]
+    [InlineData("file:///relative/path")]
+    [InlineData("file://host/path")]
+    [InlineData("ftp://host:21")]
+    [InlineData("unix:///tmp/socket")]
+    [InlineData("localhost:5001")]
+    [InlineData("localhost")]
+    public void ParseServerEndpoint_rejects_endpoints_that_are_not_absolute_http_urls(string endpoint)
+    {
+        var act = () => ActivityHelper.ParseServerEndpoint(endpoint);
+
+        act.Should().Throw<ArgumentException>(
+                "a malformed GrpcAddress must be rejected loudly, not silently parsed into an empty host")
+            .WithParameterName("grpcAddress");
+    }
+
+    [Theory]
+    [InlineData("http://")]
+    [InlineData("https://")]
+    public void ParseServerEndpoint_rejects_absolute_http_urls_with_an_empty_host(string endpoint)
+    {
+        var act = () => ActivityHelper.ParseServerEndpoint(endpoint);
+
+        act.Should().Throw<ArgumentException>(
+                "an http(s) URL with no host still parses but must not be silently accepted as an empty endpoint")
+            .WithParameterName("grpcAddress");
+    }
 }

@@ -16,6 +16,17 @@
     <CantonVersion Condition="'$(CantonVersion)' == ''">3.4.11</CantonVersion>
     <GoogleCommonProtosVersion>2.58.0</GoogleCommonProtosVersion>
 
+    <!-- Pinned SHA-256 checksums for each downloaded JAR. Verified before unzip to
+         protect against supply-chain tampering (audit F-33). Hashes were obtained by
+         downloading each JAR from Maven Central and computing SHA-256; each download
+         was also cross-checked against the SHA-1 checksum published by Maven Central.
+         When bumping CantonVersion or GoogleCommonProtosVersion, refresh all three in
+         the same commit: curl -sL <jar-url> | shasum -a 256, cross-checked against
+         <jar-url>.sha1 from Maven Central. -->
+    <LedgerApiProtoHash>18edce18db92556a2f2945f470afbba27e0ccdeebd43f13995c42c63f59e3262</LedgerApiProtoHash>
+    <LedgerApiValueProtoHash>869d7df5dd2e32f997c2674fea26dc9612dd4b6034d8a583e0275f72303b4668</LedgerApiValueProtoHash>
+    <GoogleCommonProtosHash>f8640af546c0afe26477fc5e946a7f455a1afebfc73d021b0c8a5034b8e67152</GoogleCommonProtosHash>
+
     <!-- Maven Central URLs -->
     <MavenCentralBase>https://repo1.maven.org/maven2</MavenCentralBase>
     <LedgerApiProtoUrl>$(MavenCentralBase)/com/daml/ledger-api-proto/$(CantonVersion)/ledger-api-proto-$(CantonVersion).jar</LedgerApiProtoUrl>
@@ -56,6 +67,25 @@
       DestinationFileName="proto-google-common-protos-$(GoogleCommonProtosVersion).jar"
       SkipUnchangedFiles="true" />
 
+    <!-- Verify SHA-256 checksums before unzipping (audit F-33, #224) -->
+    <GetFileHash Files="$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_LedgerApiProtoActualHash" />
+    </GetFileHash>
+    <Error Condition="'$(_LedgerApiProtoActualHash)' != '$(LedgerApiProtoHash)'"
+           Text="SHA-256 mismatch for ledger-api-proto-$(CantonVersion).jar: expected $(LedgerApiProtoHash), got $(_LedgerApiProtoActualHash)" />
+
+    <GetFileHash Files="$(ProtoCacheDir)/ledger-api-value-proto-$(CantonVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_LedgerApiValueProtoActualHash" />
+    </GetFileHash>
+    <Error Condition="'$(_LedgerApiValueProtoActualHash)' != '$(LedgerApiValueProtoHash)'"
+           Text="SHA-256 mismatch for ledger-api-value-proto-$(CantonVersion).jar: expected $(LedgerApiValueProtoHash), got $(_LedgerApiValueProtoActualHash)" />
+
+    <GetFileHash Files="$(ProtoCacheDir)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_GoogleCommonProtosActualHash" />
+    </GetFileHash>
+    <Error Condition="'$(_GoogleCommonProtosActualHash)' != '$(GoogleCommonProtosHash)'"
+           Text="SHA-256 mismatch for proto-google-common-protos-$(GoogleCommonProtosVersion).jar: expected $(GoogleCommonProtosHash), got $(_GoogleCommonProtosActualHash)" />
+
     <!-- MSBuild's Unzip task extracts identically on every OS. The previous `unzip` Exec
          relied on Info-ZIP wildcards crossing '/' (com/daml/ledger/api/v2/*.proto also
          matching v2/admin/); the unzip on windows-latest/windows-11-arm runners does not
@@ -78,6 +108,30 @@
     <WriteLinesToFile File="$(ProtoMarkerFile)" Lines="Downloaded: $(CantonVersion) + $(GoogleCommonProtosVersion)" Overwrite="true" />
 
     <Message Importance="high" Text="Proto files downloaded successfully to $(ProtoSourceDir)" />
+  </Target>
+
+  <!-- Verify cached JAR checksums on every build, even when DownloadProtos is skipped
+       because the marker file exists. Catches tampered cache files and pinned-hash
+       changes without requiring a fresh download (audit F-33, #224). -->
+  <Target Name="VerifyProtoChecksums" AfterTargets="DownloadProtos"
+          Condition="Exists('$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar')">
+    <GetFileHash Files="$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_CachedLedgerApiProtoHash" />
+    </GetFileHash>
+    <Error Condition="'$(_CachedLedgerApiProtoHash)' != '$(LedgerApiProtoHash)'"
+           Text="SHA-256 mismatch for cached ledger-api-proto-$(CantonVersion).jar: expected $(LedgerApiProtoHash), got $(_CachedLedgerApiProtoHash)" />
+
+    <GetFileHash Files="$(ProtoCacheDir)/ledger-api-value-proto-$(CantonVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_CachedLedgerApiValueProtoHash" />
+    </GetFileHash>
+    <Error Condition="'$(_CachedLedgerApiValueProtoHash)' != '$(LedgerApiValueProtoHash)'"
+           Text="SHA-256 mismatch for cached ledger-api-value-proto-$(CantonVersion).jar: expected $(LedgerApiValueProtoHash), got $(_CachedLedgerApiValueProtoHash)" />
+
+    <GetFileHash Files="$(ProtoCacheDir)/proto-google-common-protos-$(GoogleCommonProtosVersion).jar" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_CachedGoogleCommonProtosHash" />
+    </GetFileHash>
+    <Error Condition="'$(_CachedGoogleCommonProtosHash)' != '$(GoogleCommonProtosHash)'"
+           Text="SHA-256 mismatch for cached proto-google-common-protos-$(GoogleCommonProtosVersion).jar: expected $(GoogleCommonProtosHash), got $(_CachedGoogleCommonProtosHash)" />
   </Target>
 
   <!-- Clean target to remove downloaded protos -->

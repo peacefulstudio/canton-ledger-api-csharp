@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Resilience;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
 using AwesomeAssertions;
@@ -10,8 +11,10 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
+using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
@@ -54,6 +57,54 @@ public class AdminClientTests
             () => new Metadata(),
             () => { });
 
+    private static AsyncUnaryCall<TResponse> Faulted<TResponse>(RpcException exception) =>
+        new(
+            Task.FromException<TResponse>(exception),
+            Task.FromResult(new Metadata()),
+            () => exception.Status,
+            () => exception.Trailers ?? new Metadata(),
+            () => { });
+
+    [Fact]
+    public async Task GetParticipantId_retries_a_transient_Unavailable_when_Retry_is_enabled()
+    {
+        _options.Retry = new RetryOptions { Enabled = true, MaxRetryAttempts = 2, Delay = TimeSpan.Zero };
+        _partyService
+            .GetParticipantIdAsync(
+                Arg.Any<GetParticipantIdRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(
+                Faulted<GetParticipantIdResponse>(new RpcException(new Status(StatusCode.Unavailable, "down"))),
+                UnaryResponse(new GetParticipantIdResponse { ParticipantId = "participant::after-retry" }));
+
+        var client = CreateClient();
+        var result = await client.GetParticipantIdAsync(TestContext.Current.CancellationToken);
+
+        result.Should().Be("participant::after-retry");
+        _ = _partyService.Received(2).GetParticipantIdAsync(
+            Arg.Any<GetParticipantIdRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetParticipantId_surfaces_caller_cancellation_as_OperationCanceledException()
+    {
+        using var cts = new CancellationTokenSource();
+        _partyService
+            .GetParticipantIdAsync(
+                Arg.Do<GetParticipantIdRequest>(_ => cts.Cancel()),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Faulted<GetParticipantIdResponse>(new RpcException(new Status(StatusCode.Cancelled, "cancelled by caller"))));
+
+        var client = CreateClient();
+        var act = () => client.GetParticipantIdAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     [Fact]
     public async Task GetParticipantId_returns_id_from_response()
     {
@@ -77,6 +128,17 @@ public class AdminClientTests
         var result = await client.GetParticipantIdAsync(TestContext.Current.CancellationToken);
 
         result.Should().Be(expectedId);
+    }
+
+    [Fact]
+    public void AllocatePartyAsync_does_not_declare_a_displayName_parameter()
+    {
+        var parameterNames = typeof(IAdminClient)
+            .GetMethod(nameof(IAdminClient.AllocatePartyAsync))!
+            .GetParameters()
+            .Select(p => p.Name);
+
+        parameterNames.Should().Equal("partyIdHint", "synchronizerId", "cancellationToken");
     }
 
     [Fact]
@@ -198,7 +260,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task ListKnownParties_returns_paginated_results()
+    public async Task ListKnownParties_returns_results_when_single_page()
     {
         var response = new ListKnownPartiesResponse();
         response.PartyDetails.Add(new Com.Daml.Ledger.Api.V2.Admin.PartyDetails
@@ -225,6 +287,60 @@ public class AdminClientTests
 
         result.Should().ContainSingle();
         result[0].Party.Should().Be("party::alice");
+    }
+
+    [Fact]
+    public async Task ListKnownParties_follows_pagination_until_next_page_token_empty()
+    {
+        var firstPage = new ListKnownPartiesResponse
+        {
+            NextPageToken = "page-2",
+            PartyDetails = { new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = "party::alice", IsLocal = true } }
+        };
+
+        var secondPage = new ListKnownPartiesResponse
+        {
+            NextPageToken = "",
+            PartyDetails = { new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = "party::bob", IsLocal = false } }
+        };
+
+        var capturedRequests = new List<ListKnownPartiesRequest>();
+        _partyService
+            .ListKnownPartiesAsync(
+                Arg.Do<ListKnownPartiesRequest>(r => capturedRequests.Add(r.Clone())),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(secondPage));
+
+        var client = CreateClient();
+        var result = await client.ListKnownPartiesAsync(pageSize: 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        result.Select(p => p.Party).Should().Equal("party::alice", "party::bob");
+        capturedRequests.Select(r => r.PageToken).Should().Equal("", "page-2");
+        capturedRequests.Should().AllSatisfy(request => request.PageSize.Should().Be(1));
+    }
+
+    [Fact]
+    public async Task ListKnownParties_throws_when_server_echoes_same_page_token()
+    {
+        var firstPage = new ListKnownPartiesResponse { NextPageToken = "page-2" };
+        var echoedPage = new ListKnownPartiesResponse { NextPageToken = "page-2" };
+
+        _partyService
+            .ListKnownPartiesAsync(
+                Arg.Any<ListKnownPartiesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(echoedPage));
+
+        var client = CreateClient();
+
+        var act = () => client.ListKnownPartiesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("page-2");
     }
 
     [Fact]
@@ -404,7 +520,7 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task ListUsers_returns_paginated_results()
+    public async Task ListUsers_returns_results_when_single_page()
     {
         var response = new ListUsersResponse();
         response.Users.Add(new User { Id = "user1", PrimaryParty = "party::alice" });
@@ -432,39 +548,195 @@ public class AdminClientTests
     }
 
     [Fact]
-    public void ToProtoRight_converts_act_as()
+    public async Task ListUsers_follows_pagination_until_next_page_token_empty()
     {
-        var right = new UserRight.ActAs("party::alice");
-        var protoRight = AdminClient.ToProtoRight(right);
+        var firstPage = new ListUsersResponse
+        {
+            NextPageToken = "page-2",
+            Users = { new User { Id = "user1", PrimaryParty = "party::alice" } }
+        };
 
-        protoRight.CanActAs.Should().NotBeNull();
-        protoRight.CanActAs.Party.Should().Be("party::alice");
+        var secondPage = new ListUsersResponse
+        {
+            NextPageToken = "",
+            Users = { new User { Id = "user2", PrimaryParty = "party::bob" } }
+        };
+
+        var capturedRequests = new List<ListUsersRequest>();
+        _userService
+            .ListUsersAsync(
+                Arg.Do<ListUsersRequest>(r => capturedRequests.Add(r.Clone())),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(secondPage));
+
+        var client = CreateClient();
+        var result = await client.ListUsersAsync(pageSize: 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        result.Select(u => u.UserId).Should().Equal("user1", "user2");
+        capturedRequests.Select(r => r.PageToken).Should().Equal("", "page-2");
+        capturedRequests.Should().AllSatisfy(request => request.PageSize.Should().Be(1));
     }
 
     [Fact]
-    public void ToProtoRight_converts_read_as()
+    public async Task ListUsers_throws_when_server_echoes_same_page_token()
     {
-        var right = new UserRight.ReadAs("party::bob");
-        var protoRight = AdminClient.ToProtoRight(right);
+        var firstPage = new ListUsersResponse { NextPageToken = "page-2" };
+        var echoedPage = new ListUsersResponse { NextPageToken = "page-2" };
 
-        protoRight.CanReadAs.Should().NotBeNull();
-        protoRight.CanReadAs.Party.Should().Be("party::bob");
+        _userService
+            .ListUsersAsync(
+                Arg.Any<ListUsersRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(firstPage), UnaryResponse(echoedPage));
+
+        var client = CreateClient();
+
+        var act = () => client.ListUsersAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("page-2");
     }
 
     [Fact]
-    public void ToProtoRight_converts_participant_admin()
+    public async Task ListUserRights_returns_every_right_kind_as_its_typed_UserRight()
     {
-        var protoRight = AdminClient.ToProtoRight(new UserRight.ParticipantAdmin());
+        var response = new ListUserRightsResponse
+        {
+            Rights =
+            {
+                new Right { ParticipantAdmin = new Right.Types.ParticipantAdmin() },
+                new Right { CanActAs = new Right.Types.CanActAs { Party = "party::alice" } },
+                new Right { CanReadAs = new Right.Types.CanReadAs { Party = "party::bob" } },
+                new Right { IdentityProviderAdmin = new Right.Types.IdentityProviderAdmin() },
+                new Right { CanReadAsAnyParty = new Right.Types.CanReadAsAnyParty() },
+                new Right { CanExecuteAs = new Right.Types.CanExecuteAs { Party = "party::carol" } },
+                new Right { CanExecuteAsAnyParty = new Right.Types.CanExecuteAsAnyParty() }
+            }
+        };
 
-        protoRight.ParticipantAdmin.Should().NotBeNull();
+        ListUserRightsRequest? capturedRequest = null;
+        _userService
+            .ListUserRightsAsync(
+                Arg.Do<ListUserRightsRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+        var result = await client.ListUserRightsAsync("test-user", TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.UserId.Should().Be("test-user");
+        result.Should().Equal(
+            new UserRight.ParticipantAdmin(),
+            new UserRight.ActAs("party::alice"),
+            new UserRight.ReadAs("party::bob"),
+            new UserRight.IdentityProviderAdmin(),
+            new UserRight.ReadAsAnyParty(),
+            new UserRight.ExecuteAs("party::carol"),
+            new UserRight.ExecuteAsAnyParty());
     }
 
     [Fact]
-    public void ToProtoRight_converts_identity_provider_admin()
+    public async Task ListUserRights_throws_when_server_returns_right_with_unset_kind()
     {
-        var protoRight = AdminClient.ToProtoRight(new UserRight.IdentityProviderAdmin());
+        var response = new ListUserRightsResponse { Rights = { new Right() } };
 
-        protoRight.IdentityProviderAdmin.Should().NotBeNull();
+        _userService
+            .ListUserRightsAsync(
+                Arg.Any<ListUserRightsRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+
+        var act = () => client.ListUserRightsAsync("test-user", TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<NotSupportedException>())
+            .Which.Message.Should().Contain("None");
+    }
+
+    [Fact]
+    public async Task ListUserRights_returns_the_rights_granted_when_the_user_was_created()
+    {
+        var grantedProtoRights = new List<Right>();
+        _userService
+            .CreateUserAsync(
+                Arg.Do<CreateUserRequest>(r => grantedProtoRights.AddRange(r.Rights)),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => UnaryResponse(new CreateUserResponse
+            {
+                User = new User { Id = "pqs-reader", PrimaryParty = "party::alice" }
+            }));
+        ListUserRightsRequest? capturedRequest = null;
+        _userService
+            .ListUserRightsAsync(
+                Arg.Do<ListUserRightsRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => UnaryResponse(new ListUserRightsResponse { Rights = { grantedProtoRights } }));
+
+        var grantedRights = new UserRight[]
+        {
+            new UserRight.ActAs("party::alice"),
+            new UserRight.ReadAsAnyParty()
+        };
+
+        var client = CreateClient();
+        await client.CreateUserAsync(
+            "pqs-reader", "party::alice", grantedRights, TestContext.Current.CancellationToken);
+        var listedRights = await client.ListUserRightsAsync(
+            "pqs-reader", TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.UserId.Should().Be("pqs-reader");
+        listedRights.Should().Equal(grantedRights);
+    }
+
+    [Fact]
+    public async Task ListUserRights_returns_null_when_user_not_found()
+    {
+        _userService
+            .ListUserRightsAsync(
+                Arg.Any<ListUserRightsRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns<AsyncUnaryCall<ListUserRightsResponse>>(_ =>
+                throw new RpcException(new Status(StatusCode.NotFound, "User not found")));
+
+        var client = CreateClient();
+        var result = await client.ListUserRightsAsync("non-existent-user", TestContext.Current.CancellationToken);
+
+        result.Should().BeNull();
+    }
+
+    public static TheoryData<UserRight, Right> UserRightProtoPairs => new()
+    {
+        { new UserRight.ParticipantAdmin(), new Right { ParticipantAdmin = new Right.Types.ParticipantAdmin() } },
+        { new UserRight.ActAs("party::alice"), new Right { CanActAs = new Right.Types.CanActAs { Party = "party::alice" } } },
+        { new UserRight.ReadAs("party::bob"), new Right { CanReadAs = new Right.Types.CanReadAs { Party = "party::bob" } } },
+        { new UserRight.IdentityProviderAdmin(), new Right { IdentityProviderAdmin = new Right.Types.IdentityProviderAdmin() } },
+        { new UserRight.ReadAsAnyParty(), new Right { CanReadAsAnyParty = new Right.Types.CanReadAsAnyParty() } },
+        { new UserRight.ExecuteAs("party::carol"), new Right { CanExecuteAs = new Right.Types.CanExecuteAs { Party = "party::carol" } } },
+        { new UserRight.ExecuteAsAnyParty(), new Right { CanExecuteAsAnyParty = new Right.Types.CanExecuteAsAnyParty() } }
+    };
+
+    [Theory]
+    [MemberData(nameof(UserRightProtoPairs))]
+    public void ToProtoRight_converts_each_UserRight_kind_to_its_proto_case(UserRight right, Right expectedProto)
+    {
+        AdminClient.ToProtoRight(right).Should().Be(expectedProto);
     }
 
     [Fact]
@@ -480,7 +752,13 @@ public class AdminClientTests
 
         userDetails.UserId.Should().Be("test-user");
         userDetails.PrimaryParty.Should().Be("party::alice");
-        userDetails.Rights.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void UserDetails_does_not_declare_a_Rights_property()
+    {
+        typeof(UserDetails).GetProperty("Rights").Should().BeNull(
+            "the User proto carries no rights; consumers read them back via ListUserRightsAsync");
     }
 
     [Fact]
@@ -621,7 +899,7 @@ public class AdminClientTests
         {
             ArchivePayload = ByteString.CopyFrom(payload),
             Hash = "pkg-id-1",
-            HashFunction = HashFunction.Sha256
+            HashFunction = WireHashFunction.Sha256
         };
 
         GetPackageRequest? capturedRequest = null;
@@ -636,11 +914,21 @@ public class AdminClientTests
         var client = CreateClient();
         var result = await client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
 
-        result.Payload.Should().Equal(payload);
+        result.Payload.ToArray().Should().Equal(payload);
         result.Hash.Should().Be("pkg-id-1");
-        result.HashFunction.Should().Be("Sha256");
+        result.HashFunction.Should().Be(HashFunction.Sha256);
         capturedRequest.Should().NotBeNull();
         capturedRequest!.PackageId.Should().Be("pkg-id-1");
+    }
+
+    [Fact]
+    public void PackageArchive_values_with_equal_payload_bytes_compare_equal()
+    {
+        var first = new PackageArchive(new byte[] { 0x01, 0x02, 0x03 }, "hash", HashFunction.Sha256);
+        var second = new PackageArchive(new byte[] { 0x01, 0x02, 0x03 }, "hash", HashFunction.Sha256);
+
+        first.Should().Be(second);
+        first.GetHashCode().Should().Be(second.GetHashCode());
     }
 
     [Theory]
@@ -657,13 +945,13 @@ public class AdminClientTests
     }
 
     [Fact]
-    public async Task GetPackage_throws_when_hash_function_unrecognized()
+    public async Task GetPackage_maps_unrecognized_hash_function_to_Unrecognized_fallback()
     {
         var response = new GetPackageResponse
         {
             ArchivePayload = ByteString.CopyFrom(new byte[] { 0x01 }),
             Hash = "pkg-id-1",
-            HashFunction = (HashFunction)42
+            HashFunction = (WireHashFunction)42
         };
 
         _packageService
@@ -676,10 +964,9 @@ public class AdminClientTests
 
         var client = CreateClient();
 
-        var act = () => client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
+        var result = await client.GetPackageAsync("pkg-id-1", TestContext.Current.CancellationToken);
 
-        (await act.Should().ThrowAsync<InvalidOperationException>())
-            .Which.Message.Should().Contain("pkg-id-1");
+        result.HashFunction.Should().Be(HashFunction.Unrecognized);
     }
 
     [Fact]
@@ -733,6 +1020,41 @@ public class AdminClientTests
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should().Contain("pkg-id-no-timestamp");
+    }
+
+    [Fact]
+    public async Task ListKnownPackages_throws_when_package_size_exceeds_long_MaxValue()
+    {
+        const ulong packageSizeBeyondInt64 = (ulong)long.MaxValue + 1;
+        var response = new ListKnownPackagesResponse
+        {
+            PackageDetails =
+            {
+                new Com.Daml.Ledger.Api.V2.Admin.PackageDetails
+                {
+                    PackageId = "pkg-id-huge",
+                    Name = "my-package",
+                    Version = "1.2.3",
+                    PackageSize = packageSizeBeyondInt64,
+                    KnownSince = Timestamp.FromDateTimeOffset(DateTimeOffset.UnixEpoch)
+                }
+            }
+        };
+
+        _packageManagementService
+            .ListKnownPackagesAsync(
+                Arg.Any<ListKnownPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(response));
+
+        var client = CreateClient();
+
+        var act = () => client.ListKnownPackagesAsync(TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("pkg-id-huge");
     }
 
     [Fact]
@@ -885,6 +1207,62 @@ public class AdminClientTests
     }
 
     [Fact]
+    public async Task ListVettedPackages_throws_when_server_alternates_page_tokens()
+    {
+        const int alternatingPagesBeforeMockGivesUp = 50;
+        var pageRequestCount = 0;
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Any<ListVettedPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                pageRequestCount++;
+                var nextPageToken = pageRequestCount >= alternatingPagesBeforeMockGivesUp
+                    ? ""
+                    : pageRequestCount % 2 == 1 ? "token-a" : "token-b";
+                return UnaryResponse(new ListVettedPackagesResponse { NextPageToken = nextPageToken });
+            });
+
+        var client = CreateClient();
+
+        var act = () => client.ListVettedPackagesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("token-a");
+        pageRequestCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ListVettedPackages_throws_at_page_cap_when_server_returns_endless_unique_page_tokens()
+    {
+        var uniquePagesBeforeMockGivesUp = AdminClient.MaxPagesPerPaginatedCall + 10;
+        var pageRequestCount = 0;
+        _packageService
+            .ListVettedPackagesAsync(
+                Arg.Any<ListVettedPackagesRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                pageRequestCount++;
+                var nextPageToken = pageRequestCount >= uniquePagesBeforeMockGivesUp ? "" : $"token-{pageRequestCount}";
+                return UnaryResponse(new ListVettedPackagesResponse { NextPageToken = nextPageToken });
+            });
+
+        var client = CreateClient();
+
+        var act = () => client.ListVettedPackagesAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain(AdminClient.MaxPagesPerPaginatedCall.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        pageRequestCount.Should().Be(AdminClient.MaxPagesPerPaginatedCall);
+    }
+
+    [Fact]
     public async Task ListVettedPackages_sends_filter_on_every_paginated_request()
     {
         var firstPage = new ListVettedPackagesResponse { NextPageToken = "page-2" };
@@ -990,5 +1368,165 @@ public class AdminClientTests
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.DarFile.ToByteArray().Should().Equal(darFile);
+    }
+
+    [Fact]
+    public void Constructor_warns_when_bearer_tokens_would_be_sent_over_plaintext_http()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
+
+        using var client = new AdminClient(options, _tokenProvider, new Logger<AdminClient>(loggerFactory));
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Level == LogLevel.Warning
+            && r.Message.Contains("plaintext http")
+            && r.Message.Contains("http://participant.internal:5001"));
+    }
+
+    [Fact]
+    public void Constructor_does_not_warn_about_plaintext_transport_when_unauthenticated()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
+
+        using var client = new AdminClient(options, ITokenProvider.None, new Logger<AdminClient>(loggerFactory));
+
+        loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
+    }
+
+    [Fact]
+    public void Constructor_does_not_warn_about_plaintext_transport_over_https()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "https://participant.internal:5001" };
+
+        using var client = new AdminClient(options, _tokenProvider, new Logger<AdminClient>(loggerFactory));
+
+        loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task AllocateParty_throws_ArgumentException_when_partyIdHint_null_or_whitespace(string? partyIdHint)
+    {
+        var client = CreateClient();
+
+        var act = () => client.AllocatePartyAsync(partyIdHint!, cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(partyIdHint));
+    }
+
+    [Fact]
+    public async Task GetParties_throws_ArgumentNullException_when_partyIds_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.GetPartiesAsync(null!, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("partyIds");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateUser_throws_ArgumentException_when_userId_null_or_whitespace(string? userId)
+    {
+        var client = CreateClient();
+
+        var act = () => client.CreateUserAsync(userId!, "party::alice", cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(userId));
+    }
+
+    [Fact]
+    public async Task CreateUser_throws_ArgumentNullException_when_primaryParty_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.CreateUserAsync("test-user", null!, cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("primaryParty");
+    }
+
+    [Fact]
+    public async Task CreateUser_allows_an_empty_primaryParty_for_a_user_without_a_primary_party()
+    {
+        _userService
+            .CreateUserAsync(
+                Arg.Any<CreateUserRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(UnaryResponse(new CreateUserResponse { User = new User { Id = "test-user", PrimaryParty = "" } }));
+
+        var client = CreateClient();
+        var act = () => client.CreateUserAsync("test-user", "", cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetUser_throws_ArgumentException_when_userId_null_or_whitespace(string? userId)
+    {
+        var client = CreateClient();
+
+        var act = () => client.GetUserAsync(userId!, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(userId));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GrantUserRights_throws_ArgumentException_when_userId_null_or_whitespace(string? userId)
+    {
+        var client = CreateClient();
+
+        var act = () => client.GrantUserRightsAsync(
+            userId!, [new UserRight.ActAs("party::alice")], TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(userId));
+    }
+
+    [Fact]
+    public async Task GrantUserRights_throws_ArgumentNullException_when_rights_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.GrantUserRightsAsync("test-user", null!, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("rights");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task RevokeUserRights_throws_ArgumentException_when_userId_null_or_whitespace(string? userId)
+    {
+        var client = CreateClient();
+
+        var act = () => client.RevokeUserRightsAsync(
+            userId!, [new UserRight.ReadAs("party::bob")], TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(userId));
+    }
+
+    [Fact]
+    public async Task RevokeUserRights_throws_ArgumentNullException_when_rights_null()
+    {
+        var client = CreateClient();
+
+        var act = () => client.RevokeUserRightsAsync("test-user", null!, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("rights");
     }
 }

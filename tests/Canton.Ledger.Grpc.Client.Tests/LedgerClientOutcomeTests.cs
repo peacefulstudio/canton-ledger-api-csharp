@@ -12,8 +12,10 @@ using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
+using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using Status = Grpc.Core.Status;
@@ -57,7 +59,7 @@ public class LedgerClientOutcomeTests
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>();
         var success = (ExerciseOutcome<TransactionResult>.One)outcome;
@@ -75,7 +77,7 @@ public class LedgerClientOutcomeTests
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>();
         var err = (ExerciseOutcome<TransactionResult>.DamlError)outcome;
@@ -91,12 +93,54 @@ public class LedgerClientOutcomeTests
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>();
         var infra = (ExerciseOutcome<TransactionResult>.InfraError)outcome;
         infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
         infra.Message.Should().Be("network down");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransaction_returns_InfraError_when_created_event_misses_template_id()
+    {
+        var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
+        transaction.Events.Add(new Event
+        {
+            Created = new ProtoCreatedEvent { ContractId = "00broken", CreateArguments = new ProtoRecord() },
+        });
+        StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
+        infra.StatusCode.Should().Be((int)StatusCode.Internal);
+        infra.Message.Should().Contain("template_id");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransaction_returns_InfraError_when_exercise_result_Numeric_exceeds_decimal_range()
+    {
+        var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00exer",
+                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
+                Choice = "Accept",
+                ExerciseResult = LedgerClientTestFixtures.OutOfDecimalRangeNumeric(),
+            },
+        });
+        StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
+        infra.StatusCode.Should().Be((int)StatusCode.Internal);
+        infra.Message.Should().Contain("Numeric");
     }
 
     [Fact]
@@ -201,17 +245,5 @@ public class LedgerClientOutcomeTests
         return RuntimeCommands.CommandsSubmission.Single(create)
             .WithActAs((Party)"party::alice")
             .WithCommandId(new RuntimeCommands.CommandId("test-cmd"));
-    }
-
-    internal sealed record FooBar(string Owner) : ITemplate
-    {
-        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
-        public static string PackageId => "test-pkg";
-        public static string PackageName => "test-package";
-        public static Version PackageVersion { get; } = new(0, 1, 0);
-        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
-
-        public DamlRecord ToRecord() => DamlRecord.Create(
-            DamlField.Create("owner", new DamlParty(Owner)));
     }
 }

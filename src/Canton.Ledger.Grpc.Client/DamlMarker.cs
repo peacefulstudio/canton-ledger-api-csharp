@@ -20,6 +20,8 @@ internal static class MarkerMatcher<TMarker>
 {
     public static bool IsInterface { get; } = typeof(IDamlInterface).IsAssignableFrom(typeof(TMarker));
 
+    private const bool InterfaceReassignmentFilterSelectsUnassignedEventsServerSide = true;
+
     private static readonly RuntimeIdentifier MarkerIdentity = ResolveMarkerIdentity();
 
     private static readonly string PackageName = MarkerPackageName();
@@ -66,7 +68,7 @@ internal static class MarkerMatcher<TMarker>
     {
         if (IsInterface)
         {
-            return false;
+            return InterfaceReassignmentFilterSelectsUnassignedEventsServerSide;
         }
 
         return ContractStreamProjector.IsTemplateMatch(unassigned.TemplateId, MarkerIdentity);
@@ -140,6 +142,5 @@ internal static class MarkerMatcher<TMarker>
     }
 
     private static bool IsModuleEntityMatch(RuntimeIdentifier candidate, RuntimeIdentifier expected) =>
-        string.Equals(candidate.ModuleName, expected.ModuleName, StringComparison.Ordinal)
-        && string.Equals(candidate.EntityName, expected.EntityName, StringComparison.Ordinal);
+        ContractStreamProjector.MatchesModuleEntity(candidate.ModuleName, candidate.EntityName, expected);
 }

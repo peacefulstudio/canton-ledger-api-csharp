@@ -14,12 +14,6 @@ internal static class DamlErrorParser
     private const string GrpcStatusDetailsBinKey = "grpc-status-details-bin";
     private const string CategoryMetadataKey = "category";
 
-    public static ExerciseOutcome<T>.DamlError ToDamlError<T>(RpcException exception)
-    {
-        var (category, errorId, message, metadata) = Parse(exception);
-        return new ExerciseOutcome<T>.DamlError(category, errorId, message, metadata);
-    }
-
     internal static (
         DamlErrorCategory Category,
         string ErrorId,
@@ -32,18 +26,13 @@ internal static class DamlErrorParser
         var status = TryReadStatus(exception.Trailers);
         if (status is null)
         {
-            return (DamlErrorCategory.Unknown, ErrorId: string.Empty,
-                Message: exception.Status.Detail ?? string.Empty,
-                Metadata: new Dictionary<string, string>(0));
+            return UnknownError(exception.Status.Detail);
         }
 
         var errorInfo = ExtractErrorInfo(status);
         if (errorInfo is null)
         {
-            // Status was present but carried no ErrorInfo; surface the status message.
-            return (DamlErrorCategory.Unknown, ErrorId: string.Empty,
-                Message: status.Message ?? string.Empty,
-                Metadata: new Dictionary<string, string>(0));
+            return UnknownError(status.Message);
         }
 
         var metadata = new Dictionary<string, string>(errorInfo.Metadata.Count, StringComparer.Ordinal);
@@ -61,18 +50,23 @@ internal static class DamlErrorParser
             Metadata: metadata);
     }
 
+    private static (
+        DamlErrorCategory Category,
+        string ErrorId,
+        string Message,
+        IReadOnlyDictionary<string, string> Metadata)
+        UnknownError(string? message) =>
+        (DamlErrorCategory.Unknown, ErrorId: string.Empty,
+            Message: message ?? string.Empty,
+            Metadata: new Dictionary<string, string>(0));
+
     internal static DamlErrorCategory MapCategory(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
             return DamlErrorCategory.Unknown;
 
-        // Canton emits PascalCase names (e.g. "TransientServerFailure"). Match exactly first,
-        // then fall through to a case-insensitive match.
-        if (Enum.TryParse<DamlErrorCategory>(raw, ignoreCase: false, out var exact))
-            return exact;
-
-        return Enum.TryParse<DamlErrorCategory>(raw, ignoreCase: true, out var loose)
-            ? loose
+        return Enum.TryParse<DamlErrorCategory>(raw, ignoreCase: true, out var category) && Enum.IsDefined(category)
+            ? category
             : DamlErrorCategory.Unknown;
     }
 

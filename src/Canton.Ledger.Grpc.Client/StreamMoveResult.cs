@@ -13,12 +13,16 @@ internal readonly record struct StreamMoveResult(bool Moved, RpcException? Fault
     {
         try
         {
-            var moved = await stream.MoveNext(cancellationToken);
+            var moved = await stream.MoveNext(cancellationToken).ConfigureAwait(false);
             return new StreamMoveResult(moved, null);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (RpcException ex) when (CallerCancellation.Signals(ex, cancellationToken))
+        {
+            throw CallerCancellation.AsOperationCanceled(ex, cancellationToken);
         }
         catch (RpcException ex)
         {

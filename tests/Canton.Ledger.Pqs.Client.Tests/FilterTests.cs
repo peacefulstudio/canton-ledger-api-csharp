@@ -261,7 +261,7 @@ public class FilterTests
         var filter = Filter.Field<SampleTemplate>(t => t.Initiator, "alice");
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
-        sql.Should().Be("SELECT contract_id, payload FROM active(@templateId) WHERE payload->>'initiator' = @p0");
+        sql.Should().Be("SELECT contract_id, payload FROM active(@typeId) WHERE payload->>'initiator' = @p0");
         parameters.Should().ContainSingle()
             .Which.Should().Be(("@p0", "alice"));
     }

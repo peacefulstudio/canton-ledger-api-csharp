@@ -18,7 +18,6 @@ public interface IAdminClient : IDisposable
     /// Allocates a new party on the ledger.
     /// </summary>
     /// <param name="partyIdHint">A hint for the party ID (may be modified by the ledger).</param>
-    /// <param name="displayName">Optional display name for the party.</param>
     /// <param name="synchronizerId">
     /// Optional id of the synchronizer to allocate the party on. Required when the participant
     /// is connected to more than one synchronizer — otherwise Canton rejects the request with
@@ -29,7 +28,6 @@ public interface IAdminClient : IDisposable
     /// <returns>The allocated party details.</returns>
     Task<PartyDetails> AllocatePartyAsync(
         string partyIdHint,
-        string? displayName = null,
         string? synchronizerId = null,
         CancellationToken cancellationToken = default);
 
@@ -42,10 +40,12 @@ public interface IAdminClient : IDisposable
 
     /// <summary>
     /// Lists all known parties.
+    /// Transparently follows server pagination and returns the complete result set.
     /// </summary>
+    /// <param name="pageSize">Maximum number of parties fetched per server round-trip.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<PartyDetails>> ListKnownPartiesAsync(
         int pageSize = 100,
-        string? pageToken = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -81,11 +81,28 @@ public interface IAdminClient : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lists all users.
+    /// Lists the rights granted to a user.
     /// </summary>
+    /// <param name="userId">
+    /// The user whose rights to list. An empty string lists the rights of the authenticated user.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The rights granted to the user, or <see langword="null"/> when the user does not exist —
+    /// mirroring <see cref="GetUserAsync"/>.
+    /// </returns>
+    Task<IReadOnlyList<UserRight>?> ListUserRightsAsync(
+        string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists all users.
+    /// Transparently follows server pagination and returns the complete result set.
+    /// </summary>
+    /// <param name="pageSize">Maximum number of users fetched per server round-trip.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<UserDetails>> ListUsersAsync(
         int pageSize = 100,
-        string? pageToken = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -150,12 +167,12 @@ public record PartyDetails(
     bool IsLocal);
 
 /// <summary>
-/// Details about a user.
+/// Details about a user. Rights are not part of the underlying <c>User</c> proto;
+/// read them back with <see cref="IAdminClient.ListUserRightsAsync"/>.
 /// </summary>
 public record UserDetails(
     string UserId,
-    string PrimaryParty,
-    IReadOnlyList<UserRight> Rights);
+    string PrimaryParty);
 
 /// <summary>
 /// Details about a Daml-LF package known to the participant.
@@ -168,13 +185,46 @@ public record PackageDetails(
     DateTimeOffset KnownSince);
 
 /// <summary>
+/// The hash function used to compute a <see cref="PackageArchive.Hash"/>.
+/// </summary>
+public enum HashFunction
+{
+    /// <summary>SHA-256.</summary>
+    Sha256,
+
+    /// <summary>
+    /// A hash function reported by the participant that this SDK version does not recognise.
+    /// </summary>
+    Unrecognized,
+}
+
+/// <summary>
 /// A package archive downloaded from the participant: the <c>daml_lf</c> payload
 /// together with its hash and the hash function used to compute it.
 /// </summary>
-public record PackageArchive(
-    byte[] Payload,
+public sealed record PackageArchive(
+    ReadOnlyMemory<byte> Payload,
     string Hash,
-    string HashFunction);
+    HashFunction HashFunction)
+{
+    /// <inheritdoc />
+    public bool Equals(PackageArchive? other) =>
+        ReferenceEquals(this, other)
+        || (other is not null
+            && Payload.Span.SequenceEqual(other.Payload.Span)
+            && Hash == other.Hash
+            && HashFunction == other.HashFunction);
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        var hashCode = new HashCode();
+        hashCode.AddBytes(Payload.Span);
+        hashCode.Add(Hash);
+        hashCode.Add(HashFunction);
+        return hashCode.ToHashCode();
+    }
+}
 
 /// <summary>
 /// A package vetted on a participant and synchronizer.
@@ -210,4 +260,23 @@ public abstract record UserRight
     /// Right to administer an identity provider.
     /// </summary>
     public record IdentityProviderAdmin : UserRight;
+
+    /// <summary>
+    /// Right to read ledger data visible to any party on the participant.
+    /// Intended for tools that consume the whole ledger, such as PQS.
+    /// </summary>
+    public record ReadAsAnyParty : UserRight;
+
+    /// <summary>
+    /// Right to prepare and execute submissions as a party, without any read entitlement.
+    /// Combine with <see cref="ReadAs"/> when reading is also required; <see cref="ActAs"/>
+    /// implicitly contains this right.
+    /// </summary>
+    public record ExecuteAs(string Party) : UserRight;
+
+    /// <summary>
+    /// Right to prepare and execute submissions as any party on the participant.
+    /// Intended for users that perform interactive submissions on behalf of many parties.
+    /// </summary>
+    public record ExecuteAsAnyParty : UserRight;
 }

@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/value.proto
++++ b/com/daml/ledger/api/v2/value.proto
+@@ -10,6 +10,7 @@
+ 
+ import "google/protobuf/empty.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "ValueOuterClass";
+ option java_package = "com.daml.ledger.api.v2";

@@ -3,6 +3,7 @@
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
 using Com.Daml.Ledger.Api.V2;
@@ -14,6 +15,8 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
+using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using Status = Grpc.Core.Status;
@@ -23,11 +26,30 @@ namespace Canton.Ledger.Grpc.Client.Tests;
 public class LedgerClientRetryTests
 {
     private const string RetryAttemptActivityName = "LedgerClient.RetryAttempt";
+    private const int InitialAttempt = 1;
+    private const int RetriesWhenTransient = 1;
     private static readonly Party ActAs = new("party::alice");
+
+    /// <summary>
+    /// Encodes the ADR 0006 retry policy per status code: only transient transport failures
+    /// (<see cref="StatusCode.Unavailable"/>/<see cref="StatusCode.DeadlineExceeded"/>) are retried, so they
+    /// reach <c>InitialAttempt + RetriesWhenTransient</c> calls; every other code — including
+    /// <see cref="StatusCode.Aborted"/> optimistic-concurrency contention, which the SDK deliberately surfaces
+    /// immediately rather than backing off — stops at the single <c>InitialAttempt</c> call.
+    /// </summary>
+    public static TheoryData<StatusCode, int> RetryDecisionByStatusCode => new()
+    {
+        { StatusCode.Unavailable, InitialAttempt + RetriesWhenTransient },
+        { StatusCode.DeadlineExceeded, InitialAttempt + RetriesWhenTransient },
+        { StatusCode.Aborted, InitialAttempt },
+        { StatusCode.InvalidArgument, InitialAttempt },
+        { StatusCode.ResourceExhausted, InitialAttempt },
+    };
 
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
+    private readonly UpdateService.UpdateServiceClient _updateService;
     private readonly StateService.StateServiceClient _stateService;
     private readonly CommandSubmissionService.CommandSubmissionServiceClient _submissionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
@@ -43,6 +65,7 @@ public class LedgerClientRetryTests
 
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
+        _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
         _submissionService = Substitute.ForPartsOf<CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
     }
@@ -51,7 +74,7 @@ public class LedgerClientRetryTests
         _options,
         _channel,
         _commandService,
-        new UpdateService.UpdateServiceClient(_channel),
+        _updateService,
         _stateService,
         _submissionService,
         new CommandCompletionService.CommandCompletionServiceClient(_channel),
@@ -81,7 +104,7 @@ public class LedgerClientRetryTests
         StubSubmitAndWaitForTransaction(Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()));
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>();
         _ = _commandService.Received(1).SubmitAndWaitForTransactionAsync(
@@ -98,7 +121,7 @@ public class LedgerClientRetryTests
             Ok(new SubmitAndWaitForTransactionResponse { Transaction = new Transaction { UpdateId = "u-1", Offset = 1L } }));
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>();
         _ = _commandService.Received(3).SubmitAndWaitForTransactionAsync(
@@ -110,15 +133,141 @@ public class LedgerClientRetryTests
     {
         EnableRetry();
         var damlError = LedgerClientTestFixtures.MakeDamlRpcException(
-            "DUPLICATE_COMMAND", "duplicate", "InvalidGivenCurrentSystemStateResourceExists");
+            "CONTRACT_NOT_FOUND", "unknown contract", "InvalidGivenCurrentSystemStateResourceMissing");
         StubSubmitAndWaitForTransaction(Faulted<SubmitAndWaitForTransactionResponse>(damlError));
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>();
         _ = _commandService.Received(1).SubmitAndWaitForTransactionAsync(
             Arg.Any<SubmitAndWaitForTransactionRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_keeps_first_attempt_DUPLICATE_COMMAND_as_a_DamlError()
+    {
+        EnableRetry();
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: 42L)));
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>()
+            .Which.ErrorId.Should().Be("DUPLICATE_COMMAND",
+                "a first-attempt duplicate from a caller-chosen command_id is a genuine caller error");
+        _ = _commandService.Received(1).SubmitAndWaitForTransactionAsync(
+            Arg.Any<SubmitAndWaitForTransactionRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        _ = _updateService.DidNotReceive().GetUpdateByOffsetAsync(
+            Arg.Any<GetUpdateByOffsetRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_maps_DUPLICATE_COMMAND_on_a_retried_attempt_to_success_of_the_original_submission()
+    {
+        EnableRetry(maxAttempts: 2);
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()),
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: 42L)));
+        GetUpdateByOffsetRequest? pointRead = null;
+        StubGetUpdateByOffset(
+            new GetUpdateResponse { Transaction = new Transaction { UpdateId = "u-original", Offset = 42L } },
+            r => pointRead = r);
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>(
+            "the first attempt committed before its response was lost, so the deduplicated resubmission proves success").Subject;
+        success.Result.UpdateId.Should().Be("u-original");
+        pointRead.Should().NotBeNull();
+        pointRead!.Offset.Should().Be(42L, "the committed transaction sits at the completion_offset carried in the error metadata");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_keeps_a_retried_DUPLICATE_COMMAND_as_a_DamlError_when_completion_offset_is_missing()
+    {
+        EnableRetry(maxAttempts: 2);
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()),
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: null)));
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>()
+            .Which.ErrorId.Should().Be("DUPLICATE_COMMAND");
+        _ = _updateService.DidNotReceive().GetUpdateByOffsetAsync(
+            Arg.Any<GetUpdateByOffsetRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_keeps_a_retried_DUPLICATE_COMMAND_as_a_DamlError_when_the_point_read_fails()
+    {
+        EnableRetry(maxAttempts: 2);
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()),
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: 42L)));
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Any<GetUpdateByOffsetRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+            .Returns(Faulted<GetUpdateResponse>(new RpcException(new Status(StatusCode.NotFound, "no update at offset"))));
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>()
+            .Which.ErrorId.Should().Be("DUPLICATE_COMMAND");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_keeps_a_retried_DUPLICATE_COMMAND_as_a_DamlError_when_the_point_read_returns_a_non_transaction_update()
+    {
+        EnableRetry(maxAttempts: 2);
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()),
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: 42L)));
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Any<GetUpdateByOffsetRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+            .Returns(Ok(new GetUpdateResponse { Reassignment = new Reassignment() }));
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>()
+            .Which.ErrorId.Should().Be("DUPLICATE_COMMAND");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_keeps_a_retried_DUPLICATE_COMMAND_as_a_DamlError_when_the_point_read_transaction_is_undecodable()
+    {
+        EnableRetry(maxAttempts: 2);
+        StubSubmitAndWaitForTransaction(
+            Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()),
+            Faulted<SubmitAndWaitForTransactionResponse>(DuplicateCommand(completionOffset: 42L)));
+        var undecodable = new Transaction { UpdateId = "u-poison", Offset = 42L };
+        undecodable.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00exer",
+                TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
+                Choice = "Accept",
+                ExerciseResult = LedgerClientTestFixtures.OutOfDecimalRangeNumeric(),
+            },
+        });
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Any<GetUpdateByOffsetRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+            .Returns(Ok(new GetUpdateResponse { Transaction = undecodable }));
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.DamlError>()
+            .Which.ErrorId.Should().Be("DUPLICATE_COMMAND");
     }
 
     [Fact]
@@ -129,7 +278,7 @@ public class LedgerClientRetryTests
             Faulted<SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.InvalidArgument, "bad request"))));
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>();
         _ = _commandService.Received(1).SubmitAndWaitForTransactionAsync(
@@ -148,7 +297,7 @@ public class LedgerClientRetryTests
             Ok(new SubmitResponse()));
 
         var client = CreateClient();
-        var returnedCommandId = await client.Submit(Create(commandId: null), TestContext.Current.CancellationToken);
+        var returnedCommandId = await client.SubmitAsync(Create(commandId: null), TestContext.Current.CancellationToken);
 
         sentCommandIds.Should().HaveCount(3, "each of the three attempts submits once");
         sentCommandIds.Should().OnlyContain(id => id == sentCommandIds[0],
@@ -168,10 +317,26 @@ public class LedgerClientRetryTests
             Ok(new GetLedgerEndResponse { Offset = 42L }));
 
         var client = CreateClient();
-        var offset = await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
+        var offset = await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        offset.Should().Be(42L);
+        offset.Value.Should().Be(42L);
         _ = _stateService.Received(3).GetLedgerEndAsync(
+            Arg.Any<GetLedgerEndRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [MemberData(nameof(RetryDecisionByStatusCode))]
+    public async Task GetLedgerEndAsync_retries_only_transient_transport_status_codes(
+        StatusCode statusCode, int expectedAttempts)
+    {
+        EnableRetry(maxAttempts: RetriesWhenTransient);
+        StubGetLedgerEndAlwaysFaults(statusCode);
+
+        var client = CreateClient();
+        var act = () => client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<RpcException>().Where(e => e.StatusCode == statusCode);
+        _ = _stateService.Received(expectedAttempts).GetLedgerEndAsync(
             Arg.Any<GetLedgerEndRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
     }
 
@@ -186,7 +351,7 @@ public class LedgerClientRetryTests
             Faulted<SubmitAndWaitForTransactionResponse>(Unavailable()));
 
         var client = CreateClient();
-        var act = () => client.TrySubmitAndWaitForTransactionAsync(Create(), cts.Token);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         _ = _commandService.Received(1).SubmitAndWaitForTransactionAsync(
@@ -206,7 +371,7 @@ public class LedgerClientRetryTests
             Ok(new SubmitAndWaitForTransactionResponse { Transaction = new Transaction { UpdateId = "u-1", Offset = 1L } }));
 
         var client = CreateClient();
-        await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         deadlines.Should().HaveCount(3, "the per-attempt deadline is recomputed on every attempt");
         deadlines.Should().OnlyContain(d => d.HasValue);
@@ -234,7 +399,7 @@ public class LedgerClientRetryTests
         ActivitySource.AddActivityListener(listener);
 
         var client = CreateClient();
-        await client.TrySubmitAndWaitForTransactionAsync(Create(), TestContext.Current.CancellationToken);
+        await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         var retrySpans = activities
             .Where(a => a.OperationName == RetryAttemptActivityName && a.StatusDescription == uniqueDetail)
@@ -283,7 +448,39 @@ public class LedgerClientRetryTests
             .Returns(calls[0], calls[1..]);
     }
 
+    private void StubGetLedgerEndAlwaysFaults(StatusCode statusCode)
+    {
+        _stateService
+            .GetLedgerEndAsync(
+                Arg.Any<GetLedgerEndRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => Faulted<GetLedgerEndResponse>(new RpcException(new Status(statusCode, "boom"))));
+    }
+
+    private void StubGetUpdateByOffset(GetUpdateResponse response, Action<GetUpdateByOffsetRequest> capture)
+    {
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Do(capture),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(response));
+    }
+
     private static RpcException Unavailable() => new(new Status(StatusCode.Unavailable, "transient down"));
+
+    private static RpcException DuplicateCommand(long? completionOffset) =>
+        LedgerClientTestFixtures.MakeDamlRpcException(
+            "DUPLICATE_COMMAND",
+            "duplicate",
+            "InvalidGivenCurrentSystemStateResourceExists",
+            StatusCode.AlreadyExists,
+            completionOffset is { } offset
+                ? new Dictionary<string, string> { ["completion_offset"] = offset.ToString(CultureInfo.InvariantCulture) }
+                : null);
 
     private static AsyncUnaryCall<T> Faulted<T>(RpcException exception) =>
         new(

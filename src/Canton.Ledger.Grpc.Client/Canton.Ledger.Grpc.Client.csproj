@@ -13,7 +13,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Peaceful.Extensions.Logging" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Google.Protobuf" />

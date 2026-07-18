@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto
++++ b/com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto
+@@ -7,6 +7,7 @@
+ 
+ import "com/daml/ledger/api/v2/value.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/interactive/transaction/v1;transactionv1";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Interactive.Transaction.V1";
+ option java_outer_classname = "InteractiveSubmissionDataOuterClass";
+ option java_package = "com.daml.ledger.api.v2.interactive.transaction.v1";

@@ -6,10 +6,11 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 
 | Type | Purpose |
 |------|---------|
-| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `ExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
-| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `Submit` and `CompletionStreamAsync` |
+| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `TryExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
+| `LedgerClientExtensions` (from `Daml.Ledger.Abstractions`) | Throwing convenience extension methods on `ILedgerClient`: `ExerciseAsync` (wraps `TryExerciseAsync`, throws on non-`One` outcomes) |
+| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `SubmitAsync`, `CompletionStreamAsync`, `GetConnectedSynchronizersAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync`, `GetLedgerApiVersionAsync` |
 | `IAdminClient` | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
-| `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout` |
+| `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout`, `Retry` (opt-in retry pipeline, disabled by default) |
 
 ## Authentication
 
@@ -52,17 +53,21 @@ services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
 
 Use for local development with unauthenticated Canton nodes.
 
+### Transport security
+
+An `http://` `GrpcAddress` opens a cleartext channel, so a token-issuing `ITokenProvider` sends its bearer tokens readable — and replayable — by anyone on the network path. The client logs a warning at construction when that combination is detected. Use an `https://` address for any deployment beyond local development.
+
 ## Usage
 
 ### Creating Contracts
 
 ```csharp
 // Using generated template types from Daml.Codegen.CSharp
-var asset = new Asset("Alice", "My Asset", 100m);
+var asset = new Asset(new Party("Alice::1234..."), 100m);
 
 var outcome = await ledgerClient.TryCreateAsync(
     asset,
-    actAs: "Alice::1234...",
+    actAs: new Party("Alice::1234..."),
     workflowId: "create-asset");
 
 // Outcome is a discriminated union: One / None / Many / DamlError / InfraError.
@@ -77,38 +82,53 @@ var contractId = outcome switch
 ### Exercising Choices
 
 ```csharp
-var command = ExerciseCommand.For(
+var command = new ExerciseCommand(
+    Asset.TemplateId,
     contractId,
-    Asset.Transfer.Create(newOwner: "Bob::5678..."));
+    new ChoiceName("Transfer"),
+    new Asset.Transfer(NewOwner: new Party("Bob::5678...")).ToRecord());
 
 await ledgerClient.ExerciseAsync(
     command,
-    actAs: "Alice::1234...");
+    actAs: new Party("Alice::1234..."));
 ```
 
 ### Async Submission + Completions
 
-`Submit` is a true fire path: it returns once the participant accepts the commands (yielding the `command_id`), not when the transaction commits. The verdict arrives separately on `CompletionStreamAsync`, surfaced as `IAsyncEnumerable<Completion>`. The client keeps no pending-set — you correlate completions by `command_id`/`submission_id` and own your offset.
+`SubmitAsync` is a true fire path: it returns once the participant accepts the commands (yielding the `command_id`), not when the transaction commits. The verdict arrives separately on `CompletionStreamAsync`, surfaced as `IAsyncEnumerable<CompletionStreamEvent>` — a small union of `CommandCompleted` (wrapping the raw `Completion`) and `Checkpoint` (the participant's offset checkpoints, so your persisted resume offset keeps advancing during quiet periods instead of falling arbitrarily far behind). The client keeps no pending-set — you correlate completions by `command_id`/`submission_id` and own your offset.
 
 ```csharp
+var actAs = new Party("Alice::1234...");
+
 // Capture the offset BEFORE submitting — a completion can be emitted
 // before the stream is opened.
 var beginOffset = await ledgerClient.GetLedgerEndAsync();
+var resumeOffset = beginOffset;
 
-// Submit returns the effective CommandId — minted for you when the submission omits one.
-CommandId commandId = await ledgerClient.Submit(submission);
+// SubmitAsync returns the effective CommandId — minted for you when the submission omits one.
+CommandId commandId = await ledgerClient.SubmitAsync(submission);
 
-await foreach (var completion in ledgerClient.CompletionStreamAsync(actAs, beginOffset, ct))
+await foreach (var streamEvent in ledgerClient.CompletionStreamAsync(actAs, beginOffset, ct))
 {
+    if (streamEvent is CompletionStreamEvent.Checkpoint checkpoint)
+    {
+        // Persist this even when no completions arrive — it is the offset
+        // to resume from without re-processing or hitting pruned data.
+        resumeOffset = checkpoint.Offset;
+        continue;
+    }
+
+    if (streamEvent is not CompletionStreamEvent.CommandCompleted { Completion: var completion }) continue;
+    resumeOffset = completion.Offset;
     if (completion.CommandId != commandId.Value) continue;
     if (completion.Status is null or { Code: 0 }) { /* accepted */ }
     break;
 }
 ```
 
-> `Submit` and `SubmitAndWaitAsync` report the effective `CommandId` back to you — the one you supplied, or the one minted here when you omit it. To retry safely after a transport failure, resubmit with that same `CommandId`; re-invoking with a fresh, command_id-less submission mints a *new* id and double-submits, because the participant may have accepted the first attempt before the failure surfaced.
+> `SubmitAsync` and `SubmitAndWaitAsync` report the effective `CommandId` back to you — the one you supplied, or the one minted here when you omit it. To retry safely after a transport failure, resubmit with that same `CommandId`; re-invoking with a fresh, command_id-less submission mints a *new* id and double-submits, because the participant may have accepted the first attempt before the failure surfaced.
 
-To submit and wait for the transaction in one call instead, use `SubmitAndWaitAsync` (renamed from the former `SubmitAsync`).
+To submit and wait for the transaction in one call instead, use `SubmitAndWaitAsync`.
 
 ### Party Management
 
@@ -127,6 +147,8 @@ var user = await adminClient.CreateUserAsync(
 await adminClient.GrantUserRightsAsync(
     "alice-user",
     [new UserRight.ReadAs("Bob::5678...")]);
+
+var rights = await adminClient.ListUserRightsAsync("alice-user");
 
 var users = await adminClient.ListUsersAsync();
 ```

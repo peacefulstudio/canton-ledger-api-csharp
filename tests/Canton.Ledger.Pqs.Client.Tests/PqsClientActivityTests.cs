@@ -4,11 +4,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using AwesomeAssertions;
+using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime.Contracts;
 using Xunit;
 
 namespace Canton.Ledger.Pqs.Client.Tests;
 
+[Collection("PqsClient global ActivitySource")]
 public class PqsClientActivityTests
 {
     private static PqsClient CreateClient() =>
@@ -42,7 +44,27 @@ public class PqsClientActivityTests
         activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
-        activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(typeof(ArgumentException).FullName);
+        activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
+    }
+
+    [Fact]
+    public async Task QueryAsync_tags_the_PqsQuery_activity_with_the_interface_id_and_records_the_error()
+    {
+        var (listener, sharedActivities) = ListenToPqsClient();
+        using var _ = listener;
+        ActivitySource.AddActivityListener(listener);
+
+        var client = CreateClient();
+
+        var act = async () => await client.QueryAsync<ISampleInterface, SampleView>(
+            TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<ArgumentException>();
+
+        var activity = sharedActivities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
+        activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
+            PqsClient.GetDamlTypeId<ISampleInterface>());
+        activity.Status.Should().Be(ActivityStatusCode.Error);
+        activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
     }
 
     [Fact]
@@ -63,7 +85,7 @@ public class PqsClientActivityTests
         activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
-        activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(typeof(ArgumentException).FullName);
+        activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
     }
 
     [Fact]
@@ -83,6 +105,6 @@ public class PqsClientActivityTests
         activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
-        activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(typeof(ArgumentException).FullName);
+        activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
     }
 }

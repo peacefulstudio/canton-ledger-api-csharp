@@ -1,0 +1,97 @@
+--- a/com/daml/ledger/api/v2/admin/user_management_service.proto
++++ b/com/daml/ledger/api/v2/admin/user_management_service.proto
+@@ -6,8 +6,10 @@
+ package com.daml.ledger.api.v2.admin;
+ 
+ import "com/daml/ledger/api/v2/admin/object_meta.proto";
++import "google/api/annotations.proto";
+ import "google/protobuf/field_mask.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/admin;adminv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
+ option java_outer_classname = "UserManagementServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2.admin";
+@@ -42,33 +44,74 @@
+ // In order to grant or revoke user rights use ``GrantRights' and ``RevokeRights`` RPCs.
+ service UserManagementService {
+   // Create a new user.
+-  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
++  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse) {
++    option (google.api.http) = {
++      post: "/v2/users"
++      body: "*"
++    };
++  }
+ 
+   // Get the user data of a specific user or the authenticated user.
+-  rpc GetUser(GetUserRequest) returns (GetUserResponse);
++  rpc GetUser(GetUserRequest) returns (GetUserResponse) {
++    option (google.api.http) = {
++      get: "/v2/users/{user_id}"
++    };
++  }
+ 
+   // Update selected modifiable attribute of a user resource described by the ``User`` message.
+-  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
++  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse) {
++    option (google.api.http) = {
++      patch: "/v2/users/{user.id}"
++      body: "*"
++    };
++  }
+ 
+   // Delete an existing user and all its rights.
+-  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
++  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse) {
++    option (google.api.http) = {
++      delete: "/v2/users/{user_id}"
++    };
++  }
+ 
+   // List all existing users.
+-  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
++  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {
++    option (google.api.http) = {
++      get: "/v2/users"
++    };
++  }
+ 
+   // Grant rights to a user.
+   // Granting rights does not affect the resource version of the corresponding user.
+-  rpc GrantUserRights(GrantUserRightsRequest) returns (GrantUserRightsResponse);
++  rpc GrantUserRights(GrantUserRightsRequest) returns (GrantUserRightsResponse) {
++    option (google.api.http) = {
++      post: "/v2/users/{user_id}/rights"
++      body: "*"
++    };
++  }
+ 
+   // Revoke rights from a user.
+   // Revoking rights does not affect the resource version of the corresponding user.
+-  rpc RevokeUserRights(RevokeUserRightsRequest) returns (RevokeUserRightsResponse);
++  rpc RevokeUserRights(RevokeUserRightsRequest) returns (RevokeUserRightsResponse) {
++    option (google.api.http) = {
++      patch: "/v2/users/{user_id}/rights"
++      body: "*"
++    };
++  }
+ 
+   // List the set of all rights granted to a user.
+-  rpc ListUserRights(ListUserRightsRequest) returns (ListUserRightsResponse);
++  rpc ListUserRights(ListUserRightsRequest) returns (ListUserRightsResponse) {
++    option (google.api.http) = {
++      get: "/v2/users/{user_id}/rights"
++    };
++  }
+ 
+   // Update the assignment of a user from one IDP to another.
+-  rpc UpdateUserIdentityProviderId(UpdateUserIdentityProviderIdRequest) returns (UpdateUserIdentityProviderIdResponse);
++  rpc UpdateUserIdentityProviderId(UpdateUserIdentityProviderIdRequest) returns (UpdateUserIdentityProviderIdResponse) {
++    option (google.api.http) = {
++      patch: "/v2/users/{user_id}/identity-provider-id"
++      body: "*"
++    };
++  }
+ }
+ 
+ // Users and rights

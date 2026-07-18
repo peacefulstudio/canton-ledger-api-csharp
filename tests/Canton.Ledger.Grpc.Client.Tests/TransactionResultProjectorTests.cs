@@ -9,6 +9,7 @@ using Daml.Runtime.Outcomes;
 using AwesomeAssertions;
 using Xunit;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
@@ -26,6 +27,59 @@ public class TransactionResultProjectorTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*no Transaction was present*");
+    }
+
+    public static TheoryData<Event, string> EventsMissingRequiredFields => new()
+    {
+        {
+            new Event { Created = new ProtoCreatedEvent { ContractId = "00noTemplateId", CreateArguments = new ProtoRecord() } },
+            "Malformed response from ledger*template_id*"
+        },
+        {
+            new Event
+            {
+                Created = new ProtoCreatedEvent
+                {
+                    ContractId = "00noCreateArguments",
+                    TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+                },
+            },
+            "Malformed response from ledger*create_arguments*"
+        },
+        {
+            CreatedEventWithInterfaceViewMissingInterfaceId(),
+            "Malformed response from ledger*interface_id*"
+        },
+        {
+            new Event { Exercised = new ProtoExercisedEvent { ContractId = "00noTemplateIdExercised", Choice = "Accept" } },
+            "Malformed response from ledger*template_id*"
+        },
+    };
+
+    private static Event CreatedEventWithInterfaceViewMissingInterfaceId()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00noViewInterfaceId",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord(),
+        };
+        created.InterfaceViews.Add(new InterfaceView());
+        return new Event { Created = created };
+    }
+
+    [Theory]
+    [MemberData(nameof(EventsMissingRequiredFields))]
+    public void Project_throws_descriptive_malformed_response_error_when_event_misses_required_field(
+        Event malformedEvent, string expectedMessage)
+    {
+        var transaction = new Transaction { UpdateId = "u-malformed", Offset = 1L };
+        transaction.Events.Add(malformedEvent);
+
+        var act = () => TransactionResultProjector.Project(
+            new SubmitAndWaitForTransactionResponse { Transaction = transaction });
+
+        act.Should().Throw<InvalidOperationException>().WithMessage(expectedMessage);
     }
 
     [Fact]

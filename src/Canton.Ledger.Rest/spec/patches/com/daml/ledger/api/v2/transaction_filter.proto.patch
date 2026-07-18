@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/transaction_filter.proto
++++ b/com/daml/ledger/api/v2/transaction_filter.proto
+@@ -7,6 +7,7 @@
+ 
+ import "com/daml/ledger/api/v2/value.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "TransactionFilterOuterClass";
+ option java_package = "com.daml.ledger.api.v2";

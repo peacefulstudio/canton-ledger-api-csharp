@@ -1,11 +1,13 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using AwesomeAssertions;
 using Xunit;
+using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -42,6 +44,38 @@ public class MarkerMatcherTests
         act.Should().Throw<TypeInitializationException>()
             .WithInnerException<InvalidOperationException>()
             .WithMessage("*is neither IDamlInterface nor ITemplate*");
+    }
+
+    [Fact]
+    public void MatchesProtoUnassigned_classifies_an_interface_marker_UnassignedEvent_as_matched_by_construction()
+    {
+        var unassigned = new UnassignedEvent
+        {
+            ContractId = "00holding",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+            Source = "sync-src",
+            Target = "sync-tgt",
+        };
+
+        MarkerMatcher<InterfaceMarker>.MatchesProtoUnassigned(unassigned).Should().BeTrue();
+    }
+
+    [Fact]
+    public void MatchesProtoUnassigned_matches_a_template_marker_UnassignedEvent_by_template_id()
+    {
+        var matching = new UnassignedEvent
+        {
+            ContractId = "00holding",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+        };
+        var other = new UnassignedEvent
+        {
+            ContractId = "00other",
+            TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
+        };
+
+        MarkerMatcher<TemplateMarker>.MatchesProtoUnassigned(matching).Should().BeTrue();
+        MarkerMatcher<TemplateMarker>.MatchesProtoUnassigned(other).Should().BeFalse();
     }
 
     internal sealed record InterfaceMarker : IDamlInterface

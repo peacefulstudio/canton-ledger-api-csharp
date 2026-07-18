@@ -1,7 +1,6 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Globalization;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -87,9 +86,11 @@ public static class DamlValueConverter
 
     /// <summary>
     /// Projects a Runtime <see cref="DamlValue"/> onto its proto wire form.
-    /// <see cref="DamlNumeric"/> values are encoded in the canonical unpadded decimal form
-    /// committed by codegen ADR-0011: trailing zeros stripped, at least one fractional digit,
-    /// never scientific notation (e.g. <c>1.50m</c> → <c>"1.5"</c>, <c>0m</c> → <c>"0.0"</c>).
+    /// <see cref="DamlNumeric"/> values are encoded via <see cref="DamlNumeric.ToCanonicalString"/>,
+    /// which emits the canonical unpadded decimal form committed by codegen ADR-0011: trailing zeros
+    /// stripped, at least one fractional digit, never scientific notation (e.g. <c>1.50m</c> →
+    /// <c>"1.5"</c>, <c>0m</c> → <c>"0.0"</c>). The full Daml Numeric range and precision (up to 38
+    /// significant digits) is preserved, including values beyond <see cref="decimal"/>'s range.
     /// Throws <see cref="NotSupportedException"/> for unrecognised <c>DamlValue</c>
     /// subclasses.
     /// </summary>
@@ -104,7 +105,7 @@ public static class DamlValueConverter
             DamlInt64 i => new Value { Int64 = i.Value },
             DamlText t => new Value { Text = t.Value },
             DamlParty p => new Value { Party = p.Value },
-            DamlNumeric n => new Value { Numeric = n.Value.ToString(CanonicalNumericFormat, CultureInfo.InvariantCulture) },
+            DamlNumeric n => new Value { Numeric = n.ToCanonicalString() },
             DamlDate d => new Value { Date = d.DaysSinceEpoch },
             DamlTimestamp ts => new Value { Timestamp = ts.MicrosecondsSinceEpoch },
             DamlContractId c => new Value { ContractId = c.Value },
@@ -173,8 +174,11 @@ public static class DamlValueConverter
 
     /// <summary>
     /// Lifts a proto <see cref="Value"/> into its Runtime <see cref="DamlValue"/>
-    /// equivalent. Throws <see cref="InvalidOperationException"/> when the
-    /// proto sum-case is unset (a malformed wire payload).
+    /// equivalent. Numeric wire values are parsed via <see cref="DamlNumeric.TryParseCanonical"/>,
+    /// preserving the full Daml Numeric range and precision (up to 38 significant digits) without
+    /// overflow or silent rounding to <see cref="decimal"/>. Throws
+    /// <see cref="InvalidOperationException"/> when the proto sum-case is unset (a malformed wire
+    /// payload), and <see cref="FormatException"/> when a Numeric value is not canonical.
     /// </summary>
     public static DamlValue FromProtoValue(Value value)
     {
@@ -190,10 +194,10 @@ public static class DamlValueConverter
             Value.SumOneofCase.Int64 => new DamlInt64(value.Int64),
             Value.SumOneofCase.Text => new DamlText(value.Text),
             Value.SumOneofCase.Party => new DamlParty(value.Party),
-            Value.SumOneofCase.Numeric => decimal.TryParse(value.Numeric, CultureInfo.InvariantCulture, out var parsed)
-                ? new DamlNumeric(parsed)
+            Value.SumOneofCase.Numeric => DamlNumeric.TryParseCanonical(value.Numeric, out var parsed)
+                ? parsed
                 : throw new FormatException(
-                    $"Cannot parse proto Numeric value '{value.Numeric}' as decimal."),
+                    $"Cannot parse proto Numeric value '{value.Numeric}' as a canonical Daml Numeric."),
             Value.SumOneofCase.Date => DamlDate.FromDaysSinceEpoch(value.Date),
             Value.SumOneofCase.Timestamp => DamlTimestamp.FromMicrosecondsSinceEpoch(value.Timestamp),
             Value.SumOneofCase.ContractId => new DamlContractId(value.ContractId),
@@ -215,8 +219,6 @@ public static class DamlValueConverter
             _ => throw new NotSupportedException($"Proto Value case {value.SumCase} is not supported")
         };
     }
-
-    private const string CanonicalNumericFormat = "0.0###########################";
 
     private static T RequireMessage<T>(T? message, Value.SumOneofCase sumCase) where T : class =>
         message ?? throw new InvalidOperationException(
