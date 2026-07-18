@@ -135,31 +135,61 @@ public class PqsClientTests
     }
 
     [Fact]
-    public void IsTemplateNotFoundError_returns_true_for_matching_exception()
+    public void DeserializeContract_maps_contract_id_and_camel_case_payload()
+    {
+        const string payload =
+            """{"initiator":"alice","counterparty":"bob","numSwaps":"42","status":"Active"}""";
+
+        var contract = PqsClient.DeserializeContract<FilterTests.SampleTemplate>(
+            "00abc123", payload, PqsClient.DefaultJsonSerializerOptions);
+
+        contract.Id.Value.Should().Be("00abc123");
+        contract.Data.Initiator.Should().Be("alice");
+        contract.Data.Counterparty.Should().Be("bob");
+        contract.Data.NumSwaps.Should().Be(42);
+        contract.Data.Status.Should().Be("Active");
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("  null  ")]
+    public void DeserializeContract_throws_InvalidOperationException_for_null_payload(string payloadJson)
+    {
+        var act = () => PqsClient.DeserializeContract<FilterTests.SampleTemplate>(
+            "00abc123", payloadJson, PqsClient.DefaultJsonSerializerOptions);
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+                .Contain("00abc123")
+                .And.Contain(typeof(FilterTests.SampleTemplate).FullName!);
+    }
+
+    [Fact]
+    public void IsTypeNotFoundError_returns_true_for_matching_exception()
     {
         var ex = CreatePostgresException("P0001", "Identifier not found: test-package:Module:Template");
-        PqsClient.IsTemplateNotFoundError(ex).Should().BeTrue();
+        PqsClient.IsTypeNotFoundError(ex).Should().BeTrue();
     }
 
     [Fact]
-    public void IsTemplateNotFoundError_returns_false_for_different_sql_state()
+    public void IsTypeNotFoundError_returns_false_for_different_sql_state()
     {
         var ex = CreatePostgresException("42P01", "Identifier not found: test");
-        PqsClient.IsTemplateNotFoundError(ex).Should().BeFalse();
+        PqsClient.IsTypeNotFoundError(ex).Should().BeFalse();
     }
 
     [Fact]
-    public void IsTemplateNotFoundError_returns_false_for_different_message()
+    public void IsTypeNotFoundError_returns_false_for_different_message()
     {
         var ex = CreatePostgresException("P0001", "Some other error");
-        PqsClient.IsTemplateNotFoundError(ex).Should().BeFalse();
+        PqsClient.IsTypeNotFoundError(ex).Should().BeFalse();
     }
 
     [Fact]
-    public void IsTemplateNotFoundError_returns_false_when_prefix_does_not_match_at_start()
+    public void IsTypeNotFoundError_returns_false_when_prefix_does_not_match_at_start()
     {
         var ex = CreatePostgresException("P0001", "Some error: Identifier not found: x");
-        PqsClient.IsTemplateNotFoundError(ex).Should().BeFalse();
+        PqsClient.IsTypeNotFoundError(ex).Should().BeFalse();
     }
 
     [Fact]
@@ -168,7 +198,7 @@ public class PqsClientTests
         var filter = Filter.Field<FilterTests.SampleTemplate>(t => t.Initiator, "party1");
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
-        sql.Should().Be("SELECT contract_id, payload FROM active(@templateId) WHERE payload->>'initiator' = @p0");
+        sql.Should().Be("SELECT contract_id, payload FROM active(@typeId) WHERE payload->>'initiator' = @p0");
         parameters.Should().ContainSingle().Which.Should().Be(("@p0", "party1"));
     }
 
@@ -182,7 +212,7 @@ public class PqsClientTests
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
         sql.Should().Be(
-            "SELECT contract_id, payload FROM active(@templateId) " +
+            "SELECT contract_id, payload FROM active(@typeId) " +
             "WHERE (payload->>'initiator' = @p0 OR payload->>'counterparty' = @p1)");
         parameters.Should().HaveCount(2);
         parameters[0].Should().Be(("@p0", "alice"));
@@ -199,7 +229,7 @@ public class PqsClientTests
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
         sql.Should().Be(
-            "SELECT contract_id, payload FROM active(@templateId) " +
+            "SELECT contract_id, payload FROM active(@typeId) " +
             "WHERE (payload->>'initiator' = @p0 AND payload->>'status' = @p1)");
         parameters.Should().HaveCount(2);
         parameters[0].Should().Be(("@p0", "alice"));
@@ -218,7 +248,7 @@ public class PqsClientTests
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
         sql.Should().Be(
-            "SELECT contract_id, payload FROM active(@templateId) " +
+            "SELECT contract_id, payload FROM active(@typeId) " +
             "WHERE ((payload->>'initiator' = @p0 OR payload->>'counterparty' = @p1) " +
             "AND payload->>'status' = @p2)");
         parameters.Should().HaveCount(3);
@@ -236,7 +266,7 @@ public class PqsClientTests
         var (sql, parameters) = PqsClient.BuildFilteredQuery(filter);
 
         sql.Should().NotContain(nasty);
-        sql.Should().Be("SELECT contract_id, payload FROM active(@templateId) WHERE payload->>'initiator' = @p0");
+        sql.Should().Be("SELECT contract_id, payload FROM active(@typeId) WHERE payload->>'initiator' = @p0");
         parameters.Should().ContainSingle().Which.Should().Be(("@p0", nasty));
     }
 

@@ -36,13 +36,7 @@ internal static class TransactionResultProjector
             switch (evt.EventCase)
             {
                 case Event.EventOneofCase.Created:
-                    createdContracts.Add(new CreatedContract(
-                        evt.Created.ContractId,
-                        LedgerWireConversions.ToRuntimeIdentifier(evt.Created.TemplateId),
-                        evt.Created.CreateArguments.ToString())
-                    {
-                        InterfaceIds = ToInterfaceIds(evt.Created),
-                    });
+                    createdContracts.Add(ToCreatedContract(evt.Created));
                     break;
                 case Event.EventOneofCase.Archived:
                     archivedContractIds.Add(evt.Archived.ContractId);
@@ -55,7 +49,7 @@ internal static class TransactionResultProjector
 
         return new TransactionResult(
             transaction.UpdateId,
-            transaction.Offset,
+            LedgerOffset.At(transaction.Offset),
             createdContracts,
             archivedContractIds,
             ToCommandId(transaction.CommandId))
@@ -66,6 +60,26 @@ internal static class TransactionResultProjector
 
     private static RuntimeCommands.CommandId ToCommandId(string commandId) =>
         commandId.Length == 0 ? default : (RuntimeCommands.CommandId)commandId;
+
+    private static CreatedContract ToCreatedContract(ProtoCreatedEvent created)
+    {
+        var templateId = created.TemplateId
+            ?? throw MalformedResponse($"CreatedEvent for contract '{created.ContractId}' has no template_id");
+        var createArguments = created.CreateArguments
+            ?? throw MalformedResponse($"CreatedEvent for contract '{created.ContractId}' has no create_arguments");
+        return new CreatedContract(
+            created.ContractId,
+            LedgerWireConversions.ToRuntimeIdentifier(templateId),
+            createArguments.ToString())
+        {
+            InterfaceIds = ToInterfaceIds(created),
+        };
+    }
+
+    internal const string MalformedResponsePrefix = "Malformed response from ledger: ";
+
+    private static InvalidOperationException MalformedResponse(string detail) =>
+        new($"{MalformedResponsePrefix}{detail}, though the Ledger API marks the field as required.");
 
     public static ExerciseOutcome<ContractId<TMarker>> ProjectToContractId<TMarker>(
         ExerciseOutcome<TransactionResult> outcome)
@@ -112,13 +126,17 @@ internal static class TransactionResultProjector
         var interfaceIds = new List<RuntimeIdentifier>(created.InterfaceViews.Count);
         foreach (var view in created.InterfaceViews)
         {
-            interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(view.InterfaceId));
+            var interfaceId = view.InterfaceId
+                ?? throw MalformedResponse($"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
+            interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
         return interfaceIds;
     }
 
     private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)
     {
+        var templateId = exercised.TemplateId
+            ?? throw MalformedResponse($"ExercisedEvent for contract '{exercised.ContractId}' has no template_id");
         var argument = exercised.ChoiceArgument is null
             ? DamlUnit.Instance
             : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
@@ -130,7 +148,7 @@ internal static class TransactionResultProjector
             : LedgerWireConversions.ToRuntimeIdentifier(exercised.InterfaceId);
         return new RuntimeExercisedEvent(
             exercised.ContractId,
-            LedgerWireConversions.ToRuntimeIdentifier(exercised.TemplateId),
+            LedgerWireConversions.ToRuntimeIdentifier(templateId),
             interfaceId,
             exercised.Choice,
             argument,

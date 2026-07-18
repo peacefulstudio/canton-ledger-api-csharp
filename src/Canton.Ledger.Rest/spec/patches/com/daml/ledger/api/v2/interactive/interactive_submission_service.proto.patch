@@ -1,0 +1,84 @@
+--- a/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
++++ b/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
+@@ -13,9 +13,11 @@
+ import "com/daml/ledger/api/v2/transaction.proto";
+ import "com/daml/ledger/api/v2/transaction_filter.proto";
+ import "com/daml/ledger/api/v2/value.proto";
++import "google/api/annotations.proto";
+ import "google/protobuf/duration.proto";
+ import "google/protobuf/timestamp.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/interactive;interactivev2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Interactive";
+ option java_outer_classname = "InteractiveSubmissionServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2.interactive";
+@@ -30,18 +32,38 @@
+ // This gives callers the ability to sign the daml transaction with their own signing keys
+ service InteractiveSubmissionService {
+   // Requires `readAs` scope for the submitting party when LAPI User authorization is enabled
+-  rpc PrepareSubmission(PrepareSubmissionRequest) returns (PrepareSubmissionResponse);
++  rpc PrepareSubmission(PrepareSubmissionRequest) returns (PrepareSubmissionResponse) {
++    option (google.api.http) = {
++      post: "/v2/interactive-submission/prepare"
++      body: "*"
++    };
++  }
+   // Execute a prepared submission _asynchronously_ on the ledger.
+   // Requires a signature of the transaction from the submitting external party.
+-  rpc ExecuteSubmission(ExecuteSubmissionRequest) returns (ExecuteSubmissionResponse);
++  rpc ExecuteSubmission(ExecuteSubmissionRequest) returns (ExecuteSubmissionResponse) {
++    option (google.api.http) = {
++      post: "/v2/interactive-submission/execute"
++      body: "*"
++    };
++  }
+   // Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
+   // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
+   // A malicious node could make a successfully committed request appeared failed and vice versa
+-  rpc ExecuteSubmissionAndWait(ExecuteSubmissionAndWaitRequest) returns (ExecuteSubmissionAndWaitResponse);
++  rpc ExecuteSubmissionAndWait(ExecuteSubmissionAndWaitRequest) returns (ExecuteSubmissionAndWaitResponse) {
++    option (google.api.http) = {
++      post: "/v2/interactive-submission/executeAndWait"
++      body: "*"
++    };
++  }
+   // Similar to ExecuteSubmissionAndWait but additionally returns the transaction
+   // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
+   // A malicious node could make a successfully committed request appear as failed and vice versa
+-  rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse);
++  rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse) {
++    option (google.api.http) = {
++      post: "/v2/interactive-submission/executeAndWaitForTransaction"
++      body: "*"
++    };
++  }
+ 
+   // A preferred package is the highest-versioned package for a provided package-name
+   // that is vetted by all the participants hosting the provided parties.
+@@ -55,7 +77,11 @@
+   // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
+   //
+   // Provided for backwards compatibility, it will be removed in the Canton version 3.4.0
+-  rpc GetPreferredPackageVersion(GetPreferredPackageVersionRequest) returns (GetPreferredPackageVersionResponse);
++  rpc GetPreferredPackageVersion(GetPreferredPackageVersionRequest) returns (GetPreferredPackageVersionResponse) {
++    option (google.api.http) = {
++      get: "/v2/interactive-submission/preferred-package-version"
++    };
++  }
+ 
+   // Compute the preferred packages for the vetting requirements in the request.
+   // A preferred package is the highest-versioned package for a provided package-name
+@@ -73,7 +99,12 @@
+   // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
+   //
+   // Experimental API: this endpoint is not guaranteed to provide backwards compatibility in future releases
+-  rpc GetPreferredPackages(GetPreferredPackagesRequest) returns (GetPreferredPackagesResponse);
++  rpc GetPreferredPackages(GetPreferredPackagesRequest) returns (GetPreferredPackagesResponse) {
++    option (google.api.http) = {
++      post: "/v2/interactive-submission/preferred-packages"
++      body: "*"
++    };
++  }
+ }
+ 
+ // Hints to improve cost estimation precision of a prepared transaction

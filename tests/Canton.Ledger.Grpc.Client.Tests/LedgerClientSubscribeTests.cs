@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
@@ -68,7 +69,39 @@ public class LedgerClientSubscribeTests
         events.Should().ContainSingle();
         var created = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject;
         created.ContractId.Value.Should().Be("00abc");
-        created.Offset.Should().Be(42L);
+        created.Offset.Value.Should().Be(42L);
+    }
+
+    [Fact]
+    public async Task SubscribeLedgerEffectsAsync_yields_typed_Created_event()
+    {
+        var transaction = MakeTransaction(MakeCreatedEvent("00abc", FooBarTemplate, offset: 42L));
+        StubGetUpdates(MakeGetUpdatesResponse(transaction));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeLedgerEffectsAsync<FooBar>(
+            new Daml.Runtime.Commands.SubmitterInfo(new HashSet<Party> { (Party)"alice" }, new HashSet<Party>()),
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        var created = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject;
+        created.ContractId.Value.Should().Be("00abc");
+        created.Offset.Value.Should().Be(42L);
+    }
+
+    [Fact]
+    public async Task SubscribeLedgerEffectsAsync_requests_the_ledger_effects_transaction_shape()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeLedgerEffectsAsync<FooBar>(
+            new Daml.Runtime.Commands.SubmitterInfo(new HashSet<Party> { (Party)"alice" }, new HashSet<Party>()),
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        captured!.UpdateFormat.IncludeTransactions.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
     }
 
     [Fact]
@@ -91,7 +124,7 @@ public class LedgerClientSubscribeTests
         var archived = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Archived>().Subject;
         archived.ContractId.Value.Should().Be("00abc");
-        archived.Offset.Should().Be(7L);
+        archived.Offset.Value.Should().Be(7L);
     }
 
     [Fact]
@@ -119,7 +152,7 @@ public class LedgerClientSubscribeTests
             .Should().BeOfType<ContractStreamEvent<FooBar>.Exercised>().Subject;
         exercised.ChoiceName.Should().Be("Accept");
         exercised.Consuming.Should().BeTrue();
-        exercised.Offset.Should().Be(99L);
+        exercised.Offset.Value.Should().Be(99L);
     }
 
     [Fact]
@@ -191,10 +224,10 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(MakeActiveContract("00foo", FooBarTemplate));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>().Subject
             .SynchronizerId.Should().Be(new SynchronizerId("sync-1"));
     }
 
@@ -222,7 +255,7 @@ public class LedgerClientSubscribeTests
         events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo");
         events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>()
-            .Which.Offset.Should().Be(2L);
+            .Which.Offset.Value.Should().Be(2L);
         events[2].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo2");
     }
@@ -239,8 +272,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(42L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -250,7 +283,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 123L, cancellationToken: TestContext.Current.CancellationToken));
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: LedgerOffset.At(123), cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         captured!.BeginExclusive.Should().Be(123L);
@@ -339,7 +372,7 @@ public class LedgerClientSubscribeTests
         var createdEvent = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<IFoo>.Created>().Subject;
         createdEvent.ContractId.Value.Should().Be("00impl");
-        createdEvent.Offset.Should().Be(5L);
+        createdEvent.Offset.Value.Should().Be(5L);
     }
 
     [Fact]
@@ -400,7 +433,7 @@ public class LedgerClientSubscribeTests
         var archivedEvent = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<IFoo>.Archived>().Subject;
         archivedEvent.ContractId.Value.Should().Be("00impl");
-        archivedEvent.Offset.Should().Be(7L);
+        archivedEvent.Offset.Value.Should().Be(7L);
     }
 
     [Fact]
@@ -572,17 +605,55 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
+    public async Task SubscribeAsync_StreamError_message_falls_back_to_status_string_when_detail_empty()
+    {
+        // gRPC surfaces a server status with no message as Status.Detail == "" (empty,
+        // not null), so a plain ?? never falls back — the StreamError diagnostic must
+        // still be non-empty.
+        StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Unavailable, string.Empty)));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        error.Message.Should().NotBeNullOrEmpty(
+            "an empty transport Detail must fall back to the status string, not silently empty the diagnostic Message");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_yields_items_already_read_before_surfacing_mid_stream_StreamError()
+    {
+        StubGetUpdatesFailureAfterItems(
+            new RpcException(new Status(StatusCode.Unavailable, "stream aborted after two updates")),
+            MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00first", FooBarTemplate, offset: 1L))),
+            MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00second", FooBarTemplate, offset: 2L))));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(3, "both already-read Created events are yielded before the terminal fault");
+        events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00first");
+        events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00second");
+        events[2].Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>()
+            .Which.StatusCode.Should().Be((int)StatusCode.Unavailable);
+    }
+
+    [Fact]
     public async Task SubscribeAsync_round_trips_offset_through_Created_event()
     {
         var transaction = MakeTransaction(MakeCreatedEvent("00first", FooBarTemplate, offset: 100L));
         StubGetUpdates(MakeGetUpdatesResponse(transaction));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: 50L, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, fromOffset: LedgerOffset.At(50), cancellationToken: TestContext.Current.CancellationToken));
 
         // Caller recovers the last-seen offset from the event so it can resume later.
         var lastOffset = events.OfType<ContractStreamEvent<FooBar>.Created>().Last().Offset;
-        lastOffset.Should().Be(100L);
+        lastOffset.Value.Should().Be(100L);
     }
 
     [Fact]
@@ -590,7 +661,7 @@ public class LedgerClientSubscribeTests
     {
         var cts = new CancellationTokenSource();
         cts.Cancel();
-        StubGetUpdatesCancellable();
+        StubGetUpdates();
 
         var client = CreateClient();
         var act = async () => { await foreach (var _ in client.SubscribeAsync<FooBar>(ActAs, cancellationToken: cts.Token)) { } };
@@ -599,20 +670,140 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_rethrows_RpcException_when_stream_faults()
+    public async Task SubscribeAsync_throws_OperationCanceledException_when_caller_cancels_mid_stream()
+    {
+        using var cts = new CancellationTokenSource();
+        StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00abc", FooBarTemplate, offset: 42L))));
+
+        var client = CreateClient();
+        var events = new List<ContractStreamEvent<FooBar>>();
+        var act = async () =>
+        {
+            await foreach (var item in client.SubscribeAsync<FooBar>(ActAs, cancellationToken: cts.Token))
+            {
+                events.Add(item);
+                cts.Cancel();
+            }
+        };
+
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeOfType<RpcException>()
+            .Which.StatusCode.Should().Be(StatusCode.Cancelled);
+        thrown.Which.CancellationToken.Should().Be(cts.Token);
+        events.Should().NotContain(e => e is ContractStreamEvent<FooBar>.StreamError);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_server_cancelled_stream_as_StreamError_when_caller_token_not_cancelled()
+    {
+        StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Cancelled, "server closed the call")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Cancelled);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_throws_OperationCanceledException_when_caller_cancels_mid_stream()
+    {
+        using var cts = new CancellationTokenSource();
+        StubGetLedgerEnd(offset: 10L);
+        StubGetActiveContracts(MakeActiveContract("00foo", FooBarTemplate));
+
+        var client = CreateClient();
+        var act = async () =>
+        {
+            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: cts.Token))
+            {
+                cts.Cancel();
+            }
+        };
+
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeOfType<RpcException>()
+            .Which.StatusCode.Should().Be(StatusCode.Cancelled);
+        thrown.Which.CancellationToken.Should().Be(cts.Token);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_throws_OperationCanceledException_when_caller_cancels_during_ledger_end_lookup()
+    {
+        using var cts = new CancellationTokenSource();
+        StubGetLedgerEndCancelledMidFlight(cts);
+
+        var client = CreateClient();
+        var act = async () =>
+        {
+            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: cts.Token)) { }
+        };
+
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeOfType<RpcException>()
+            .Which.StatusCode.Should().Be(StatusCode.Cancelled);
+        thrown.Which.CancellationToken.Should().Be(cts.Token);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_RpcException_as_StreamError_event()
     {
         StubGetLedgerEnd(offset: 10L);
         var rpcException = new RpcException(new Status(StatusCode.Unavailable, "transient down"));
         StubGetActiveContractsFailure(rpcException);
 
         var client = CreateClient();
-        var act = async () =>
-        {
-            await foreach (var _ in client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken)) { }
-        };
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        await act.Should().ThrowAsync<RpcException>()
-            .Where(e => e.StatusCode == StatusCode.Unavailable);
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        error.Message.Should().Contain("transient");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_StreamError_message_falls_back_to_status_string_when_detail_empty()
+    {
+        // gRPC surfaces a server status with no message as Status.Detail == "" (empty,
+        // not null), so a plain ?? never falls back — the StreamError diagnostic must
+        // still be non-empty.
+        StubGetLedgerEnd(offset: 10L);
+        StubGetActiveContractsFailure(new RpcException(new Status(StatusCode.Unavailable, string.Empty)));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        error.Message.Should().NotBeNullOrEmpty(
+            "an empty transport Detail must fall back to the status string, not silently empty the diagnostic Message");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_StreamError_instead_of_terminal_Checkpoint_on_mid_stream_fault()
+    {
+        // The faulted snapshot ends with a terminal StreamError in place of the
+        // Checkpoint a successful snapshot ends with (mutually exclusive), so no
+        // snapshot offset is handed over to a resumed live subscription.
+        StubGetLedgerEnd(offset: 10L);
+        StubGetActiveContractsFailureAfterItems(
+            new RpcException(new Status(StatusCode.Unavailable, "snapshot aborted after two contracts")),
+            MakeActiveContract("00first", FooBarTemplate),
+            MakeActiveContract("00second", FooBarTemplate));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(3, "both already-read snapshot contracts are yielded before the terminal fault");
+        events.Take(2).Should().AllSatisfy(e => e.Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>());
+        events.OfType<AcsSnapshotEntry<FooBar>.Created>().Select(c => c.ContractId.Value)
+            .Should().Equal("00first", "00second");
+        events.Should().NotContain(e => e is AcsSnapshotEntry<FooBar>.Checkpoint,
+            "a faulted snapshot terminates with StreamError, never the success-path Checkpoint");
+        events[2].Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>()
+            .Which.StatusCode.Should().Be((int)StatusCode.Unavailable);
     }
 
     [Fact]
@@ -632,14 +823,14 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(matching, unrelated);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().HaveCount(2);
-        events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+        events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo");
-        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
-        unclassified.Offset.Should().Be(99L);
+        var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
+        unclassified.Offset.Value.Should().Be(99L);
     }
 
     [Fact]
@@ -659,14 +850,36 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(matching, unrelated);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<IFoo>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().HaveCount(2);
-        events[0].Should().BeOfType<ContractStreamEvent<IFoo>.Created>()
+        events[0].Should().BeOfType<AcsSnapshotEntry<IFoo>.Created>()
             .Which.ContractId.Value.Should().Be("00impl");
-        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
-        unclassified.Offset.Should().Be(88L);
+        var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<IFoo>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
+        unclassified.Offset.Value.Should().Be(88L);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_surfaces_undecodable_entry_as_decode_failure_Unclassified_and_keeps_streaming()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        var poison = MakeActiveContract("00poison", FooBarTemplate, offset: 5L);
+        poison.ActiveContract.CreatedEvent.CreateArguments = new ProtoRecord
+        {
+            Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
+        };
+        StubGetActiveContracts(poison, MakeActiveContract("00good", FooBarTemplate, offset: 6L));
+
+        var client = CreateClient();
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        var unclassified = events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(5L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure.ToString());
+        events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00good");
     }
 
     [Fact]
@@ -677,7 +890,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        _ = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         captured!.ActiveAtOffset.Should().Be(42L);
@@ -691,7 +904,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        _ = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
@@ -710,7 +923,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeActiveAsync<IFoo>(ActAs, TestContext.Current.CancellationToken));
+        _ = await CollectActiveAsync(client.SubscribeActiveAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
@@ -748,8 +961,8 @@ public class LedgerClientSubscribeTests
 
         var checkpoints = events.OfType<ContractStreamEvent<FooBar>.Checkpoint>().ToList();
         checkpoints.Should().HaveCount(2);
-        checkpoints[0].Offset.Should().Be(50L);
-        checkpoints[1].Offset.Should().Be(60L);
+        checkpoints[0].Offset.Value.Should().Be(50L);
+        checkpoints[1].Offset.Value.Should().Be(60L);
     }
 
     [Fact]
@@ -782,7 +995,7 @@ public class LedgerClientSubscribeTests
         assigned.ContractId.Value.Should().Be("00abc");
         assigned.Source.Should().Be(new SynchronizerId("sync-a"));
         assigned.Target.Should().Be(new SynchronizerId("sync-b"));
-        assigned.Offset.Should().Be(200L);
+        assigned.Offset.Value.Should().Be(200L);
     }
 
     [Fact]
@@ -810,7 +1023,7 @@ public class LedgerClientSubscribeTests
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unassigned>().Subject;
         unassigned.ContractId.Value.Should().Be("00abc");
         unassigned.Source.Should().Be(new SynchronizerId("sync-a"));
-        unassigned.Offset.Should().Be(201L);
+        unassigned.Offset.Value.Should().Be(201L);
     }
 
     [Fact]
@@ -855,15 +1068,12 @@ public class LedgerClientSubscribeTests
             .Which.ContractId.Value.Should().Be("00foo");
         events.OfType<ContractStreamEvent<FooBar>.Unclassified>()
             .Should().ContainSingle()
-            .Which.Offset.Should().Be(300L);
+            .Which.Offset.Value.Should().Be(300L);
     }
 
     [Fact]
-    public async Task SubscribeAsync_for_interface_marker_surfaces_Unassigned_as_Unclassified()
+    public async Task SubscribeAsync_for_interface_marker_surfaces_typed_Unassigned()
     {
-        // Regression for #140: UnassignedEvent has no implemented_interfaces field,
-        // so an interface-typed stream cannot classify it — the projector surfaces
-        // it as Unclassified rather than silently dropping it.
         var interfaceShapedTemplate = new ProtoIdentifier
         {
             PackageId = "iface-pkg",
@@ -887,19 +1097,16 @@ public class LedgerClientSubscribeTests
         var client = CreateClient();
         var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Unassigned>().Should().BeEmpty();
-        var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(400L);
-        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+        var unassigned = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<IFoo>.Unassigned>().Subject;
+        unassigned.ContractId.Value.Should().Be("00iface");
+        unassigned.Source.Id.Should().Be("sync-a");
+        unassigned.Target.Id.Should().Be("sync-b");
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_includes_IncompleteUnassigned_entries()
+    public async Task SubscribeActiveAsync_surfaces_IncompleteUnassigned_as_Created_then_Unclassified()
     {
-        // Multi-synchronizer ACS view: a contract mid-reassignment must still
-        // appear in the snapshot, otherwise consumers see an under-reported
-        // active set.
         StubGetLedgerEnd(offset: 0L);
         var incomplete = new GetActiveContractsResponse
         {
@@ -917,17 +1124,21 @@ public class LedgerClientSubscribeTests
                     TemplateId = FooBarTemplate,
                     Source = "sync-a",
                     Target = "sync-b",
+                    Offset = 500L,
                 },
             },
         };
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
-            .Which.ContractId.Value.Should().Be("00mid");
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
+            .Which.SynchronizerId.Id.Should().Be("sync-a");
+        var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.UnassignedEvent.ToString());
+        unclassified.Offset.Value.Should().Be(500L);
     }
 
     [Fact]
@@ -954,10 +1165,10 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00mid2");
     }
 
@@ -984,12 +1195,12 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(response);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(15L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(15L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
     }
 
     [Fact]
@@ -1021,12 +1232,12 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(16L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(16L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
     }
 
     [Fact]
@@ -1056,12 +1267,12 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(17L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(17L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
     }
 
     [Fact]
@@ -1093,12 +1304,12 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(response);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(21L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.CreatedEvent);
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(21L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
     }
 
     [Fact]
@@ -1125,12 +1336,132 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(incomplete);
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(33L);
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(33L);
         unclassified.Kind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned.ToString());
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_passes_toOffset_through_as_EndInclusive()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(
+            ActAs, fromOffset: LedgerOffset.At(5), toOffset: LedgerOffset.At(20), cancellationToken: TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        captured!.BeginExclusive.Should().Be(5L);
+        captured.HasEndInclusive.Should().BeTrue();
+        captured.EndInclusive.Should().Be(20L);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_leaves_EndInclusive_unset_when_toOffset_is_null()
+    {
+        GetUpdatesRequest? captured = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
+
+        var client = CreateClient();
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(
+            ActAs, fromOffset: LedgerOffset.At(5), cancellationToken: TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        captured!.HasEndInclusive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_bounded_by_toOffset_yields_in_range_events_then_completes_normally()
+    {
+        var first = MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00a", FooBarTemplate, offset: 11L)));
+        var second = MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00b", FooBarTemplate, offset: 19L)));
+        StubGetUpdates(first, second);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(
+            ActAs, fromOffset: LedgerOffset.At(10), toOffset: LedgerOffset.At(20), cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        events.Should().AllBeOfType<ContractStreamEvent<FooBar>.Created>();
+        events.Should().NotContain(e => e is ContractStreamEvent<FooBar>.StreamError,
+            "the server closes a bounded stream cleanly at end_inclusive; the client completes normally, never in error");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_terminal_Checkpoint_carries_resolved_ledger_end()
+    {
+        StubGetLedgerEnd(offset: 64L);
+        StubGetActiveContracts(MakeActiveContract("00a", FooBarTemplate));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>();
+        events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
+            .Which.Offset.Value.Should().Be(64L);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_emits_terminal_Checkpoint_even_for_empty_snapshot()
+    {
+        StubGetLedgerEnd(offset: 55L);
+        StubGetActiveContracts();
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Which
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
+            .Which.Offset.Value.Should().Be(55L);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_uses_supplied_activeAtOffset_without_resolving_ledger_end()
+    {
+        GetActiveContractsRequest? captured = null;
+        StubGetActiveContracts(captureRequest: r => captured = r);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, activeAtOffset: LedgerOffset.At(777), cancellationToken: TestContext.Current.CancellationToken));
+
+        captured.Should().NotBeNull();
+        captured!.ActiveAtOffset.Should().Be(777L);
+        events.Should().ContainSingle().Which
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
+            .Which.Offset.Value.Should().Be(777L);
+        _ = _stateService.DidNotReceive().GetLedgerEndAsync(
+            Arg.Any<GetLedgerEndRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Snapshot_checkpoint_offset_resumes_live_subscription_without_duplication()
+    {
+        StubGetLedgerEnd(offset: 100L);
+        StubGetActiveContracts(MakeActiveContract("00snap", FooBarTemplate, offset: 90L));
+
+        var client = CreateClient();
+        var snapshot = await CollectAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var checkpoint = snapshot[^1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>().Subject;
+        checkpoint.Offset.Value.Should().Be(100L);
+
+        GetUpdatesRequest? resumeRequest = null;
+        StubGetUpdates(MakeGetUpdatesResponse(), capture: r => resumeRequest = r);
+        _ = await CollectAsync(client.SubscribeAsync<FooBar>(
+            ActAs, fromOffset: checkpoint.Offset, cancellationToken: TestContext.Current.CancellationToken));
+
+        resumeRequest.Should().NotBeNull();
+        resumeRequest!.BeginExclusive.Should().Be(100L,
+            "resuming the live stream from the snapshot's terminal checkpoint offset (exclusive) skips exactly the snapshot boundary, so no event is duplicated across the handover");
     }
 
     [Fact]
@@ -1139,9 +1470,9 @@ public class LedgerClientSubscribeTests
         StubGetLedgerEnd(offset: 12345L);
         var client = CreateClient();
 
-        var offset = await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
+        var offset = await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        offset.Should().Be(12345L);
+        offset.Value.Should().Be(12345L);
     }
 
     [Fact]
@@ -1165,8 +1496,8 @@ public class LedgerClientSubscribeTests
         events.OfType<ContractStreamEvent<IFoo>.Archived>().Should().BeEmpty();
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(71L);
-        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+        unclassified.Offset.Value.Should().Be(71L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.ArchivedEvent);
     }
 
     [Fact]
@@ -1191,8 +1522,8 @@ public class LedgerClientSubscribeTests
         events.OfType<ContractStreamEvent<IFoo>.Exercised>().Should().BeEmpty();
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(93L);
-        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+        unclassified.Offset.Value.Should().Be(93L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.ExercisedEvent);
     }
 
     [Fact]
@@ -1210,8 +1541,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(250L);
-        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+        unclassified.Offset.Value.Should().Be(250L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.AssignedEvent);
     }
 
     [Fact]
@@ -1241,8 +1572,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(260L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+        unclassified.Offset.Value.Should().Be(260L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -1267,8 +1598,76 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(261L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.MissingSynchronizerId);
+        unclassified.Offset.Value.Should().Be(261L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_undecodable_Created_as_decode_failure_Unclassified_and_keeps_streaming()
+    {
+        var poison = new Event
+        {
+            Created = new ProtoCreatedEvent
+            {
+                ContractId = "00poison",
+                TemplateId = FooBarTemplate,
+                CreateArguments = new ProtoRecord
+                {
+                    Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
+                },
+                Offset = 5L,
+            },
+        };
+        StubGetUpdates(
+            MakeGetUpdatesResponse(MakeTransaction(poison)),
+            MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00good", FooBarTemplate, offset: 6L))));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        var unclassified = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(5L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00good");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_surfaces_undecodable_Assigned_as_decode_failure_Unclassified_and_keeps_streaming()
+    {
+        var poison = new Reassignment { UpdateId = "u-poison", Offset = 300L };
+        poison.Events.Add(new ReassignmentEvent
+        {
+            Assigned = new AssignedEvent
+            {
+                Source = "sync-a",
+                Target = "sync-b",
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00poison",
+                    TemplateId = FooBarTemplate,
+                    CreateArguments = new ProtoRecord
+                    {
+                        Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
+                    },
+                    Offset = 300L,
+                },
+            },
+        });
+        StubGetUpdates(
+            new GetUpdatesResponse { Reassignment = poison },
+            MakeGetUpdatesResponse(MakeTransaction(MakeCreatedEvent("00good", FooBarTemplate, offset: 301L))));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        var unclassified = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(300L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
+            .Which.ContractId.Value.Should().Be("00good");
     }
 
     [Fact]
@@ -1283,8 +1682,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(1L);
-        unclassified.Kind.Should().NotBeNullOrWhiteSpace();
+        unclassified.Offset.Value.Should().Be(1L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
     private static readonly ProtoIdentifier FooBarTemplate = new()
@@ -1398,11 +1797,9 @@ public class LedgerClientSubscribeTests
             .Returns(call);
     }
 
-    private void StubGetUpdatesCancellable()
+    private void StubGetUpdatesFailureAfterItems(RpcException afterItemsException, params GetUpdatesResponse[] responses)
     {
-        var reader = new FakeStreamReader<GetUpdatesResponse>(
-            Array.Empty<GetUpdatesResponse>(),
-            new OperationCanceledException());
+        var reader = new FakeStreamReader<GetUpdatesResponse>(responses, afterItemsException);
         var call = MakeServerStreamingCall(reader);
 
         _updateService
@@ -1430,6 +1827,27 @@ public class LedgerClientSubscribeTests
                 () => { }));
     }
 
+    private void StubGetLedgerEndCancelledMidFlight(CancellationTokenSource cts)
+    {
+        _stateService
+            .GetLedgerEndAsync(
+                Arg.Any<GetLedgerEndRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                cts.Cancel();
+                var cancelled = new RpcException(new Status(StatusCode.Cancelled, "Call canceled by the client."));
+                return new AsyncUnaryCall<GetLedgerEndResponse>(
+                    Task.FromException<GetLedgerEndResponse>(cancelled),
+                    Task.FromResult(new Metadata()),
+                    () => cancelled.Status,
+                    () => new Metadata(),
+                    () => { });
+            });
+    }
+
     private void StubGetActiveContracts(
         params GetActiveContractsResponse[] responses)
         => StubGetActiveContracts(captureRequest: null, responses);
@@ -1439,6 +1857,21 @@ public class LedgerClientSubscribeTests
         var reader = new FakeStreamReader<GetActiveContractsResponse>(
             Array.Empty<GetActiveContractsResponse>(),
             afterItemsException);
+        var call = MakeServerStreamingCall(reader);
+
+        _stateService
+            .GetActiveContracts(
+                Arg.Any<GetActiveContractsRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call);
+    }
+
+    private void StubGetActiveContractsFailureAfterItems(
+        RpcException afterItemsException, params GetActiveContractsResponse[] responses)
+    {
+        var reader = new FakeStreamReader<GetActiveContractsResponse>(responses, afterItemsException);
         var call = MakeServerStreamingCall(reader);
 
         _stateService
@@ -1487,51 +1920,16 @@ public class LedgerClientSubscribeTests
         return list;
     }
 
-    private sealed class FakeStreamReader<T> : IAsyncStreamReader<T>
+    private static async Task<List<AcsSnapshotEntry<T>>> CollectActiveAsync<T>(
+        IAsyncEnumerable<AcsSnapshotEntry<T>> snapshot)
+        where T : Daml.Runtime.IDamlType
     {
-        private readonly IReadOnlyList<T> _items;
-        private readonly Exception? _afterItemsException;
-        private int _index = -1;
-        private T _current = default!;
-
-        public FakeStreamReader(IEnumerable<T> items, Exception? afterItemsException = null)
-        {
-            _items = items.ToList();
-            _afterItemsException = afterItemsException;
-        }
-
-        public T Current => _current;
-
-        public Task<bool> MoveNext(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            _index++;
-            if (_index < _items.Count)
-            {
-                _current = _items[_index];
-                return Task.FromResult(true);
-            }
-
-            if (_afterItemsException is not null)
-            {
-                return Task.FromException<bool>(_afterItemsException);
-            }
-
-            return Task.FromResult(false);
-        }
-    }
-
-    internal sealed record FooBar(string Owner) : ITemplate
-    {
-        public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
-        public static string PackageId => "test-pkg";
-        public static string PackageName => "test-package";
-        public static Version PackageVersion { get; } = new(0, 1, 0);
-        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
-
-        public DamlRecord ToRecord() => DamlRecord.Create(
-            DamlField.Create("owner", new DamlParty(Owner)));
+        var events = await CollectAsync(snapshot);
+        events.Should().NotBeEmpty("a success-path ACS snapshot always terminates with a Checkpoint, even when empty");
+        events[^1].Should().BeOfType<AcsSnapshotEntry<T>.Checkpoint>(
+            "the snapshot's terminal event carries its effective active-at offset");
+        events.RemoveAt(events.Count - 1);
+        return events;
     }
 
     internal sealed record IFoo : IDamlInterface

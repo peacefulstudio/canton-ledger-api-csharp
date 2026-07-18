@@ -122,4 +122,68 @@ public class ReassignmentInterfaceFilterConformanceTests
         Assert.Equal(wildcardUnassigned.Source, interfaceFilteredUnassigned.Source);
         Assert.Equal(wildcardUnassigned.Target, interfaceFilteredUnassigned.Target);
     }
+
+    [Fact]
+    public async Task Reassignment_round_trip_surfaces_typed_Unassigned_and_Assigned_through_SubscribeAsync()
+    {
+        if (!EndpointDiscovery.IsLocalnetAvailable())
+        {
+            Assert.Skip(SkipMessage);
+        }
+
+        await using var fixture = LocalnetFixture.FromEnvironment();
+        await using var harness = ReassignmentHarness.FromFixture(fixture);
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await harness.UploadRichTypesDarAsync(cancellationToken);
+
+        var synchronizers = await harness.ParticipantSynchronizersAsync(cancellationToken);
+        if (synchronizers.Count < 2)
+        {
+            Assert.Skip(SingleSyncSkipMessage);
+        }
+
+        var sourceSynchronizerId = synchronizers[0].SynchronizerId;
+        var targetSynchronizerId = synchronizers[1].SynchronizerId;
+
+        var issuer = await harness.HostPartyOnBothSynchronizersAsync(
+            PartyIdHint, sourceSynchronizerId, targetSynchronizerId, cancellationToken);
+        var contractId = await harness.CreateAssetAsync(
+            issuer, sourceSynchronizerId, AssetAmount, cancellationToken);
+
+        var beginExclusiveOffset = await harness.LedgerEndAsync(cancellationToken);
+
+        await harness.UnassignAsync(
+            issuer, contractId, sourceSynchronizerId, targetSynchronizerId, cancellationToken);
+        var unassigned = await harness.ObserveUnassignedAsync(
+            ReassignmentEventFormats.Wildcard(issuer),
+            beginExclusiveOffset,
+            contractId,
+            ObservationTimeout,
+            cancellationToken);
+        Assert.NotNull(unassigned);
+
+        await harness.AssignAsync(
+            issuer, unassigned.ReassignmentId, sourceSynchronizerId, targetSynchronizerId, cancellationToken);
+        var assigned = await harness.ObserveAssignedAsync(
+            ReassignmentEventFormats.Wildcard(issuer),
+            beginExclusiveOffset,
+            contractId,
+            ObservationTimeout,
+            cancellationToken);
+        Assert.NotNull(assigned);
+
+        Assert.Equal(unassigned.ReassignmentCounter, assigned.ReassignmentCounter);
+
+        var typed = await harness.ObserveTypedReassignmentAsync<Asset>(
+            issuer, beginExclusiveOffset, contractId, ObservationTimeout, cancellationToken);
+
+        Assert.NotNull(typed.Unassigned);
+        Assert.NotNull(typed.Assigned);
+        Assert.Equal(contractId, typed.Unassigned.ContractId.Value);
+        Assert.Equal(sourceSynchronizerId, typed.Unassigned.Source.Id);
+        Assert.Equal(targetSynchronizerId, typed.Unassigned.Target.Id);
+        Assert.Equal(contractId, typed.Assigned.ContractId.Value);
+        Assert.Equal(targetSynchronizerId, typed.Assigned.Target.Id);
+    }
 }

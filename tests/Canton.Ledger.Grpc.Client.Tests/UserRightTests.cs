@@ -25,29 +25,23 @@ public class UserRightTests
     }
 
     [Fact]
-    public void ParticipantAdmin_right_can_be_created()
+    public void UserRight_equality_distinguishes_parties_and_party_variants()
     {
-        var right = new UserRight.ParticipantAdmin();
+        UserRight aliceActAs = new UserRight.ActAs("Alice::1234");
 
-        right.Should().BeOfType<UserRight.ParticipantAdmin>();
+        aliceActAs.Should().Be(new UserRight.ActAs("Alice::1234"));
+        aliceActAs.Should().NotBe(new UserRight.ActAs("Bob::5678"));
+        aliceActAs.Should().NotBe(new UserRight.ReadAs("Alice::1234"),
+            "ActAs and ReadAs are distinct rights even for the same party");
     }
 
     [Fact]
-    public void IdentityProviderAdmin_right_can_be_created()
+    public void UserRight_equality_distinguishes_admin_marker_variants()
     {
-        var right = new UserRight.IdentityProviderAdmin();
+        UserRight participantAdmin = new UserRight.ParticipantAdmin();
 
-        right.Should().BeOfType<UserRight.IdentityProviderAdmin>();
-    }
-
-    [Fact]
-    public void UserRight_supports_equality()
-    {
-        var right1 = new UserRight.ActAs("Alice::1234");
-        var right2 = new UserRight.ActAs("Alice::1234");
-        var right3 = new UserRight.ActAs("Bob::5678");
-
-        right1.Should().Be(right2);
-        right1.Should().NotBe(right3);
+        participantAdmin.Should().Be(new UserRight.ParticipantAdmin());
+        participantAdmin.Should().NotBe(new UserRight.IdentityProviderAdmin(),
+            "ParticipantAdmin and IdentityProviderAdmin are distinct rights, not interchangeable markers");
     }
 }

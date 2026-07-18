@@ -2,21 +2,22 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![.NET](https://img.shields.io/badge/.NET-10.0-white.svg)](https://dotnet.microsoft.com/)
-<!-- Static badge — repo is private, so shields.io's `github/v/release/...` dynamic endpoint can't read it. Bump on each release. -->
-[![Release](https://img.shields.io/badge/Release-v0.1.4-blue.svg)](https://github.com/peacefulstudio/canton-ledger-api-csharp/releases/latest)
+[![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Grpc.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Grpc.Client/)
 
 C# client libraries for interacting with Canton participant nodes via the Ledger API (gRPC) and Participant Query Store (PQS).
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| [`Canton.Ledger.Grpc`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc) | Generated gRPC stubs from Canton Ledger API protos |
-| [`Canton.Ledger.Grpc.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Grpc.Client) | High-level client with `Daml.Runtime` integration |
-| [`Canton.Ledger.Pqs.Client`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Pqs.Client) | Type-safe query client for the Participant Query Store (PQS) |
-| [`Canton.Ledger.Kernel`](https://github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget/Canton.Ledger.Kernel) | Transport-neutral client kernel the clients consume as peers — token providers (`ITokenProvider`, OAuth2 client-credentials/static/unauthenticated), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline |
+All packages are versioned in lockstep and published to [nuget.org](https://www.nuget.org/packages?q=Canton.Ledger).
 
-Packages are published to [GitHub Packages](https://github.com/orgs/peacefulstudio/packages?repo_name=canton-ledger-api-csharp).
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`Canton.Ledger.Grpc`](https://www.nuget.org/packages/Canton.Ledger.Grpc/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Grpc?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Grpc/) | Generated gRPC stubs from Canton Ledger API protos |
+| [`Canton.Ledger.Grpc.Client`](https://www.nuget.org/packages/Canton.Ledger.Grpc.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Grpc.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Grpc.Client/) | High-level client with `Daml.Runtime` integration |
+| [`Canton.Ledger.Pqs.Client`](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Pqs.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | Type-safe query client for the Participant Query Store (PQS) |
+| [`Canton.Ledger.Kernel`](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Kernel?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | Transport-neutral client kernel the clients consume as peers — token providers (`ITokenProvider`, OAuth2 client-credentials/static/unauthenticated), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline |
+| [`Canton.Ledger.OpenTelemetry`](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.OpenTelemetry?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | OpenTelemetry SDK integration — registers the `LedgerClient`/`AdminClient`/`PqsClient` `ActivitySource`s (plus Npgsql tracing) with a single `AddCantonLedgerInstrumentation()` call |
+| [`Daml.Runtime.Grpc`](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | [![NuGet](https://img.shields.io/nuget/v/Daml.Runtime.Grpc?include_prereleases)](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | Bridge between proto `Value`/`Record` and `Daml.Runtime` `DamlValue`/`DamlRecord` |
 
 ## Quick Start
 
@@ -34,50 +35,66 @@ dotnet add package Canton.Ledger.Pqs.Client
 
 ```csharp
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Kernel.Authentication;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 
-// Configure the client
+// Configure the client (auth is supplied via an ITokenProvider, not a token string)
 var options = new LedgerClientOptions
 {
     GrpcAddress = "https://localhost:5001",
-    AccessToken = "your-jwt-token"  // Optional
 };
 
-// Create clients
-using var ledgerClient = new LedgerClient(options);
-using var adminClient = new AdminClient(options);
+// ITokenProvider.None runs unauthenticated — for local dev with an open participant.
+// For production, register a token provider (see Authentication below) or use the
+// dependency-injection path, which injects the ITokenProvider for you.
+using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
+using var adminClient = new AdminClient(options, ITokenProvider.None);
 
 // Allocate a party
 var party = await adminClient.AllocatePartyAsync("alice");
-Console.WriteLine($"Party: {party.Party}");
+var submitter = new Party(party.Party);
 
-// Create a contract (using generated types from Daml.Codegen.CSharp)
-var contractId = await ledgerClient.CreateAsync(
+// Create a contract from a generated Daml template type.
+// TryCreateAsync returns ExerciseOutcome<ContractId<T>> — switch on it instead of catching.
+var outcome = await ledgerClient.TryCreateAsync(
     new MyTemplate("field1", "field2"),
-    actAs: party.Party);
+    submitter);
+
+var contractId = outcome switch
+{
+    ExerciseOutcome<ContractId<MyTemplate>>.One ok => ok.Result,
+    ExerciseOutcome<ContractId<MyTemplate>>.DamlError err => throw new InvalidOperationException(err.ErrorId),
+    _ => throw new InvalidOperationException(outcome.GetType().Name),
+};
 ```
 
 ### PQS Client Usage
 
 ```csharp
 using Canton.Ledger.Pqs.Client;
+using Daml.Runtime.Contracts;
 
-// Configure the PQS client
+// Configure the PQS client (single-argument constructor)
 var pqsOptions = new PqsClientOptions
 {
     ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs"
 };
-var pqsClient = new PqsClient(pqsOptions, logger);
+var pqsClient = new PqsClient(pqsOptions);
 
 // Query all active contracts of a template type
 var agreements = await pqsClient.QueryAsync<Agreement>();
 
-// Query with type-safe filters
+// Query with type-safe filters — field names resolve from codegen [DamlField] metadata
+var partyId = "party::alice";
 var filtered = await pqsClient.QueryAsync<Agreement>(
     Filter.Or(
         Filter.Field<Agreement>(a => a.Initiator, partyId),
         Filter.Field<Agreement>(a => a.Counterparty, partyId)));
 
 // Fetch a single contract by ID
+var contractId = new ContractId<Agreement>("...");
 var contract = await pqsClient.FetchByIdAsync<Agreement>(contractId);
 
 // Check if a contract exists
@@ -147,17 +164,43 @@ These packages integrate seamlessly with [Daml.Codegen.CSharp](https://github.co
 // Generate C# from your Daml contracts
 // daml-codegen-csharp ./my-contracts.dar -o ./Generated
 
-// Use generated types with the ledger client
-var asset = new Asset(owner: party.Party, name: "My Asset", value: 100m);
-var contractId = await ledgerClient.CreateAsync(asset, actAs: party.Party);
+using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Kernel.Authentication;
+using Daml.Runtime.Commands;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 
-// Exercise choices
-var command = ExerciseCommand.For(contractId, Asset.Transfer.Create("Bob::..."));
-await ledgerClient.ExerciseAsync(command, actAs: party.Party);
+var options = new LedgerClientOptions { GrpcAddress = "https://localhost:5001" };
+using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
+
+var owner = new Party("Alice::1234...");
+
+// Create a contract from a generated template type
+var asset = new Asset(owner, "My Asset", 100m);
+var createOutcome = await ledgerClient.TryCreateAsync(asset, owner);
+var contractId = createOutcome switch
+{
+    ExerciseOutcome<ContractId<Asset>>.One ok => ok.Result,
+    _ => throw new InvalidOperationException(createOutcome.GetType().Name),
+};
+
+// Exercise a choice — ExerciseCommand.For takes the contract id, the choice name,
+// and the encoded choice argument (a DamlValue, here a record via ToRecord()).
+var command = ExerciseCommand.For(
+    contractId,
+    new ChoiceName("Transfer"),
+    new Asset.Transfer(NewOwner: "Bob::5678...").ToRecord());
+
+var exerciseOutcome = await ledgerClient.TryExerciseAsync<ContractId<Asset>>(command, owner);
 
 // Query the same contracts via PQS
+var pqsClient = new PqsClient(new PqsClientOptions
+{
+    ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs",
+});
 var assets = await pqsClient.QueryAsync<Asset>(
-    Filter.Field<Asset>(a => a.Owner, party.Party));
+    Filter.Field<Asset>(a => a.Owner, owner.Id));
 ```
 
 ## Architecture
@@ -170,7 +213,11 @@ This library targets Canton Ledger API v2. The proto files are automatically dow
 
 | Library Version | Canton Version |
 |-----------------|----------------|
+| 0.4.x | 3.4.x |
+| 0.2.x | 3.4.x |
 | 0.1.x | 3.4.x |
+
+From `0.4.x`, the `Canton.Ledger.*` package minor tracks the `Daml.Runtime` / `Daml.Ledger.Abstractions` minor line — package `0.N.x` embeds `Daml.* 0.N.x` — so the Daml runtime line is legible straight off the package version (the `0.3.x` line is skipped to realign). Patch and `-preview.N` suffixes evolve independently. See [ADR 0013](docs/adr/0013-package-version-tracks-daml-line.md).
 
 ## Building from Source
 

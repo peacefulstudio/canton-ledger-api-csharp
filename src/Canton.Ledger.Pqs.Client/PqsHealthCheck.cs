@@ -3,23 +3,16 @@
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Pqs.Client;
 
-internal sealed partial class PqsHealthCheck : IHealthCheck
+internal sealed partial class PqsHealthCheck(IOptions<PqsClientOptions> options, ILogger<PqsHealthCheck>? logger = null) : IHealthCheck
 {
-    private static readonly ILogger<PqsHealthCheck> Logger = StaticLoggerFactory.Create<PqsHealthCheck>();
-
-    private readonly PqsClientOptions _options;
-
-    public PqsHealthCheck(IOptions<PqsClientOptions> options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        _options = options.Value;
-    }
+    private readonly PqsClientOptions _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
+    private readonly ILogger<PqsHealthCheck> _logger = logger ?? NullLogger<PqsHealthCheck>.Instance;
 
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -27,21 +20,27 @@ internal sealed partial class PqsHealthCheck : IHealthCheck
     {
         try
         {
-            await using var connection = new NpgsqlConnection(_options.ConnectionString);
-            await connection.OpenAsync(cancellationToken);
+            var connection = new NpgsqlConnection(_options.ConnectionString);
+            await using (connection.ConfigureAwait(false))
+            {
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-            await using var command = new NpgsqlCommand("SELECT 1", connection);
-            await command.ExecuteScalarAsync(cancellationToken);
+                var command = new NpgsqlCommand("SELECT 1", connection);
+                await using (command.ConfigureAwait(false))
+                {
+                    await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
 
-            LogHealthy(Logger, connection.Database ?? "unknown");
+                    LogHealthy(_logger, connection.Database ?? "unknown");
 
-            return HealthCheckResult.Healthy(
-                description: "PQS database is reachable.",
-                data: new Dictionary<string, object> { ["database"] = connection.Database ?? "unknown" });
+                    return HealthCheckResult.Healthy(
+                        description: "PQS database is reachable.",
+                        data: new Dictionary<string, object> { ["database"] = connection.Database ?? "unknown" });
+                }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            LogUnhealthy(Logger, ex);
+            LogUnhealthy(_logger, ex);
 
             return new HealthCheckResult(
                 context.Registration.FailureStatus,

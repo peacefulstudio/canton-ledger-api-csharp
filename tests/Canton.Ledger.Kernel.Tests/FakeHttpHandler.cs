@@ -12,6 +12,7 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
     private HttpStatusCode _statusCode = HttpStatusCode.OK;
     private string _responseBody = """{"access_token":"fake-token","expires_in":3600,"token_type":"Bearer"}""";
     private readonly ConcurrentQueue<string> _responseSequence = new();
+    private TimeSpan? _delay;
 
     public HttpRequestMessage? LastRequest { get; private set; }
     public string? LastRequestBody { get; private set; }
@@ -32,6 +33,12 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         return this;
     }
 
+    public FakeHttpHandler WithDelay(TimeSpan delay)
+    {
+        _delay = delay;
+        return this;
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -40,6 +47,9 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         if (request.Content is not null)
             LastRequestBody = await request.Content.ReadAsStringAsync(cancellationToken);
         Interlocked.Increment(ref _callCount);
+
+        if (_delay is { } delay)
+            await Task.Delay(delay, cancellationToken);
 
         var body = _responseSequence.TryDequeue(out var next) ? next : _responseBody;
 

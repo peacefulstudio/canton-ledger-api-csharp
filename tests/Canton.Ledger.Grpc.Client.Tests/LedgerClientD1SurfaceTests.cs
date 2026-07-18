@@ -11,6 +11,7 @@ using NSubstitute;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using Status = Grpc.Core.Status;
@@ -78,7 +79,7 @@ public class LedgerClientD1SurfaceTests
         var synchronizer = synchronizers.Should().ContainSingle().Subject;
         synchronizer.SynchronizerAlias.Should().Be("global");
         synchronizer.SynchronizerId.Should().Be("sync::global");
-        synchronizer.Permission.Should().Be(ParticipantPermission.Submission.ToString());
+        synchronizer.Permission.Should().Be(SynchronizerPermissionLevel.Submission);
     }
 
     [Fact]
@@ -229,6 +230,46 @@ public class LedgerClientD1SurfaceTests
     }
 
     [Fact]
+    public async Task GetUpdateByOffsetAsync_throws_descriptive_malformed_response_error_when_created_event_misses_template_id()
+    {
+        var transaction = new Transaction { UpdateId = "update-1", Offset = 42L };
+        transaction.Events.Add(new Event
+        {
+            Created = new ProtoCreatedEvent { ContractId = "00broken", CreateArguments = new ProtoRecord() },
+        });
+        StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
+
+        var client = CreateClient();
+        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Malformed response from ledger*offset 42*template_id*");
+    }
+
+    [Fact]
+    public async Task GetUpdateByOffsetAsync_names_lookup_offset_when_transaction_value_cannot_be_decoded()
+    {
+        var transaction = new Transaction { UpdateId = "update-1", Offset = 42L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00exer",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Accept",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value(),
+            },
+        });
+        StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
+
+        var client = CreateClient();
+        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Malformed response from ledger*offset 42*");
+    }
+
+    [Fact]
     public async Task GetUpdateByOffsetAsync_throws_when_update_is_not_a_transaction()
     {
         StubGetUpdateByOffset(new GetUpdateResponse { Reassignment = new Reassignment() });
@@ -263,6 +304,23 @@ public class LedgerClientD1SurfaceTests
 
         captured.Should().NotBeNull();
         captured!.UpdateId.Should().Be("update-xyz");
+    }
+
+    [Fact]
+    public async Task GetUpdateByIdAsync_throws_descriptive_malformed_response_error_when_exercised_event_misses_template_id()
+    {
+        var transaction = new Transaction { UpdateId = "update-2", Offset = 7L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent { ContractId = "00broken", Choice = "Accept" },
+        });
+        StubGetUpdateById(new GetUpdateResponse { Transaction = transaction });
+
+        var client = CreateClient();
+        var act = () => client.GetUpdateByIdAsync("update-2", ActAs, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Malformed response from ledger*update-2*template_id*");
     }
 
     [Fact]

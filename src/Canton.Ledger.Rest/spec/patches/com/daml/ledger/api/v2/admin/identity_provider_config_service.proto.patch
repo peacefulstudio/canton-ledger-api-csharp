@@ -1,0 +1,61 @@
+--- a/com/daml/ledger/api/v2/admin/identity_provider_config_service.proto
++++ b/com/daml/ledger/api/v2/admin/identity_provider_config_service.proto
+@@ -5,8 +5,10 @@
+ 
+ package com.daml.ledger.api.v2.admin;
+ 
++import "google/api/annotations.proto";
+ import "google/protobuf/field_mask.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/admin;adminv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
+ option java_outer_classname = "IdentityProviderConfigServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2.admin";
+@@ -37,20 +39,42 @@
+ service IdentityProviderConfigService {
+   // Create a new identity provider configuration.
+   // The request will fail if the maximum allowed number of separate configurations is reached.
+-  rpc CreateIdentityProviderConfig(CreateIdentityProviderConfigRequest) returns (CreateIdentityProviderConfigResponse);
++  rpc CreateIdentityProviderConfig(CreateIdentityProviderConfigRequest) returns (CreateIdentityProviderConfigResponse) {
++    option (google.api.http) = {
++      post: "/v2/idps"
++      body: "*"
++    };
++  }
+ 
+   // Get the identity provider configuration data by id.
+-  rpc GetIdentityProviderConfig(GetIdentityProviderConfigRequest) returns (GetIdentityProviderConfigResponse);
++  rpc GetIdentityProviderConfig(GetIdentityProviderConfigRequest) returns (GetIdentityProviderConfigResponse) {
++    option (google.api.http) = {
++      get: "/v2/idps/{identity_provider_id}"
++    };
++  }
+ 
+   // Update selected modifiable attribute of an identity provider config resource described
+   // by the ``IdentityProviderConfig`` message.
+-  rpc UpdateIdentityProviderConfig(UpdateIdentityProviderConfigRequest) returns (UpdateIdentityProviderConfigResponse);
++  rpc UpdateIdentityProviderConfig(UpdateIdentityProviderConfigRequest) returns (UpdateIdentityProviderConfigResponse) {
++    option (google.api.http) = {
++      patch: "/v2/idps/{identity_provider_config.identity_provider_id}"
++      body: "*"
++    };
++  }
+ 
+   // List all existing identity provider configurations.
+-  rpc ListIdentityProviderConfigs(ListIdentityProviderConfigsRequest) returns (ListIdentityProviderConfigsResponse);
++  rpc ListIdentityProviderConfigs(ListIdentityProviderConfigsRequest) returns (ListIdentityProviderConfigsResponse) {
++    option (google.api.http) = {
++      get: "/v2/idps"
++    };
++  }
+ 
+   // Delete an existing identity provider configuration.
+-  rpc DeleteIdentityProviderConfig(DeleteIdentityProviderConfigRequest) returns (DeleteIdentityProviderConfigResponse);
++  rpc DeleteIdentityProviderConfig(DeleteIdentityProviderConfigRequest) returns (DeleteIdentityProviderConfigResponse) {
++    option (google.api.http) = {
++      delete: "/v2/idps/{identity_provider_id}"
++    };
++  }
+ }
+ 
+ message IdentityProviderConfig {

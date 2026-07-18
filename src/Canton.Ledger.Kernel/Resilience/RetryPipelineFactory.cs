@@ -46,7 +46,8 @@ public static class RetryPipelineFactory
         {
             MaxRetryAttempts = options.MaxRetryAttempts,
             Delay = options.Delay,
-            BackoffType = DelayBackoffType.Exponential
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true
         };
 
         if (shouldRetry is not null)

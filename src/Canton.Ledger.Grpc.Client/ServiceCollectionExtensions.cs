@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.DependencyInjection;
 using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,8 @@ namespace Canton.Ledger.Grpc.Client;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Convention-based registration for both <see cref="ILedgerClient"/> and <see cref="IAdminClient"/>
+    /// Convention-based registration for <see cref="ICantonLedgerClient"/> (also resolvable as the base
+    /// <see cref="ILedgerClient"/>, backed by the same singleton) and <see cref="IAdminClient"/>
     /// using canonical <c>Canton:Ledger</c> and <c>Canton:Auth</c> configuration sections.
     /// </summary>
     /// <remarks>
@@ -47,7 +49,7 @@ public static class ServiceCollectionExtensions
             services.AddCantonAuth(auth);
 
         AddLedgerOptions(services, configuration.GetSection("Canton:Ledger"));
-        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+        AddLedgerClientRegistration(services);
         services.TryAddSingleton<IAdminClient, AdminClient>();
 
         return services;
@@ -68,7 +70,8 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers <see cref="ILedgerClient"/> as a singleton and binds <see cref="LedgerClientOptions"/>
+    /// Registers <see cref="ICantonLedgerClient"/> as a singleton — also resolvable as the base
+    /// <see cref="ILedgerClient"/>, backed by the same singleton — and binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section. Options are validated at startup.
     /// </summary>
     /// <remarks>
@@ -89,13 +92,14 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         AddLedgerOptions(services, configuration);
-        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+        AddLedgerClientRegistration(services);
 
         return services;
     }
 
     /// <summary>
-    /// Registers <see cref="ILedgerClient"/> as a singleton and configures <see cref="LedgerClientOptions"/>
+    /// Registers <see cref="ICantonLedgerClient"/> as a singleton — also resolvable as the base
+    /// <see cref="ILedgerClient"/>, backed by the same singleton — and configures <see cref="LedgerClientOptions"/>
     /// using the provided action delegate. Options are validated at startup.
     /// </summary>
     /// <param name="services">The service collection.</param>
@@ -107,13 +111,14 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configure);
 
         AddLedgerOptions(services, configure);
-        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+        AddLedgerClientRegistration(services);
 
         return services;
     }
 
     /// <summary>
-    /// Registers <see cref="ILedgerClient"/> as a singleton, binds <see cref="LedgerClientOptions"/>
+    /// Registers <see cref="ICantonLedgerClient"/> as a singleton — also resolvable as the base
+    /// <see cref="ILedgerClient"/>, backed by the same singleton — binds <see cref="LedgerClientOptions"/>
     /// from the provided configuration section, and auto-registers <see cref="ITokenProvider"/> as a
     /// <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsProvider"/> from the auth configuration section.
     /// If an <see cref="ITokenProvider"/> is already registered, the existing registration is kept.
@@ -139,7 +144,7 @@ public static class ServiceCollectionExtensions
 
         services.AddCantonAuth(authConfiguration);
         AddLedgerOptions(services, configuration);
-        services.TryAddSingleton<ILedgerClient, LedgerClient>();
+        AddLedgerClientRegistration(services);
 
         return services;
     }
@@ -224,22 +229,24 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    private static void AddLedgerClientRegistration(IServiceCollection services)
+    {
+        services.TryAddSingleton<ICantonLedgerClient, LedgerClient>();
+        services.TryAddSingleton<ILedgerClient>(sp => sp.GetRequiredService<ICantonLedgerClient>());
+    }
+
     private static void AddLedgerOptions(IServiceCollection services, IConfiguration configuration)
     {
-        services.AddOptions<LedgerClientOptions>()
-            .Bind(configuration)
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        services.AddValidatedOptions<LedgerClientOptions>(configuration)
+            .ValidateDataAnnotations();
 
         services.TryAddSingleton(ITokenProvider.None);
     }
 
     private static void AddLedgerOptions(IServiceCollection services, Action<LedgerClientOptions> configure)
     {
-        services.AddOptions<LedgerClientOptions>()
-            .Configure(configure)
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        services.AddValidatedOptions<LedgerClientOptions>(configure)
+            .ValidateDataAnnotations();
 
         services.TryAddSingleton(ITokenProvider.None);
     }

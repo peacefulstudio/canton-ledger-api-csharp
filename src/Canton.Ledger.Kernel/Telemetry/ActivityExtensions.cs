@@ -3,13 +3,13 @@
 
 using System.Diagnostics;
 
-namespace Canton.Ledger.Pqs.Client;
+namespace Canton.Ledger.Kernel.Telemetry;
 
-internal static class ActivityHelper
+internal static class ActivityExtensions
 {
-    internal const string ErrorType = "error.type";
+    internal const string ErrorType = SemanticConventions.ErrorType;
 
-    public static void RecordException(this Activity? activity, Exception exception)
+    internal static void RecordException(this Activity? activity, Exception exception)
     {
         if (activity is null) return;
 

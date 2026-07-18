@@ -4,6 +4,7 @@
     <PackageId>Daml.Runtime.Grpc</PackageId>
     <Description>Bidirectional conversion between Daml.Runtime value types and Canton Ledger API v2 protobuf messages.</Description>
     <PackageTags>canton;daml;ledger;grpc;protobuf;serialization</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
@@ -13,10 +14,15 @@
 
   <ItemGroup>
     <PackageReference Include="Daml.Runtime" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" VersionOverride="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Canton.Ledger.Grpc\Canton.Ledger.Grpc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

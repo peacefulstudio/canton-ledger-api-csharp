@@ -21,7 +21,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Peaceful.Extensions.Logging" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Microsoft.Extensions.Options" />

@@ -199,13 +199,85 @@ public class RichTypesRoundTripTests
         Assert.Equal(1.00m, readBack.Fee);
     }
 
-    private static async Task<ContractStreamEvent<RichRecord>.Created?> ReadBackAsync(
+    [Fact]
+    public async Task TryExerciseAsync_exercises_the_Relabel_choice_directly_against_a_real_node()
+    {
+        if (!EndpointDiscovery.IsLocalnetAvailable())
+        {
+            Assert.Skip(SkipMessage);
+        }
+
+        await using var fixture = LocalnetFixture.FromEnvironment();
+
+        var darOutcome = await fixture.UploadDarAsync(DarPath(), TestContext.Current.CancellationToken);
+        Assert.True(
+            darOutcome is DarUploadOutcome.Uploaded or DarUploadOutcome.AlreadyKnown,
+            $"Unexpected DAR upload outcome: {darOutcome}");
+
+        var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
+        var owner = new Party(party.PartyId);
+        var userId = fixture.ValidatorUserId;
+        await fixture.GrantUserRightsAsync(
+            userId,
+            actAs: new[] { party.PartyId },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        using var client = NewClient(fixture, userId);
+
+        var markerOutcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
+        var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
+
+        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var assetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(assetOutcome).Result;
+        var holdingCid = new ContractId<IHolding>(assetCid.Value);
+
+        var payload = new RichRecord(
+            Owner: owner,
+            Count: 1L,
+            Amount: 1.00m,
+            Label: "before-direct-exercise",
+            Active: true,
+            AsOf: new DateOnly(2026, 5, 29),
+            ObservedAt: DateTimeOffset.UnixEpoch,
+            Note: null,
+            Tags: Array.Empty<string>(),
+            Attributes: new Dictionary<string, string>(),
+            Marker: markerCid,
+            HoldingCid: holdingCid,
+            HoldingCids: new[] { holdingCid },
+            Profile: new Profile(Nickname: "cdg", Level: 1L),
+            Outcome: new Outcome.Pending(),
+            Fee: 1.00m);
+
+        var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
+        var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
+
+        var command = new ExerciseCommand(
+            RichRecord.TemplateId,
+            createdCid,
+            new ChoiceName("Relabel"),
+            new RichRecord.Relabel(NewLabel: "renamed-direct").ToRecord());
+
+        var exerciseOutcome = await client.TryExerciseAsync<ContractId<RichRecord>>(
+            command, owner, cancellationToken: TestContext.Current.CancellationToken);
+
+        var relabelledCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(exerciseOutcome).Result;
+        Assert.False(string.IsNullOrWhiteSpace(relabelledCid.Value), "relabelled ContractId is empty");
+        Assert.NotEqual(createdCid.Value, relabelledCid.Value);
+
+        var seen = await ReadBackAsync(client, owner, relabelledCid.Value);
+        Assert.NotNull(seen);
+        var readBack = RichRecord.FromRecord(seen!.Payload);
+        Assert.Equal("renamed-direct", readBack.Label);
+    }
+
+    private static async Task<AcsSnapshotEntry<RichRecord>.Created?> ReadBackAsync(
         LedgerClient client, Party owner, string contractIdValue)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner, cts.Token))
+        await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner, cancellationToken: cts.Token))
         {
-            if (evt is ContractStreamEvent<RichRecord>.Created created && created.ContractId.Value == contractIdValue)
+            if (evt is AcsSnapshotEntry<RichRecord>.Created created && created.ContractId.Value == contractIdValue)
             {
                 return created;
             }

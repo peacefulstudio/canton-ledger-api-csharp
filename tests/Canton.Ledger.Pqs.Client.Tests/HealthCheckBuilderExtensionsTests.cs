@@ -4,6 +4,7 @@
 using AwesomeAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -16,6 +17,31 @@ public class HealthCheckBuilderExtensionsTests
         var provider = services.BuildServiceProvider();
         return provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
             .Value.Registrations.Single(r => r.Name == name);
+    }
+
+    [Fact]
+    public async Task AddPqsClient_health_check_logs_the_failed_probe_to_the_registered_ILoggerFactory()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = new ServiceCollection();
+        services.AddSingleton<ILoggerFactory>(loggerFactory);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+        services.AddPqsClient(o => o.ConnectionString = "not a valid connection string");
+        services.AddHealthChecks().AddPqsClient();
+
+        var provider = services.BuildServiceProvider();
+        var registration = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
+            .Value.Registrations.Single();
+        var healthCheck = registration.Factory(provider);
+
+        await healthCheck.CheckHealthAsync(
+            new HealthCheckContext { Registration = registration },
+            TestContext.Current.CancellationToken);
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(PqsHealthCheck).FullName
+            && r.Level == LogLevel.Warning
+            && r.Message.Contains("PQS health check failed"));
     }
 
     [Fact]

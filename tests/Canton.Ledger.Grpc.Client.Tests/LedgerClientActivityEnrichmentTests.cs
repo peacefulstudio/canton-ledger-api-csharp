@@ -195,7 +195,7 @@ public class LedgerClientActivityEnrichmentTests
         ActivitySource.AddActivityListener(listener);
 
         var client = CreateClientWithStateService();
-        await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
+        await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = sharedActivities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonOffset) as long? == offset)
@@ -230,11 +230,83 @@ public class LedgerClientActivityEnrichmentTests
 
         var client = CreateClientWithStateService();
 
-        var act = () => client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
+        var act = () => client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<RpcException>();
 
         var activity = sharedActivities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
+    }
+
+    [Fact]
+    public async Task SubmitAndWaitAsync_tags_the_activity_with_grpc_semconv()
+    {
+        _commandService
+            .SubmitAndWaitAsync(
+                Arg.Any<SubmitAndWaitRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitResponse>(
+                Task.FromResult(new SubmitAndWaitResponse { UpdateId = "update-1", CompletionOffset = 1L }),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
+        using var _ = listener;
+        ActivitySource.AddActivityListener(listener);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
+            .WithActAs(ActAs);
+
+        var client = CreateClient();
+        await client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = sharedActivities.Should()
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "SubmitAndWait")
+            .Subject;
+        activity.Kind.Should().Be(ActivityKind.Client);
+        activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
+        activity.GetTagItem(ActivityHelper.RpcService).Should().Be("com.daml.ledger.api.v2.CommandService");
+        activity.GetTagItem(ActivityHelper.ServerAddress).Should().Be("localhost");
+        activity.GetTagItem(ActivityHelper.ServerPort).Should().Be(5001);
+    }
+
+    [Fact]
+    public async Task SubmitAndWaitAsync_records_an_RpcException_as_an_activity_error()
+    {
+        var detail = $"network down {Guid.NewGuid()}";
+        var ex = new RpcException(new Status(StatusCode.Unavailable, detail));
+        _commandService
+            .SubmitAndWaitAsync(
+                Arg.Any<SubmitAndWaitRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitResponse>(
+                Task.FromException<SubmitAndWaitResponse>(ex),
+                Task.FromResult(new Metadata()),
+                () => ex.Status,
+                () => new Metadata(),
+                () => { }));
+
+        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
+        using var _ = listener;
+        ActivitySource.AddActivityListener(listener);
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
+            .WithActAs(ActAs);
+
+        var client = CreateClient();
+
+        var act = () => client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
+        await act.Should().ThrowAsync<RpcException>();
+
+        var activity = sharedActivities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
+        activity.Status.Should().Be(ActivityStatusCode.Error);
+        activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
+        activity.GetTagItem(ActivityHelper.RpcGrpcStatusCode).Should().Be((int)StatusCode.Unavailable);
     }
 }

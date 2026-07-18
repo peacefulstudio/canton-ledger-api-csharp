@@ -70,7 +70,7 @@ public class LedgerClientAsyncSubmitTests
         StubSubmit(r => captured = r);
 
         var client = CreateClient();
-        _ = await client.Submit(Create(), TestContext.Current.CancellationToken);
+        _ = await client.SubmitAsync(Create(), TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         captured!.Commands.Commands_.Should().ContainSingle();
@@ -83,7 +83,7 @@ public class LedgerClientAsyncSubmitTests
         StubSubmit();
 
         var client = CreateClient();
-        var commandId = await client.Submit(Create("corr-123"), TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(Create("corr-123"), TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("corr-123");
     }
@@ -101,7 +101,7 @@ public class LedgerClientAsyncSubmitTests
             .WithActAs(ActAs);
 
         var client = CreateClient();
-        var commandId = await client.Submit(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         Guid.TryParse(captured!.Commands.CommandId, out _).Should().BeTrue(
@@ -118,23 +118,55 @@ public class LedgerClientAsyncSubmitTests
             CompletionResponse(new Completion { CommandId = "c2", UpdateId = "u2" }));
 
         var client = CreateClient();
-        var completions = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        completions.Select(c => c.CommandId).Should().Equal("c1", "c2");
-        completions.Select(c => c.UpdateId).Should().Equal("u1", "u2");
+        var completions = events.Should().AllBeOfType<CompletionStreamEvent.CommandCompleted>().Subject.ToList();
+        completions.Select(c => c.Completion.CommandId).Should().Equal("c1", "c2");
+        completions.Select(c => c.Completion.UpdateId).Should().Equal("u1", "u2");
     }
 
     [Fact]
-    public async Task CompletionStreamAsync_skips_offset_checkpoints()
+    public async Task CompletionStreamAsync_yields_offset_checkpoints_alongside_completions()
     {
         StubCompletionStream(
             new CompletionStreamResponse { OffsetCheckpoint = new OffsetCheckpoint { Offset = 5L } },
             CompletionResponse(new Completion { CommandId = "c1" }));
 
         var client = CreateClient();
-        var completions = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        completions.Should().ContainSingle().Which.CommandId.Should().Be("c1");
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<CompletionStreamEvent.Checkpoint>()
+            .Which.Offset.Should().Be(5L);
+        events[1].Should().BeOfType<CompletionStreamEvent.CommandCompleted>()
+            .Which.Completion.CommandId.Should().Be("c1");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_yields_resume_offset_from_checkpoint_when_no_completions_arrive()
+    {
+        StubCompletionStream(
+            new CompletionStreamResponse { OffsetCheckpoint = new OffsetCheckpoint { Offset = 42L } });
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Which.Should().BeOfType<CompletionStreamEvent.Checkpoint>()
+            .Which.Offset.Should().Be(42L);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_skips_response_with_no_variant_set_and_keeps_streaming()
+    {
+        StubCompletionStream(
+            new CompletionStreamResponse(),
+            CompletionResponse(new Completion { CommandId = "c1" }));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Which.Should().BeOfType<CompletionStreamEvent.CommandCompleted>()
+            .Which.Completion.CommandId.Should().Be("c1");
     }
 
     [Fact]
@@ -157,19 +189,75 @@ public class LedgerClientAsyncSubmitTests
     }
 
     [Fact]
-    public async Task CompletionStreamAsync_rethrows_RpcException_when_stream_faults()
+    public async Task CompletionStreamAsync_surfaces_RpcException_as_StreamError_event()
     {
         var rpcException = new RpcException(new Status(StatusCode.Unavailable, "transient down"));
         StubCompletionStreamFailure(rpcException);
 
         var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        error.Message.Should().Contain("transient");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_yields_completions_already_read_before_surfacing_mid_stream_StreamError()
+    {
+        StubCompletionStreamFailureAfterItems(
+            new RpcException(new Status(StatusCode.Unavailable, "stream aborted after two completions")),
+            CompletionResponse(new Completion { CommandId = "c1" }),
+            CompletionResponse(new Completion { CommandId = "c2" }));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(3, "both already-read completions are yielded before the terminal fault");
+        events.OfType<CompletionStreamEvent.CommandCompleted>().Select(e => e.Completion.CommandId)
+            .Should().Equal("c1", "c2");
+        events[2].Should().BeOfType<CompletionStreamEvent.StreamError>()
+            .Which.StatusCode.Should().Be((int)StatusCode.Unavailable);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_StreamError_message_falls_back_to_status_string_when_detail_empty()
+    {
+        // gRPC surfaces a server status with no message as Status.Detail == "" (empty,
+        // not null), so a plain ?? never falls back — the StreamError diagnostic must
+        // still be non-empty.
+        StubCompletionStreamFailure(new RpcException(new Status(StatusCode.Unavailable, string.Empty)));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        error.Message.Should().NotBeNullOrEmpty(
+            "an empty transport Detail must fall back to the status string, not silently empty the diagnostic Message");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_throws_OperationCanceledException_when_caller_cancels_mid_stream()
+    {
+        using var cts = new CancellationTokenSource();
+        StubCompletionStream(CompletionResponse(new Completion { CommandId = "c1" }));
+
+        var client = CreateClient();
         var act = async () =>
         {
-            await foreach (var _ in client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken)) { }
+            await foreach (var _ in client.CompletionStreamAsync(ActAs, cancellationToken: cts.Token))
+            {
+                cts.Cancel();
+            }
         };
 
-        await act.Should().ThrowAsync<RpcException>()
-            .Where(e => e.StatusCode == StatusCode.Unavailable);
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeOfType<RpcException>()
+            .Which.StatusCode.Should().Be(StatusCode.Cancelled);
+        thrown.Which.CancellationToken.Should().Be(cts.Token);
     }
 
     private static CompletionStreamResponse CompletionResponse(Completion completion) =>
@@ -225,6 +313,21 @@ public class LedgerClientAsyncSubmitTests
             .Returns(call);
     }
 
+    private void StubCompletionStreamFailureAfterItems(
+        RpcException afterItemsException, params CompletionStreamResponse[] responses)
+    {
+        var reader = new FakeStreamReader<CompletionStreamResponse>(responses, afterItemsException);
+        var call = MakeServerStreamingCall(reader);
+
+        _completionService
+            .CompletionStream(
+                Arg.Any<CompletionStreamRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call);
+    }
+
     private static AsyncServerStreamingCall<TResponse> MakeServerStreamingCall<TResponse>(
         IAsyncStreamReader<TResponse> reader) =>
         new(
@@ -242,40 +345,5 @@ public class LedgerClientAsyncSubmitTests
             list.Add(item);
         }
         return list;
-    }
-
-    private sealed class FakeStreamReader<T> : IAsyncStreamReader<T>
-    {
-        private readonly IReadOnlyList<T> _items;
-        private readonly Exception? _afterItemsException;
-        private int _index = -1;
-        private T _current = default!;
-
-        public FakeStreamReader(IEnumerable<T> items, Exception? afterItemsException = null)
-        {
-            _items = items.ToList();
-            _afterItemsException = afterItemsException;
-        }
-
-        public T Current => _current;
-
-        public Task<bool> MoveNext(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            _index++;
-            if (_index < _items.Count)
-            {
-                _current = _items[_index];
-                return Task.FromResult(true);
-            }
-
-            if (_afterItemsException is not null)
-            {
-                return Task.FromException<bool>(_afterItemsException);
-            }
-
-            return Task.FromResult(false);
-        }
     }
 }

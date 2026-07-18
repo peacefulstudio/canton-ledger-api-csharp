@@ -11,6 +11,11 @@ namespace Canton.Ledger.Kernel.Authentication.TokenGeneration;
 /// </summary>
 public class ClientCredentialsOptions : IValidatableObject
 {
+    private const string InsecureTokenEndpointError =
+        "The token endpoint uses plaintext http, which would expose the OAuth client secret to anyone "
+        + "on the network path. Use an https endpoint, or set AllowInsecureTokenEndpoint to true to "
+        + "accept the risk (e.g. against localhost during development).";
+
     /// <summary>
     /// OAuth2 client identifier.
     /// </summary>
@@ -46,13 +51,35 @@ public class ClientCredentialsOptions : IValidatableObject
     /// Explicit token endpoint URI. Takes precedence over <see cref="Domain"/>-derived endpoint.
     /// Use when the identity provider does not follow the <c>/oauth/token</c> convention
     /// (e.g. Keycloak: <c>/realms/{realm}/protocol/openid-connect/token</c>).
+    /// Plaintext <c>http</c> endpoints are rejected unless
+    /// <see cref="AllowInsecureTokenEndpoint"/> is set, because the token request sends the
+    /// client secret in cleartext.
     /// </summary>
     public Uri? TokenEndpoint { get; set; }
+
+    /// <summary>
+    /// Opts in to sending the token request — including <see cref="ClientSecret"/> — to a
+    /// plaintext <c>http</c> token endpoint, e.g. against localhost during development.
+    /// Defaults to <see langword="false"/>, which rejects <c>http</c> endpoints at validation
+    /// and construction time because anyone on the network path could read the secret.
+    /// <see cref="ClientCredentialsProvider"/> logs a warning whenever a plaintext endpoint
+    /// is actually used.
+    /// </summary>
+    public bool AllowInsecureTokenEndpoint { get; set; }
 
     /// <summary>
     /// How far before token expiry to trigger a refresh. Defaults to 30 seconds.
     /// </summary>
     public TimeSpan SafetyMargin { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Maximum time a single token-acquisition HTTP request may run before it is aborted.
+    /// Bounds how long a hung identity provider can stall authenticated calls, since token
+    /// fetches are serialized behind a single refresh lock. Defaults to 30 seconds. Must be
+    /// positive. This governs only token acquisition; <c>LedgerClientOptions.Timeout</c>
+    /// applies to the gRPC call.
+    /// </summary>
+    public TimeSpan TokenAcquisitionTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Returns the effective token endpoint, preferring <see cref="TokenEndpoint"/>
@@ -66,11 +93,11 @@ public class ClientCredentialsOptions : IValidatableObject
             {
                 if (!IsValidAbsoluteHttpUri(TokenEndpoint))
                     throw new InvalidOperationException("TokenEndpoint must be a valid absolute http/https URI.");
-                return TokenEndpoint;
+                return RequireOptInForPlaintextHttp(TokenEndpoint);
             }
 
             if (TryResolveDomainEndpoint(Domain, out var endpoint))
-                return endpoint;
+                return RequireOptInForPlaintextHttp(endpoint);
 
             if (DomainLooksLikeTokenEndpoint(Domain))
                 throw new InvalidOperationException(
@@ -112,11 +139,17 @@ public class ClientCredentialsOptions : IValidatableObject
                     "Domain must not include the /oauth/token path — set TokenEndpoint instead for explicit token URIs.",
                     [nameof(Domain)]);
             }
-            else if (!TryResolveDomainEndpoint(Domain, out _))
+            else if (!TryResolveDomainEndpoint(Domain, out var endpoint))
             {
                 yield return new ValidationResult(
                     "Domain must be a valid hostname or absolute http/https URI when TokenEndpoint is not specified.",
                     [nameof(Domain)]);
+            }
+            else if (IsPlaintextHttpWithoutOptIn(endpoint))
+            {
+                yield return new ValidationResult(
+                    InsecureTokenEndpointError,
+                    [nameof(Domain), nameof(AllowInsecureTokenEndpoint)]);
             }
         }
         else if (!IsValidAbsoluteHttpUri(TokenEndpoint))
@@ -125,12 +158,25 @@ public class ClientCredentialsOptions : IValidatableObject
                 "TokenEndpoint must be a valid absolute http/https URI.",
                 [nameof(TokenEndpoint)]);
         }
+        else if (IsPlaintextHttpWithoutOptIn(TokenEndpoint))
+        {
+            yield return new ValidationResult(
+                InsecureTokenEndpointError,
+                [nameof(TokenEndpoint), nameof(AllowInsecureTokenEndpoint)]);
+        }
 
         if (SafetyMargin < TimeSpan.Zero)
         {
             yield return new ValidationResult(
                 "SafetyMargin must not be negative.",
                 [nameof(SafetyMargin)]);
+        }
+
+        if (TokenAcquisitionTimeout <= TimeSpan.Zero)
+        {
+            yield return new ValidationResult(
+                "TokenAcquisitionTimeout must be positive.",
+                [nameof(TokenAcquisitionTimeout)]);
         }
     }
 
@@ -179,4 +225,12 @@ public class ClientCredentialsOptions : IValidatableObject
     private static bool IsValidAbsoluteHttpUri(Uri uri) =>
         uri.IsAbsoluteUri
         && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private Uri RequireOptInForPlaintextHttp(Uri endpoint) =>
+        IsPlaintextHttpWithoutOptIn(endpoint)
+            ? throw new InvalidOperationException(InsecureTokenEndpointError)
+            : endpoint;
+
+    private bool IsPlaintextHttpWithoutOptIn(Uri endpoint) =>
+        endpoint.Scheme == Uri.UriSchemeHttp && !AllowInsecureTokenEndpoint;
 }

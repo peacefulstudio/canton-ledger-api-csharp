@@ -11,6 +11,7 @@ using AwesomeAssertions;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -79,139 +80,6 @@ public class LedgerClientTests
                 () => { }));
     }
     [Fact]
-    public void BuildCommands_sets_command_id_and_workflow_id()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(null, []));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs)
-            .WithCommandId(new RuntimeCommands.CommandId("cmd-123"))
-            .WithWorkflowId(new RuntimeCommands.WorkflowId("workflow-456"));
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.CommandId.Should().Be("cmd-123");
-        commands.WorkflowId.Should().Be("workflow-456");
-        commands.UserId.Should().Be("test-user");
-        commands.ActAs.Should().ContainSingle().Which.Should().Be("party::alice");
-    }
-
-    [Fact]
-    public void BuildCommands_generates_command_id_when_not_provided()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(null, []));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs);
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.CommandId.Should().NotBeNullOrEmpty();
-        Guid.TryParse(commands.CommandId, out _).Should().BeTrue();
-    }
-
-    [Fact]
-    public void BuildCommands_adds_create_command()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(
-                new RuntimeIdentifier("pkg", "Module", "Template"),
-                [new DamlField("owner", new DamlParty("party::alice"))]));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs)
-            .WithCommandId(TestCommandId);
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.Commands_.Should().ContainSingle();
-        commands.Commands_[0].Create.Should().NotBeNull();
-        commands.Commands_[0].Create.TemplateId.ModuleName.Should().Be("Module");
-        commands.Commands_[0].Create.TemplateId.EntityName.Should().Be("Template");
-    }
-
-    [Fact]
-    public void BuildCommands_adds_exercise_command()
-    {
-        var exerciseCommand = Exercise();
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(exerciseCommand)
-            .WithActAs(ActAs)
-            .WithCommandId(TestCommandId);
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.Commands_.Should().ContainSingle();
-        commands.Commands_[0].Exercise.Should().NotBeNull();
-        commands.Commands_[0].Exercise.ContractId.Should().Be("00contract123");
-        commands.Commands_[0].Exercise.Choice.Should().Be("Archive");
-    }
-
-    [Fact]
-    public void BuildCommands_includes_read_as_parties()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(null, []));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs)
-            .WithReadAs((Party)"party::observer1", (Party)"party::observer2")
-            .WithCommandId(TestCommandId);
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.ReadAs.Should().HaveCount(2);
-        commands.ReadAs.Should().Contain("party::observer1");
-        commands.ReadAs.Should().Contain("party::observer2");
-    }
-
-    [Fact]
-    public void BuildCommands_pins_synchronizer_id_from_submission()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(null, []));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs)
-            .WithCommandId(TestCommandId)
-            .WithSynchronizerId(new SynchronizerId("sync::pinned"));
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.SynchronizerId.Should().Be("sync::pinned");
-    }
-
-    [Fact]
-    public void BuildCommands_leaves_synchronizer_id_unset_when_submission_has_none()
-    {
-        var createCommand = new RuntimeCommands.CreateCommand(
-            new RuntimeIdentifier("pkg", "Module", "Template"),
-            new DamlRecord(null, []));
-
-        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
-            .WithActAs(ActAs)
-            .WithCommandId(TestCommandId);
-
-        var client = CreateClient();
-        var commands = client.BuildCommands(submission);
-
-        commands.SynchronizerId.Should().BeEmpty();
-    }
-
-    [Fact]
     public async Task SubmitAndWaitAsync_echoes_supplied_command_id_with_update_id_and_offset()
     {
         StubSubmitAndWait(new SubmitAndWaitResponse { UpdateId = "update-123", CompletionOffset = 789L });
@@ -221,11 +89,11 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var result = await client.SubmitAndWaitAsync(submission, TestContext.Current.CancellationToken);
+        var result = await client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         result.CommandId.Should().Be(TestCommandId);
         result.UpdateId.Should().Be("update-123");
-        result.CompletionOffset.Should().Be(789L);
+        result.CompletionOffset.Value.Should().Be(789L);
     }
 
     [Fact]
@@ -238,7 +106,7 @@ public class LedgerClientTests
             .WithActAs(ActAs);
 
         var client = CreateClient();
-        var result = await client.SubmitAndWaitAsync(submission, TestContext.Current.CancellationToken);
+        var result = await client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         Guid.TryParse(captured!.Commands.CommandId, out _).Should().BeTrue(
@@ -271,7 +139,7 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         success.Result.CommandId.Should().Be(new RuntimeCommands.CommandId("cmd-echoed"));
@@ -324,11 +192,11 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         success.Result.UpdateId.Should().Be("update-123");
-        success.Result.CompletionOffset.Should().Be(456L);
+        success.Result.CompletionOffset.Value.Should().Be(456L);
         success.Result.CreatedContracts.Should().ContainSingle();
         success.Result.CreatedContracts[0].ContractId.Should().Be("00contract789");
     }
@@ -371,7 +239,7 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         success.Result.ArchivedContractIds.Should().ContainSingle().Which.Should().Be("00archived123");
@@ -419,7 +287,7 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var success = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject;
         var ev = success.Result.ExercisedEvents.Should().ContainSingle().Subject;
@@ -448,7 +316,7 @@ public class LedgerClientTests
             .WithActAs(ActAs)
             .WithCommandId(TestCommandId);
 
-        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
@@ -469,7 +337,7 @@ public class LedgerClientTests
             .WithActAs(ActAs)
             .WithCommandId(TestCommandId);
 
-        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        var act = () => client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*returned an empty token*");
@@ -530,7 +398,7 @@ public class LedgerClientTests
             .WithActAs(ActAs)
             .WithCommandId(TestCommandId);
 
-        await secondClient.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        await secondClient.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         startedActivities.Should().NotBeEmpty(
             "disposing one LedgerClient must not disable tracing for subsequent instances");
@@ -567,7 +435,7 @@ public class LedgerClientTests
     }
 
     [Fact]
-    public async Task TryExerciseAsync_throws_when_response_has_no_Transaction()
+    public async Task TryExerciseAsync_returns_InfraError_when_response_has_no_Transaction()
     {
         var response = new SubmitAndWaitForTransactionResponse();
 
@@ -588,10 +456,11 @@ public class LedgerClientTests
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*no Transaction*");
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<object>.InfraError>().Subject;
+        infra.StatusCode.Should().Be((int)StatusCode.Internal);
+        infra.Message.Should().Contain("no Transaction");
     }
 
     [Fact]
@@ -631,6 +500,45 @@ public class LedgerClientTests
             exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_None_when_unit_result_decodes_to_null_reference_type()
+    {
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Archive",
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = Exercise();
+
+        var client = CreateClient();
+
+        var outcome = await client.TryExerciseAsync<DamlRecord>(
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<DamlRecord>.None>();
     }
 
     [Fact]
@@ -757,6 +665,53 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public async Task TryExerciseAsync_populates_FiltersByParty_for_every_actAs_and_readAs_party()
+    {
+        SubmitAndWaitForTransactionRequest? capturedRequest = null;
+
+        var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00contract123",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "Archive",
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
+            }
+        });
+
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        var exerciseCommand = Exercise();
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"bob" });
+
+        var client = CreateClient();
+        await client.TryExerciseAsync<object>(
+            exerciseCommand, submitter, cancellationToken: TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        var filtersByParty = capturedRequest!.TransactionFormat.EventFormat.FiltersByParty;
+        filtersByParty.Keys.Should().BeEquivalentTo(["alice", "bob"]);
+        filtersByParty.Values.Should().OnlyContain(filters => filters.Cumulative.Count == 0);
+    }
+
+    [Fact]
     public async Task TrySubmitAndWaitForTransaction_uses_default_acs_delta_shape()
     {
         SubmitAndWaitForTransactionRequest? capturedRequest = null;
@@ -785,7 +740,7 @@ public class LedgerClientTests
             .WithCommandId(TestCommandId);
 
         var client = CreateClient();
-        await client.TrySubmitAndWaitForTransactionAsync(submission, TestContext.Current.CancellationToken);
+        await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.TransactionFormat.Should().BeNull(
@@ -857,8 +812,8 @@ public class LedgerClientTests
 
         var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: cts.Token);
 
-        await action.Should().ThrowAsync<RpcException>(
-            "a caller-cancelled exercise must surface as cancellation, not a mapped InfraError");
+        await action.Should().ThrowAsync<OperationCanceledException>(
+            "a caller-cancelled exercise must surface as OperationCanceledException, not a mapped InfraError");
     }
 
     [Fact]
@@ -911,6 +866,42 @@ public class LedgerClientTests
         var infra = (ExerciseOutcome<object>.InfraError)outcome;
         infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
         infra.Message.Should().Be("network down");
+    }
+
+    [Fact]
+    public void Constructor_warns_when_bearer_tokens_would_be_sent_over_plaintext_http()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
+
+        using var client = new LedgerClient(options, _tokenProvider, new Logger<LedgerClient>(loggerFactory));
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Level == LogLevel.Warning
+            && r.Message.Contains("plaintext http")
+            && r.Message.Contains("http://participant.internal:5001"));
+    }
+
+    [Fact]
+    public void Constructor_does_not_warn_about_plaintext_transport_when_unauthenticated()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
+
+        using var client = new LedgerClient(options, ITokenProvider.None, new Logger<LedgerClient>(loggerFactory));
+
+        loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
+    }
+
+    [Fact]
+    public void Constructor_does_not_warn_about_plaintext_transport_over_https()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var options = new LedgerClientOptions { GrpcAddress = "https://participant.internal:5001" };
+
+        using var client = new LedgerClient(options, _tokenProvider, new Logger<LedgerClient>(loggerFactory));
+
+        loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
 
     internal sealed record TestTemplate(string Owner) : ITemplate

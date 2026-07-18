@@ -3,10 +3,12 @@
 
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Authentication.TokenGeneration;
+using Canton.Ledger.Kernel.Resilience;
 using Daml.Ledger.Abstractions;
 using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -27,9 +29,12 @@ public class ServiceCollectionExtensionsTests
 
         services.AddLedgerClient(config);
 
-        var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(ILedgerClient)).Subject;
-        descriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        descriptor.ImplementationType.Should().Be<LedgerClient>();
+        var ledgerDescriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(ILedgerClient)).Subject;
+        ledgerDescriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
+
+        var cantonDescriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(ICantonLedgerClient)).Subject;
+        cantonDescriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
+        cantonDescriptor.ImplementationType.Should().Be<LedgerClient>();
     }
 
     [Fact]
@@ -316,6 +321,95 @@ public class ServiceCollectionExtensionsTests
         tokenProvider.Should().BeSameAs(ITokenProvider.None);
     }
 
+    private static ServiceCollection ServicesWithCapturingLogging(CapturingLoggerFactory loggerFactory)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ILoggerFactory>(loggerFactory);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+        return services;
+    }
+
+    [Fact]
+    public void AddLedgerClient_without_auth_delivers_LedgerClient_logs_to_the_registered_ILoggerFactory()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = ServicesWithCapturingLogging(loggerFactory);
+
+        services.AddLedgerClient(o => o.GrpcAddress = "https://localhost:5001");
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ILedgerClient>();
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(LedgerClient).FullName
+            && r.Level == LogLevel.Information
+            && r.Message.Contains("LedgerClient initialized"));
+    }
+
+    [Fact]
+    public void AddLedgerClient_without_auth_emits_the_unauthenticated_mode_warning()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = ServicesWithCapturingLogging(loggerFactory);
+
+        services.AddLedgerClient(o => o.GrpcAddress = "https://localhost:5001");
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ILedgerClient>();
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(LedgerClient).FullName
+            && r.Level == LogLevel.Warning
+            && r.Message.Contains("unauthenticated mode"));
+    }
+
+    [Fact]
+    public void AddAdminClient_without_auth_emits_the_unauthenticated_mode_warning()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = ServicesWithCapturingLogging(loggerFactory);
+
+        services.AddAdminClient(o => o.GrpcAddress = "https://localhost:5001");
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IAdminClient>();
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(AdminClient).FullName
+            && r.Level == LogLevel.Warning
+            && r.Message.Contains("unauthenticated mode"));
+    }
+
+    [Fact]
+    public void AddLedgerClient_with_auth_delivers_LedgerClient_logs_to_the_registered_ILoggerFactory()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var services = ServicesWithCapturingLogging(loggerFactory);
+
+        services.AddCantonStaticAuth("test-token");
+        services.AddLedgerClient(o => o.GrpcAddress = "https://localhost:5001");
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ILedgerClient>();
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(LedgerClient).FullName
+            && r.Level == LogLevel.Information
+            && r.Message.Contains("LedgerClient initialized"));
+        loggerFactory.Records.Should().NotContain(r => r.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public void AddLedgerClient_resolves_ICantonLedgerClient_as_the_same_instance_as_ILedgerClient()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLedgerClient(o => o.GrpcAddress = "https://localhost:5001");
+
+        var provider = services.BuildServiceProvider();
+        var cantonClient = provider.GetRequiredService<ICantonLedgerClient>();
+        var ledgerClient = provider.GetRequiredService<ILedgerClient>();
+
+        cantonClient.Should().BeOfType<LedgerClient>();
+        cantonClient.Should().BeSameAs(ledgerClient);
+    }
+
     [Fact]
     public void AddCantonLedger_registers_ledger_and_admin_clients()
     {
@@ -330,6 +424,23 @@ public class ServiceCollectionExtensionsTests
         var provider = services.BuildServiceProvider();
         provider.GetRequiredService<ILedgerClient>().Should().BeOfType<LedgerClient>();
         provider.GetRequiredService<IAdminClient>().Should().BeOfType<AdminClient>();
+    }
+
+    [Fact]
+    public void AddCantonLedger_resolves_ICantonLedgerClient_as_the_same_instance_as_ILedgerClient()
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        var provider = services.BuildServiceProvider();
+        var cantonClient = provider.GetRequiredService<ICantonLedgerClient>();
+        cantonClient.Should().BeOfType<LedgerClient>();
+        cantonClient.Should().BeSameAs(provider.GetRequiredService<ILedgerClient>());
     }
 
     [Fact]
@@ -492,5 +603,55 @@ public class ServiceCollectionExtensionsTests
         }).Build();
 
         services.AddCantonLedger(config).Should().BeSameAs(services);
+    }
+
+    [Fact]
+    public void AddLedgerClient_fails_at_startup_when_Retry_MaxRetryAttempts_negative()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Retry = new RetryOptions { Enabled = true, MaxRetryAttempts = -1 };
+        });
+        var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*MaxRetryAttempts*");
+    }
+
+    [Fact]
+    public void AddLedgerClient_fails_at_startup_when_Retry_Delay_negative()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Retry = new RetryOptions { Enabled = true, Delay = TimeSpan.FromMilliseconds(-1) };
+        });
+        var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*Delay*");
+    }
+
+    [Fact]
+    public void AddLedgerClient_starts_when_Retry_configured_with_nonnegative_values()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Retry = new RetryOptions { Enabled = true, MaxRetryAttempts = 5, Delay = TimeSpan.FromMilliseconds(200) };
+        });
+        var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
     }
 }

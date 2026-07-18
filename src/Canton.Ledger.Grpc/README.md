@@ -4,7 +4,9 @@ Generated gRPC client stubs for the Canton Ledger API.
 
 ## Overview
 
-This package provides low-level gRPC client stubs generated from the official Canton Ledger API protobuf definitions. It enables direct communication with Canton participant nodes.
+This package provides low-level gRPC client stubs generated from the official Canton Ledger API protobuf definitions (Canton Ledger API version 3.4.11). It enables direct communication with Canton participant nodes.
+
+All generated types live under the `Com.Daml.Ledger.Api.V2` namespace (admin services under `Com.Daml.Ledger.Api.V2.Admin`), matching the `csharp_namespace` set in the upstream proto files. No type lives under `Canton.Ledger.Grpc` — that is only the NuGet package and assembly name.
 
 ## Services Included
 
@@ -26,7 +28,8 @@ This package provides low-level gRPC client stubs generated from the official Ca
 ## Usage
 
 ```csharp
-using Canton.Ledger.Grpc;
+using Com.Daml.Ledger.Api.V2;
+using Com.Daml.Ledger.Api.V2.Admin;
 using Grpc.Net.Client;
 
 // Create a gRPC channel
@@ -45,7 +48,7 @@ var response = await commandService.SubmitAndWaitAsync(new SubmitAndWaitRequest
 
 ## Version
 
-This package is generated from Canton Ledger API version specified in the project configuration.
+Generated from Canton Ledger API protos version 3.4.11 (downloaded from Maven Central at build time).
 
 ## Related Packages
 

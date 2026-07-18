@@ -1,0 +1,26 @@
+--- a/com/daml/ledger/api/v2/version_service.proto
++++ b/com/daml/ledger/api/v2/version_service.proto
+@@ -6,8 +6,10 @@
+ package com.daml.ledger.api.v2;
+ 
+ import "com/daml/ledger/api/v2/experimental_features.proto";
++import "google/api/annotations.proto";
+ import "google/protobuf/duration.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "VersionServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2";
+@@ -15,7 +17,11 @@
+ // Allows clients to retrieve information about the ledger API version
+ service VersionService {
+   // Read the Ledger API version
+-  rpc GetLedgerApiVersion(GetLedgerApiVersionRequest) returns (GetLedgerApiVersionResponse);
++  rpc GetLedgerApiVersion(GetLedgerApiVersionRequest) returns (GetLedgerApiVersionResponse) {
++    option (google.api.http) = {
++      get: "/v2/version"
++    };
++  }
+ }
+ 
+ message GetLedgerApiVersionRequest {}

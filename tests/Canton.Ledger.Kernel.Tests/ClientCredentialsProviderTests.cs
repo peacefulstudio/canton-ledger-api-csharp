@@ -4,6 +4,7 @@
 using System.Net;
 using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using AwesomeAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
@@ -24,14 +25,16 @@ public class ClientCredentialsProviderTests
     private static ClientCredentialsProvider CreateProvider(
         ClientCredentialsOptions options,
         FakeHttpHandler handler,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ILoggerFactory? loggerFactory = null)
     {
         var factory = Substitute.For<IHttpClientFactory>();
         factory.CreateClient("CantonAuth").Returns(_ => new HttpClient(handler));
         return new ClientCredentialsProvider(
             Options.Create(options),
             factory,
-            timeProvider ?? TimeProvider.System);
+            timeProvider ?? TimeProvider.System,
+            loggerFactory is null ? null : new Logger<ClientCredentialsProvider>(loggerFactory));
     }
 
     public static TheoryData<ClientCredentialsOptions, string> OptionsWithUnresolvableEndpoint => new()
@@ -66,6 +69,15 @@ public class ClientCredentialsProviderTests
                 Domain = "https://auth.example.com/oauth/token"
             },
             "Domain must not include the /oauth/token path*"
+        },
+        {
+            new ClientCredentialsOptions
+            {
+                ClientId = "test-client",
+                ClientSecret = "test-secret",
+                TokenEndpoint = new Uri("http://idp.internal/oauth/token")
+            },
+            "*plaintext http*AllowInsecureTokenEndpoint*"
         }
     };
 
@@ -292,5 +304,79 @@ public class ClientCredentialsProviderTests
         var act = () => provider.GetTokenAsync(cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task GetTokenAsync_faults_within_TokenAcquisitionTimeout_when_endpoint_stalls()
+    {
+        var handler = new FakeHttpHandler().WithDelay(TimeSpan.FromSeconds(30));
+        var options = CreateOptions();
+        options.TokenAcquisitionTimeout = TimeSpan.FromMilliseconds(50);
+        using var provider = CreateProvider(options, handler);
+
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
+
+        var exception = (await act.Should().ThrowAsync<TimeoutException>()).Which;
+        exception.Message.Should().Contain("Token acquisition")
+            .And.Contain("auth.example.com/oauth/token")
+            .And.Contain("timed out");
+    }
+
+    [Fact]
+    public async Task GetTokenAsync_timeout_message_does_not_leak_the_client_secret()
+    {
+        var handler = new FakeHttpHandler().WithDelay(TimeSpan.FromSeconds(30));
+        var options = CreateOptions();
+        options.TokenAcquisitionTimeout = TimeSpan.FromMilliseconds(50);
+        using var provider = CreateProvider(options, handler);
+
+        var act = () => provider.GetTokenAsync(TestContext.Current.CancellationToken);
+
+        var exception = (await act.Should().ThrowAsync<TimeoutException>()).Which;
+        exception.Message.Should().NotContain(options.ClientSecret);
+    }
+
+    [Fact]
+    public async Task GetTokenAsync_propagates_caller_cancellation_even_while_endpoint_stalls()
+    {
+        var handler = new FakeHttpHandler().WithDelay(Timeout.InfiniteTimeSpan);
+        var options = CreateOptions();
+        options.TokenAcquisitionTimeout = TimeSpan.FromMinutes(5);
+        using var provider = CreateProvider(options, handler);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var act = () => provider.GetTokenAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public void Constructor_warns_when_token_endpoint_uses_plaintext_http()
+    {
+        var options = new ClientCredentialsOptions
+        {
+            ClientId = "test-client",
+            ClientSecret = "test-secret",
+            TokenEndpoint = new Uri("http://localhost:8080/oauth/token"),
+            AllowInsecureTokenEndpoint = true
+        };
+        var loggerFactory = new CapturingLoggerFactory();
+
+        using var provider = CreateProvider(options, new FakeHttpHandler(), loggerFactory: loggerFactory);
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Level == LogLevel.Warning
+            && r.Message.Contains("plaintext http")
+            && r.Message.Contains("client secret"));
+    }
+
+    [Fact]
+    public void Constructor_does_not_warn_when_token_endpoint_uses_https()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+
+        using var provider = CreateProvider(CreateOptions(), new FakeHttpHandler(), loggerFactory: loggerFactory);
+
+        loggerFactory.Records.Should().NotContain(r => r.Level == LogLevel.Warning);
     }
 }

@@ -1,0 +1,50 @@
+--- a/com/daml/ledger/api/v2/admin/package_management_service.proto
++++ b/com/daml/ledger/api/v2/admin/package_management_service.proto
+@@ -6,8 +6,10 @@
+ package com.daml.ledger.api.v2.admin;
+ 
+ import "com/daml/ledger/api/v2/package_reference.proto";
++import "google/api/annotations.proto";
+ import "google/protobuf/timestamp.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/admin;adminv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
+ option java_outer_classname = "PackageManagementServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2.admin";
+@@ -27,7 +29,12 @@
+   // If vetting is enabled in the request, the DAR is checked for upgrade compatibility
+   // with the set of the already vetted packages on the target vetting synchronizer
+   // See UploadDarFileRequest for details regarding vetting and the target vetting synchronizer.
+-  rpc UploadDarFile(UploadDarFileRequest) returns (UploadDarFileResponse);
++  rpc UploadDarFile(UploadDarFileRequest) returns (UploadDarFileResponse) {
++    option (google.api.http) = {
++      post: "/v2/dars"
++      body: "*"
++    };
++  }
+ 
+   // Validates the DAR and checks the upgrade compatibility of the DAR's packages
+   // with the set of the already vetted packages on the target vetting synchronizer.
+@@ -35,10 +42,20 @@
+   //
+   // The operation has no effect on the state of the participant or the Canton ledger:
+   // the DAR payload and its packages are not persisted neither are the packages vetted.
+-  rpc ValidateDarFile(ValidateDarFileRequest) returns (ValidateDarFileResponse);
++  rpc ValidateDarFile(ValidateDarFileRequest) returns (ValidateDarFileResponse) {
++    option (google.api.http) = {
++      post: "/v2/dars/validate"
++      body: "*"
++    };
++  }
+ 
+   // Update the vetted packages of this participant
+-  rpc UpdateVettedPackages(UpdateVettedPackagesRequest) returns (UpdateVettedPackagesResponse);
++  rpc UpdateVettedPackages(UpdateVettedPackagesRequest) returns (UpdateVettedPackagesResponse) {
++    option (google.api.http) = {
++      post: "/v2/package-vetting/update"
++      body: "*"
++    };
++  }
+ }
+ 
+ message ListKnownPackagesRequest {}

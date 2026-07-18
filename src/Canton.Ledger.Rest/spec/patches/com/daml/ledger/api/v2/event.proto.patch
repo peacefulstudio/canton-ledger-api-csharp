@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/event.proto
++++ b/com/daml/ledger/api/v2/event.proto
+@@ -9,6 +9,7 @@
+ import "google/protobuf/timestamp.proto";
+ import "google/rpc/status.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "EventOuterClass";
+ option java_package = "com.daml.ledger.api.v2";

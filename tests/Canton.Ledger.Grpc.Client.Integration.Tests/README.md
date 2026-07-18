@@ -12,7 +12,26 @@ The Daml fixture lives in `testdata/richtypes/` and covers the full surface of t
 
 ### Prerequisites
 
-Install dpm >= 1.0.17 via the SHA-pinned GitHub-release tarball (not `get.daml.com` / `install.sh`, which gives 1.0.10). See the repo-level CI workflow for the pinned-tarball pattern.
+Install **dpm >= 1.0.20**. The floor is 1.0.20 because that release keys the OCI component cache by content digest (`pkg/cacheindex`); older builds key it by name and can silently reuse a stale extraction, poisoning regen output. `regen.sh` enforces this floor and refuses to run on an older binary.
+
+Pull the pinned `1.0.21` tarball from the upstream [`digital-asset/dpm` release](https://github.com/digital-asset/dpm/releases/tag/1.0.21) and verify it against the published `checksums.txt` — do **not** use `get.daml.com` / `install.sh`, which installs an old 1.0.10:
+
+```bash
+DPM_VERSION=1.0.21
+# platform: darwin-arm64 | darwin-amd64 | linux-amd64 | linux-arm64
+PLATFORM=darwin-arm64
+BASE="https://github.com/digital-asset/dpm/releases/download/${DPM_VERSION}"
+
+curl -fsSLO "${BASE}/dpm-${DPM_VERSION}-${PLATFORM}.tar.gz"
+curl -fsSLO "${BASE}/dpm-${DPM_VERSION}-checksums.txt"
+shasum -a 256 --ignore-missing -c "dpm-${DPM_VERSION}-checksums.txt"
+
+mkdir -p "$HOME/.dpm/bin"
+tar -xzf "dpm-${DPM_VERSION}-${PLATFORM}.tar.gz" -C "$HOME/.dpm/bin" dpm
+export PATH="$HOME/.dpm/bin:$PATH"
+```
+
+Alternatively, use the upstream dpm installer with an **explicit version argument** (never its unpinned default) per the [Canton Network dpm docs](https://docs.canton.network/appdev/tooling/development-tools-overview#dpm-daml-package-manager).
 
 Then install the required SDK:
 

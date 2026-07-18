@@ -1,0 +1,10 @@
+--- a/com/daml/ledger/api/v2/admin/object_meta.proto
++++ b/com/daml/ledger/api/v2/admin/object_meta.proto
+@@ -5,6 +5,7 @@
+ 
+ package com.daml.ledger.api.v2.admin;
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/admin;adminv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
+ option java_outer_classname = "ObjectMetaOuterClass";
+ option java_package = "com.daml.ledger.api.v2.admin";

@@ -1,0 +1,51 @@
+--- a/com/daml/ledger/api/v2/state_service.proto
++++ b/com/daml/ledger/api/v2/state_service.proto
+@@ -8,7 +8,9 @@
+ import "com/daml/ledger/api/v2/event.proto";
+ import "com/daml/ledger/api/v2/reassignment.proto";
+ import "com/daml/ledger/api/v2/transaction_filter.proto";
++import "google/api/annotations.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "StateServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2";
+@@ -20,17 +22,34 @@
+   // the client SHOULD begin streaming updates from the update service,
+   // starting at the GetActiveContractsRequest.active_at_offset specified in this request.
+   // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
+-  rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse);
++  rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse) {
++    option (google.api.http) = {
++      post: "/v2/state/active-contracts"
++      body: "*"
++    };
++  }
+ 
+   // Get the list of connected synchronizers at the time of the query.
+-  rpc GetConnectedSynchronizers(GetConnectedSynchronizersRequest) returns (GetConnectedSynchronizersResponse);
++  rpc GetConnectedSynchronizers(GetConnectedSynchronizersRequest) returns (GetConnectedSynchronizersResponse) {
++    option (google.api.http) = {
++      get: "/v2/state/connected-synchronizers"
++    };
++  }
+ 
+   // Get the current ledger end.
+   // Subscriptions started with the returned offset will serve events after this RPC was called.
+-  rpc GetLedgerEnd(GetLedgerEndRequest) returns (GetLedgerEndResponse);
++  rpc GetLedgerEnd(GetLedgerEndRequest) returns (GetLedgerEndResponse) {
++    option (google.api.http) = {
++      get: "/v2/state/ledger-end"
++    };
++  }
+ 
+   // Get the latest successfully pruned ledger offsets
+-  rpc GetLatestPrunedOffsets(GetLatestPrunedOffsetsRequest) returns (GetLatestPrunedOffsetsResponse);
++  rpc GetLatestPrunedOffsets(GetLatestPrunedOffsetsRequest) returns (GetLatestPrunedOffsetsResponse) {
++    option (google.api.http) = {
++      get: "/v2/state/latest-pruned-offsets"
++    };
++  }
+ }
+ 
+ // If the given offset is different than the ledger end, and there are (un)assignments in-flight at the given offset,

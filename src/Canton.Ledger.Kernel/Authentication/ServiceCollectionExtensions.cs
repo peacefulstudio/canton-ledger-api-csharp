@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Kernel.Authentication.TokenGeneration;
+using Canton.Ledger.Kernel.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Peaceful.Extensions.Logging;
 
 namespace Canton.Ledger.Kernel.Authentication;
 
@@ -34,9 +34,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.AddOptions<ClientCredentialsOptions>()
-            .Bind(configuration)
-            .ValidateOnStart();
+        services.AddValidatedOptions<ClientCredentialsOptions>(configuration);
 
         AddSharedServices(services);
 
@@ -58,9 +56,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
 
-        services.AddOptions<ClientCredentialsOptions>()
-            .Configure(configure)
-            .ValidateOnStart();
+        services.AddValidatedOptions<ClientCredentialsOptions>(configure);
 
         AddSharedServices(services);
 
@@ -82,11 +78,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
 
-        services.TryAddSingleton<ITokenProvider>(sp =>
-        {
-            ConfigureLogging(sp);
-            return new StaticTokenProvider(token);
-        });
+        services.TryAddSingleton<ITokenProvider>(new StaticTokenProvider(token));
 
         return services;
     }
@@ -95,22 +87,19 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<ClientCredentialsOptions>, ClientCredentialsOptionsValidator>());
-        services.AddHttpClient("CantonAuth");
+        services.AddHttpClient("CantonAuth")
+            .ConfigureHttpClient((serviceProvider, httpClient) =>
+                httpClient.Timeout = serviceProvider
+                    .GetRequiredService<IOptions<ClientCredentialsOptions>>()
+                    .Value.TokenAcquisitionTimeout);
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ITokenProvider>(sp =>
         {
-            ConfigureLogging(sp);
             var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
             var options = sp.GetRequiredService<IOptions<ClientCredentialsOptions>>();
             var timeProvider = sp.GetRequiredService<TimeProvider>();
-            return new ClientCredentialsProvider(options, httpClientFactory, timeProvider);
+            var logger = sp.GetService<ILogger<ClientCredentialsProvider>>();
+            return new ClientCredentialsProvider(options, httpClientFactory, timeProvider, logger);
         });
-    }
-
-    private static void ConfigureLogging(IServiceProvider sp)
-    {
-        var loggerFactory = sp.GetService<ILoggerFactory>();
-        if (loggerFactory is not null)
-            StaticLoggerFactory.Configure(loggerFactory);
     }
 }

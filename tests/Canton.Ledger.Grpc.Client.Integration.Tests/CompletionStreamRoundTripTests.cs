@@ -59,7 +59,7 @@ public class CompletionStreamRoundTripTests
 
         using var client = NewClient(fixture, userId);
 
-        var preSubmitOffset = await client.GetLedgerEndAsync(TestContext.Current.CancellationToken);
+        var preSubmitOffset = (await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken)).Value;
 
         var commandId = Guid.NewGuid().ToString();
         var submission = RuntimeCommands.CommandsSubmission
@@ -67,7 +67,7 @@ public class CompletionStreamRoundTripTests
             .WithActAs(owner)
             .WithCommandId(new RuntimeCommands.CommandId(commandId));
 
-        var returnedCommandId = await client.Submit(submission, TestContext.Current.CancellationToken);
+        var returnedCommandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
         Assert.Equal(commandId, returnedCommandId.Value);
 
         var completion = await ObserveCompletionAsync(client, owner, preSubmitOffset, commandId);
@@ -82,9 +82,10 @@ public class CompletionStreamRoundTripTests
         LedgerClient client, Party owner, long beginExclusiveOffset, string commandId)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await foreach (var completion in client.CompletionStreamAsync(owner, beginExclusiveOffset, cts.Token))
+        await foreach (var streamEvent in client.CompletionStreamAsync(owner, beginExclusiveOffset, cts.Token))
         {
-            if (completion.CommandId == commandId)
+            if (streamEvent is CompletionStreamEvent.CommandCompleted { Completion: var completion }
+                && completion.CommandId == commandId)
             {
                 return completion;
             }

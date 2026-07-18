@@ -4,9 +4,11 @@
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Daml.Runtime.Streams;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -20,10 +22,12 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 /// <summary>
 /// Arrange harness for reassignment conformance tests on the multi-synchronizer LocalNet lane:
 /// hosts one party on both synchronizers, creates an <see cref="Asset"/> on the source
-/// synchronizer, unassigns it source→target via the raw <c>SubmitReassignment</c> gRPC stub, and
+/// synchronizer, unassigns it source→target through the typed
+/// <see cref="ICantonLedgerClient.SubmitReassignmentAsync"/> write surface (ADR 0007), and
 /// observes the resulting <see cref="UnassignedEvent"/> on a caller-supplied reassignment
-/// <see cref="EventFormat"/>. The reassignment write and read paths go through raw generated stubs
-/// because no typed client surface exists for them yet (ADR 0003, ADR 0007).
+/// <see cref="EventFormat"/>. Observation still reads the raw <c>UnassignedEvent</c> off the wire
+/// to recover the <c>reassignment_id</c> the typed <c>Unassigned</c> variant cannot yet carry
+/// (upstream-blocked, ADR 0003).
 /// </summary>
 internal sealed class ReassignmentHarness : IAsyncDisposable
 {
@@ -44,7 +48,6 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
     private readonly LedgerClient _client;
     private readonly AdminClient _admin;
     private readonly GrpcChannel _channel;
-    private readonly CommandSubmissionService.CommandSubmissionServiceClient _submission;
     private readonly UpdateService.UpdateServiceClient _updates;
     private readonly PackageManagementService.PackageManagementServiceClient _packages;
 
@@ -58,7 +61,6 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         _client = new LedgerClient(options, _tokenProvider);
         _admin = new AdminClient(options, _tokenProvider);
         _channel = GrpcChannel.ForAddress(grpcAddress);
-        _submission = new CommandSubmissionService.CommandSubmissionServiceClient(_channel);
         _updates = new UpdateService.UpdateServiceClient(_channel);
         _packages = new PackageManagementService.PackageManagementServiceClient(_channel);
     }
@@ -143,13 +145,13 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
             .WithSynchronizerId(new SynchronizerId(synchronizerId))
             .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()));
 
-        var outcome = await _client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken);
+        var outcome = await _client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: cancellationToken);
         var result = Assert.IsType<ExerciseOutcome<TransactionResult>.One>(outcome).Result;
         return Assert.Single(result.CreatedContracts).ContractId;
     }
 
-    public Task<long> LedgerEndAsync(CancellationToken cancellationToken) =>
-        _client.GetLedgerEndAsync(cancellationToken);
+    public async Task<long> LedgerEndAsync(CancellationToken cancellationToken) =>
+        (await _client.GetLedgerEndAsync(cancellationToken: cancellationToken)).Value;
 
     public async Task UnassignAsync(
         Party submitter,
@@ -158,33 +160,40 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         string targetSynchronizerId,
         CancellationToken cancellationToken)
     {
-        var request = new SubmitReassignmentRequest
-        {
-            ReassignmentCommands = new ReassignmentCommands
-            {
-                UserId = _userId,
-                CommandId = Guid.NewGuid().ToString(),
-                SubmissionId = Guid.NewGuid().ToString(),
-                Submitter = submitter.Id,
-                Commands =
-                {
-                    new ReassignmentCommand
-                    {
-                        UnassignCommand = new UnassignCommand
-                        {
-                            ContractId = contractId,
-                            Source = sourceSynchronizerId,
-                            Target = targetSynchronizerId,
-                        },
-                    },
-                },
-            },
-        };
+        var submission = ReassignmentSubmission.Of(
+            new Canton.Ledger.Grpc.Client.UnassignCommand(
+                contractId,
+                new SynchronizerId(sourceSynchronizerId),
+                new SynchronizerId(targetSynchronizerId)),
+            submitter);
 
         try
         {
-            await _submission.SubmitReassignmentAsync(
-                request, await HeadersAsync(cancellationToken), deadline: null, cancellationToken: cancellationToken);
+            await _client.SubmitReassignmentAsync(submission, cancellationToken);
+        }
+        catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
+        {
+            Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
+        }
+    }
+
+    public async Task AssignAsync(
+        Party submitter,
+        string reassignmentId,
+        string sourceSynchronizerId,
+        string targetSynchronizerId,
+        CancellationToken cancellationToken)
+    {
+        var submission = ReassignmentSubmission.Of(
+            new Canton.Ledger.Grpc.Client.AssignCommand(
+                reassignmentId,
+                new SynchronizerId(sourceSynchronizerId),
+                new SynchronizerId(targetSynchronizerId)),
+            submitter);
+
+        try
+        {
+            await _client.SubmitReassignmentAsync(submission, cancellationToken);
         }
         catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
         {
@@ -246,6 +255,96 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         return null;
     }
 
+    public async Task<AssignedEvent?> ObserveAssignedAsync(
+        EventFormat reassignmentFormat,
+        long beginExclusiveOffset,
+        string contractId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var request = new GetUpdatesRequest
+        {
+            BeginExclusive = beginExclusiveOffset,
+            UpdateFormat = new UpdateFormat { IncludeReassignments = reassignmentFormat },
+        };
+        var headers = await HeadersAsync(cancellationToken);
+
+        using var call = _updates.GetUpdates(
+            request, headers, deadline: null, cancellationToken: linked.Token);
+        linked.CancelAfter(timeout);
+
+        try
+        {
+            while (await call.ResponseStream.MoveNext(linked.Token))
+            {
+                var response = call.ResponseStream.Current;
+                if (response.UpdateCase != GetUpdatesResponse.UpdateOneofCase.Reassignment) continue;
+
+                foreach (var reassignmentEvent in response.Reassignment.Events)
+                {
+                    if (reassignmentEvent.EventCase == ReassignmentEvent.EventOneofCase.Assigned
+                        && reassignmentEvent.Assigned.CreatedEvent?.ContractId == contractId)
+                    {
+                        return reassignmentEvent.Assigned;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) when (TimedOut(linked, cancellationToken))
+        {
+            return null;
+        }
+        catch (RpcException) when (TimedOut(linked, cancellationToken))
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    public async Task<TypedReassignmentObservation<T>> ObserveTypedReassignmentAsync<T>(
+        Party issuer,
+        long fromOffset,
+        string contractId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+        where T : IDamlType
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linked.CancelAfter(timeout);
+
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { issuer }, new HashSet<Party>());
+
+        ContractStreamEvent<T>.Unassigned? unassigned = null;
+        ContractStreamEvent<T>.Assigned? assigned = null;
+
+        try
+        {
+            await foreach (var streamEvent in _client.SubscribeAsync<T>(submitter, LedgerOffset.At(fromOffset), cancellationToken: linked.Token))
+            {
+                switch (streamEvent)
+                {
+                    case ContractStreamEvent<T>.Unassigned u when u.ContractId.Value == contractId:
+                        unassigned = u;
+                        break;
+                    case ContractStreamEvent<T>.Assigned a when a.ContractId.Value == contractId:
+                        assigned = a;
+                        break;
+                }
+
+                if (unassigned is not null && assigned is not null) break;
+            }
+        }
+        catch (OperationCanceledException) when (TimedOut(linked, cancellationToken))
+        {
+        }
+
+        return new TypedReassignmentObservation<T>(unassigned, assigned);
+    }
+
     private static bool TimedOut(CancellationTokenSource linked, CancellationToken caller) =>
         linked.IsCancellationRequested && !caller.IsCancellationRequested;
 
@@ -266,3 +365,8 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         _channel.Dispose();
     }
 }
+
+internal sealed record TypedReassignmentObservation<T>(
+    ContractStreamEvent<T>.Unassigned? Unassigned,
+    ContractStreamEvent<T>.Assigned? Assigned)
+    where T : IDamlType;

@@ -1,7 +1,6 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Daml.Runtime.Contracts;
 using Daml.Runtime.Outcomes;
 using AwesomeAssertions;
 using Google.Protobuf;
@@ -40,6 +39,34 @@ public class DamlErrorParserTests
             errorId: "SOMETHING",
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = raw });
+
+        var (category, _, _, _) = DamlErrorParser.Parse(ex);
+
+        category.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("1", DamlErrorCategory.TransientServerFailure)]
+    [InlineData("2", DamlErrorCategory.ContentionOnSharedResources)]
+    [InlineData("3", DamlErrorCategory.DeadlineExceededRequestStateUnknown)]
+    [InlineData("4", DamlErrorCategory.SystemInternalAssumptionViolated)]
+    [InlineData("5", DamlErrorCategory.MaliciousOrFaultyBehaviour)]
+    [InlineData("6", DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials)]
+    [InlineData("7", DamlErrorCategory.AuthorizationChecksFailed)]
+    [InlineData("8", DamlErrorCategory.InvalidIndependentOfSystemState)]
+    [InlineData("9", DamlErrorCategory.InvalidGivenCurrentSystemStateOther)]
+    [InlineData("10", DamlErrorCategory.InvalidGivenCurrentSystemStateResourceExists)]
+    [InlineData("11", DamlErrorCategory.InvalidGivenCurrentSystemStateResourceMissing)]
+    [InlineData("12", DamlErrorCategory.InvalidGivenCurrentSystemStateSeekDifferentResource)]
+    [InlineData("13", DamlErrorCategory.BackgroundProcessDegradationWarning)]
+    [InlineData("14", DamlErrorCategory.InternalUnsupportedOperation)]
+    public void Parse_maps_documented_numeric_category_ids_to_enum(string wireCategoryId, DamlErrorCategory expected)
+    {
+        var ex = MakeRpcException(
+            statusCode: StatusCode.FailedPrecondition,
+            errorId: "SOMETHING",
+            statusMessage: "boom",
+            metadata: new Dictionary<string, string> { ["category"] = wireCategoryId });
 
         var (category, _, _, _) = DamlErrorParser.Parse(ex);
 
@@ -178,28 +205,22 @@ public class DamlErrorParserTests
         metadata.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("15")]
+    [InlineData("999")]
+    [InlineData("-1")]
+    [InlineData("2147483647")]
+    public void MapCategory_returns_Unknown_for_numeric_values_outside_the_defined_categories(string raw)
+    {
+        DamlErrorParser.MapCategory(raw).Should().Be(DamlErrorCategory.Unknown);
+    }
+
     [Fact]
     public void MapCategory_returns_unknown_for_null_or_whitespace()
     {
         DamlErrorParser.MapCategory(null).Should().Be(DamlErrorCategory.Unknown);
         DamlErrorParser.MapCategory("").Should().Be(DamlErrorCategory.Unknown);
         DamlErrorParser.MapCategory("   ").Should().Be(DamlErrorCategory.Unknown);
-    }
-
-    [Fact]
-    public void ToDamlError_builds_outcome()
-    {
-        var ex = MakeRpcException(
-            statusCode: StatusCode.FailedPrecondition,
-            errorId: "INCONSISTENT",
-            statusMessage: "stale",
-            metadata: new Dictionary<string, string> { ["category"] = "ContentionOnSharedResources" });
-
-        var outcome = DamlErrorParser.ToDamlError<TransactionResult>(ex);
-
-        outcome.Category.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
-        outcome.ErrorId.Should().Be("INCONSISTENT");
-        outcome.Message.Should().Be("stale");
     }
 
     private static RpcException MakeRpcException(

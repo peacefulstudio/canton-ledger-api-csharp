@@ -78,7 +78,7 @@ dpm codegen-cs --dar ./contracts.dar --out ./Generated -n MyCompany.Contracts
 
 ## The runtime: `Daml.Runtime`
 
-`Daml.Runtime` is a NuGet package published from [`daml-codegen-csharp`](https://github.com/peacefulstudio/daml-codegen-csharp). It is the shared vocabulary between generated bindings and the ledger clients — this repository consumes it as a dependency (the pinned version lives in `Directory.Packages.props`; currently `0.1.8-preview.1`) and deliberately does not re-implement any of it.
+`Daml.Runtime` is a NuGet package published from [`daml-codegen-csharp`](https://github.com/peacefulstudio/daml-codegen-csharp). It is the shared vocabulary between generated bindings and the ledger clients — this repository consumes it as a dependency (the pinned version lives in `Directory.Packages.props`) and deliberately does not re-implement any of it.
 
 Its main areas:
 

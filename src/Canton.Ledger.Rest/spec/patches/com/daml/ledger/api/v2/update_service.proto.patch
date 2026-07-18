@@ -1,0 +1,46 @@
+--- a/com/daml/ledger/api/v2/update_service.proto
++++ b/com/daml/ledger/api/v2/update_service.proto
+@@ -10,7 +10,9 @@
+ import "com/daml/ledger/api/v2/topology_transaction.proto";
+ import "com/daml/ledger/api/v2/transaction.proto";
+ import "com/daml/ledger/api/v2/transaction_filter.proto";
++import "google/api/annotations.proto";
+ 
++option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
+ option csharp_namespace = "Com.Daml.Ledger.Api.V2";
+ option java_outer_classname = "UpdateServiceOuterClass";
+ option java_package = "com.daml.ledger.api.v2";
+@@ -34,15 +36,30 @@
+   //
+   // - ACS delta: a requesting party must be a stakeholder of an event for it to be included.
+   // - ledger effects: a requesting party must be a witness of an en event for it to be included.
+-  rpc GetUpdates(GetUpdatesRequest) returns (stream GetUpdatesResponse);
++  rpc GetUpdates(GetUpdatesRequest) returns (stream GetUpdatesResponse) {
++    option (google.api.http) = {
++      post: "/v2/updates"
++      body: "*"
++    };
++  }
+ 
+   // Lookup an update by its offset.
+   // If there is no update with this offset, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+-  rpc GetUpdateByOffset(GetUpdateByOffsetRequest) returns (GetUpdateResponse);
++  rpc GetUpdateByOffset(GetUpdateByOffsetRequest) returns (GetUpdateResponse) {
++    option (google.api.http) = {
++      post: "/v2/updates/update-by-offset"
++      body: "*"
++    };
++  }
+ 
+   // Lookup an update by its ID.
+   // If there is no update with this ID, or all the events are filtered, an UPDATE_NOT_FOUND error will be raised.
+-  rpc GetUpdateById(GetUpdateByIdRequest) returns (GetUpdateResponse);
++  rpc GetUpdateById(GetUpdateByIdRequest) returns (GetUpdateResponse) {
++    option (google.api.http) = {
++      post: "/v2/updates/update-by-id"
++      body: "*"
++    };
++  }
+ }
+ 
+ message GetUpdatesRequest {

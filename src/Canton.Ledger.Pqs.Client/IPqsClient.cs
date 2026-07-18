@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 
 namespace Canton.Ledger.Pqs.Client;
 
@@ -11,12 +12,12 @@ namespace Canton.Ledger.Pqs.Client;
 /// </summary>
 /// <remarks>
 /// <para>
-/// PQS stores active contracts in a table accessible via the <c>active(@templateId)</c>
+/// PQS stores active contracts in a table accessible via the <c>active(@typeId)</c>
 /// PostgreSQL function. Each row contains a <c>contract_id</c> column and a <c>payload</c>
 /// column with the contract fields as a JSON object (camelCase field names).
 /// </para>
 /// <para>
-/// Queries use the generated Daml C# bindings for type safety. The template identifier
+/// Queries use the generated Daml C# bindings for type safety. The type identifier
 /// is derived from the generated Daml type metadata in the format required by PQS.
 /// </para>
 /// </remarks>
@@ -28,6 +29,32 @@ public interface IPqsClient
     Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         CancellationToken cancellationToken = default)
         where T : ITemplate;
+
+    /// <summary>
+    /// Queries all active contracts that implement a Daml interface, projecting each row's
+    /// participant-computed interface view into <typeparamref name="TView"/>.
+    /// </summary>
+    /// <remarks>
+    /// Routes through the same PQS <c>active(name)</c> function as the template overload, but
+    /// passes the interface's package-name-qualified identifier
+    /// (<c>{packageName}:{moduleName}:{interfaceName}</c>). PQS returns one row per active contract
+    /// implementing the interface, whose <c>payload</c> is the interface view record — not the
+    /// implementing template's payload — so results carry the view in
+    /// <see cref="InterfaceContract{TInterface, TView}.View"/>. Both type arguments are explicit
+    /// (<c>QueryAsync&lt;IHolding, HoldingView&gt;()</c>) because the queried interface and its
+    /// deserialized view are distinct types; the <see cref="IHasView{TView}"/> constraint ties them.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var holdings = await pqs.QueryAsync&lt;IHolding, HoldingView&gt;(ct);
+    /// </code>
+    /// </example>
+    /// <typeparam name="TInterface">The generated Daml interface marker (e.g. <c>IHolding</c>).</typeparam>
+    /// <typeparam name="TView">The interface's view record (e.g. <c>HoldingView</c>).</typeparam>
+    Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
+        CancellationToken cancellationToken = default)
+        where TInterface : IDamlInterface, IHasView<TView>
+        where TView : IDamlRecord;
 
     /// <summary>
     /// Queries active contracts matching a filter.

@@ -10,6 +10,7 @@ using AwesomeAssertions;
 using Google.Rpc;
 using Xunit;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
+using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
 using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
@@ -74,8 +75,8 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(11L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.InterfaceViewUnavailable);
+        unclassified.Offset.Value.Should().Be(11L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
     public static IEnumerable<object[]> UndecodableInterfaceViews()
@@ -126,9 +127,10 @@ public class ContractStreamProjectorTests
             },
         };
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response);
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response).ToList();
 
-        var typed = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
+        var typed = projected.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
         typed.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("acs-view-value");
     }
 
@@ -153,11 +155,12 @@ public class ContractStreamProjectorTests
             },
         };
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response);
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response).ToList();
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(21L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.InterfaceViewUnavailable);
+        var unclassified = projected.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(21L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
     [Fact]
@@ -224,8 +227,96 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(31L);
-        unclassified.Kind.Should().Be(ContractStreamProjector.UnclassifiedKind.InterfaceViewUnavailable);
+        unclassified.Offset.Value.Should().Be(31L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
+    }
+
+    private static ProtoValue UnsetSumValue() => new();
+
+    public static TheoryData<ProtoValue> PoisonValues =>
+        new(LedgerClientTestFixtures.OutOfDecimalRangeNumeric(), UnsetSumValue());
+
+    [Theory]
+    [MemberData(nameof(PoisonValues))]
+    public void ProjectTransactionEvents_surfaces_Created_with_undecodable_create_arguments_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00poison",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord
+            {
+                Fields = { new RecordField { Label = "amount", Value = poisonValue } },
+            },
+            Offset = 50L,
+        };
+        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        transaction.Events.Add(new Event { Created = created });
+
+        var events = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+    }
+
+    [Theory]
+    [MemberData(nameof(PoisonValues))]
+    public void ProjectTransactionEvents_surfaces_Exercised_with_undecodable_choice_argument_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    {
+        var exercised = new ProtoExercisedEvent
+        {
+            ContractId = "00poison",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            Choice = "Accept",
+            ChoiceArgument = poisonValue,
+            ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            Consuming = true,
+            Offset = 51L,
+        };
+        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        transaction.Events.Add(new Event { Exercised = exercised });
+
+        var events = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(51L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+    }
+
+    [Theory]
+    [MemberData(nameof(PoisonValues))]
+    public void ProjectReassignmentEvents_surfaces_Assigned_with_undecodable_payload_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00poison",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord
+            {
+                Fields = { new RecordField { Label = "amount", Value = poisonValue } },
+            },
+            Offset = 60L,
+        };
+        var reassignment = new Reassignment { Offset = 99L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Assigned = new AssignedEvent
+            {
+                Source = "sync-src",
+                Target = "sync-tgt",
+                CreatedEvent = created,
+            },
+        });
+
+        var events = ContractStreamProjector.ProjectReassignmentEvents<TemplateMarker>(reassignment).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(60L, "the decode-failure offset comes from the created event, not the reassignment fallback");
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
     [Fact]
@@ -249,6 +340,137 @@ public class ContractStreamProjectorTests
         var typed = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         typed.Payload.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice");
+    }
+
+    [Fact]
+    public void ProjectReassignmentEvents_surfaces_typed_Unassigned_for_interface_marker()
+    {
+        var unassigned = new UnassignedEvent
+        {
+            ContractId = "00holding",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+            Source = "sync-src",
+            Target = "sync-tgt",
+            Offset = 70L,
+        };
+        var reassignment = new Reassignment { Offset = 70L };
+        reassignment.Events.Add(new ReassignmentEvent { Unassigned = unassigned });
+
+        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+
+        var typed = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unassigned>().Subject;
+        typed.ContractId.Value.Should().Be("00holding");
+        typed.Source.Id.Should().Be("sync-src");
+        typed.Target.Id.Should().Be("sync-tgt");
+    }
+
+    [Fact]
+    public void ProjectActiveContractEntry_IncompleteUnassigned_surfaces_Created_then_Unassigned_on_source_to_target()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00holding",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord
+            {
+                Fields = { new RecordField { Label = "owner", Value = new ProtoValue { Party = "alice" } } },
+            },
+            Offset = 80L,
+        };
+        var response = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                CreatedEvent = created,
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = "00holding",
+                    Source = "sync-src",
+                    Target = "sync-tgt",
+                    Offset = 81L,
+                },
+            },
+        };
+
+        var events = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+
+        events.Should().HaveCount(2);
+        var createdEvent = events[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
+        createdEvent.ContractId.Value.Should().Be("00holding");
+        createdEvent.SynchronizerId.Id.Should().Be("sync-src");
+        var unassignedEvent = events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unassigned>().Subject;
+        unassignedEvent.ContractId.Value.Should().Be("00holding");
+        unassignedEvent.Offset.Value.Should().Be(81L);
+        unassignedEvent.Source.Id.Should().Be("sync-src");
+        unassignedEvent.Target.Id.Should().Be("sync-tgt");
+    }
+
+    [Fact]
+    public void ProjectActiveContractEntry_IncompleteUnassigned_surfaces_Unclassified_instead_of_the_Unassigned_when_Target_is_missing()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00holding",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord(),
+            Offset = 85L,
+        };
+        var response = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                CreatedEvent = created,
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = "00holding",
+                    Source = "sync-src",
+                    Target = string.Empty,
+                    Offset = 86L,
+                },
+            },
+        };
+
+        var events = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
+        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(86L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public void ProjectActiveContractEntry_IncompleteUnassigned_omits_the_Unassigned_when_the_created_does_not_match_the_marker()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00other",
+            TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
+            CreateArguments = new ProtoRecord(),
+            Offset = 90L,
+        };
+        var response = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                CreatedEvent = created,
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = "00other",
+                    Source = "sync-src",
+                    Target = "sync-tgt",
+                    Offset = 91L,
+                },
+            },
+        };
+
+        var events = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(90L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
     internal sealed record InterfaceMarker : IDamlInterface

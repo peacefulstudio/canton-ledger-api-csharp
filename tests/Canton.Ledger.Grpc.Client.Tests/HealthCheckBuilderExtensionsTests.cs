@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using AwesomeAssertions;
+using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -35,6 +40,35 @@ public class HealthCheckBuilderExtensionsTests
 
         var registration = options.Value.Registrations.Should().ContainSingle(r => r.Name == "ledger-custom").Subject;
         registration.Tags.Should().Contain(["grpc", "ready"]);
+    }
+
+    [Fact]
+    public async Task AddLedgerClient_health_check_logs_the_failed_probe_to_the_registered_ILoggerFactory()
+    {
+        var loggerFactory = new CapturingLoggerFactory();
+        var ledgerClient = Substitute.For<ILedgerClient>();
+        ledgerClient.GetLedgerEndAsync(Arg.Any<TimeSpan?>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("Connection refused"));
+
+        var services = new ServiceCollection();
+        services.AddSingleton<ILoggerFactory>(loggerFactory);
+        services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+        services.AddSingleton(ledgerClient);
+        services.AddHealthChecks().AddLedgerClient();
+
+        var provider = services.BuildServiceProvider();
+        var registration = provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>()
+            .Value.Registrations.Single();
+        var healthCheck = registration.Factory(provider);
+
+        await healthCheck.CheckHealthAsync(
+            new HealthCheckContext { Registration = registration },
+            TestContext.Current.CancellationToken);
+
+        loggerFactory.Records.Should().Contain(r =>
+            r.Category == typeof(LedgerHealthCheck).FullName
+            && r.Level == LogLevel.Warning
+            && r.Message.Contains("Ledger health check failed"));
     }
 
     [Fact]
