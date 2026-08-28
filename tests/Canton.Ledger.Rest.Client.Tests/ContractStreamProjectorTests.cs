@@ -3,7 +3,8 @@
 
 using System.Net;
 using AwesomeAssertions;
-using Canton.Ledger.Rest;
+using Canton.Ledger.Testing.Helpers;
+using Canton.Ledger.Rest.Client.Raw;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -11,6 +12,8 @@ using Daml.Runtime.Streams;
 using Microsoft.Extensions.Logging;
 using Xunit;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+
+#pragma warning disable CANTONREST001
 
 namespace Canton.Ledger.Rest.Client.Tests;
 
@@ -23,28 +26,37 @@ public class ContractStreamProjectorTests
         return await api.GetActiveContracts(new GetActiveContractsRequest(), TestContext.Current.CancellationToken);
     }
 
+    private static ContractStreamEvent<TemplateMarker> ProjectSingleActiveContractEntry(
+        GetActiveContractsResponse response,
+        ILogger? logger = null,
+        LedgerOffset? snapshotOffset = null) =>
+        ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response, logger, snapshotOffset)
+            .Should().ContainSingle().Subject;
+
     [Fact]
     public async Task ProjectActiveContractEntry_projects_an_active_contract_into_Created()
     {
         var response = await ActiveContractsResponseFrom(
             """
             {
-              "active_contract": {
-                "created_event": {
-                  "offset": "42",
-                  "node_id": 0,
-                  "contract_id": "00holding",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                  "create_arguments": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
-                  "witness_parties": ["alice::ns1"]
-                },
-                "synchronizer_id": "sync-1",
-                "reassignment_counter": "0"
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "nodeId": 0,
+                    "contractId": "00holding",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                    "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                    "witnessParties": ["alice::ns1"]
+                  },
+                  "synchronizerId": "sync-1",
+                  "reassignmentCounter": "0"
+                }
               }
             }
             """);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.ContractId.Value.Should().Be("00holding");
@@ -60,19 +72,21 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseFrom(
             """
             {
-              "active_contract": {
-                "created_event": {
-                  "offset": "42",
-                  "contract_id": "00other",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Other"},
-                  "create_arguments": {"fields": []}
-                },
-                "synchronizer_id": "sync-1"
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "contractId": "00other",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Other"},
+                    "createArgument": {"fields": []}
+                  },
+                  "synchronizerId": "sync-1"
+                }
               }
             }
             """);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Offset.Value.Should().Be(42L);
@@ -85,18 +99,20 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseFrom(
             """
             {
-              "active_contract": {
-                "created_event": {
-                  "offset": "42",
-                  "contract_id": "00holding",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                  "create_arguments": {"fields": []}
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "contractId": "00holding",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                    "createArgument": {"fields": []}
+                  }
                 }
               }
             }
             """);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Offset.Value.Should().Be(42L);
@@ -105,53 +121,170 @@ public class ContractStreamProjectorTests
 
     [Theory]
     [InlineData("""{}""")]
-    [InlineData("""{"workflow_id": "wf-1"}""")]
-    [InlineData("""{"active_contract": {"synchronizer_id": "sync-1"}}""")]
-    [InlineData("""{"incomplete_assigned": {"assigned_event": {"target": "sync-2"}}}""")]
+    [InlineData("""{"workflowId": "wf-1"}""")]
+    [InlineData("""{"contractEntry": {"JsActiveContract": {"synchronizerId": "sync-1"}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteAssigned": {"assignedEvent": {"target": "sync-2"}}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteUnassigned": {}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteUnassigned": {"unassignedEvent": {"source": "sync-1", "target": "sync-2"}}}}""")]
     public async Task ProjectActiveContractEntry_surfaces_an_entry_without_a_created_event_as_Unclassified(
         string json)
     {
         var response = await ActiveContractsResponseFrom(json);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Offset.Value.Should().Be(0L);
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
-    [Fact]
-    public async Task ProjectActiveContractEntry_projects_an_incomplete_unassigned_entry_using_the_source_synchronizer()
+    [Theory]
+    [InlineData("""{}""")]
+    [InlineData("""{"workflowId": "wf-1"}""")]
+    [InlineData("""{"contractEntry": {"JsActiveContract": {"synchronizerId": "sync-1"}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteAssigned": {"assignedEvent": {"target": "sync-2"}}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteUnassigned": {}}}""")]
+    [InlineData("""{"contractEntry": {"JsIncompleteUnassigned": {"unassignedEvent": {"source": "sync-1", "target": "sync-2"}}}}""")]
+    public async Task ProjectActiveContractEntry_reports_an_entry_without_a_created_event_at_the_snapshot_offset(
+        string json)
     {
-        var response = await ActiveContractsResponseFrom(
-            """
+        var response = await ActiveContractsResponseFrom(json);
+
+        var projected = ProjectSingleActiveContractEntry(response, snapshotOffset: LedgerOffset.At(77));
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
+    }
+
+    private static Task<GetActiveContractsResponse> IncompleteUnassignedResponseFrom(
+        string createdEntityName,
+        string unassignedEventJson) =>
+        ActiveContractsResponseFrom(
+            $$"""
             {
-              "incomplete_unassigned": {
-                "created_event": {
-                  "offset": "42",
-                  "contract_id": "00holding",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                  "create_arguments": {"fields": []}
-                },
-                "unassigned_event": {"source": "sync-1", "target": "sync-2", "offset": "50"}
+              "contractEntry": {
+                "JsIncompleteUnassigned": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "contractId": "00holding",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "{{createdEntityName}}"},
+                    "createArgument": {"fields": []}
+                  },
+                  "unassignedEvent": {{unassignedEventJson}}
+                }
               }
             }
             """);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+    [Fact]
+    public async Task ProjectActiveContractEntry_projects_an_incomplete_unassigned_entry_as_Created_on_the_source_then_Unassigned_source_to_target()
+    {
+        var response = await IncompleteUnassignedResponseFrom(
+            "Holding",
+            """
+            {
+              "contractId": "00holding",
+              "source": "sync-1",
+              "target": "sync-2",
+              "offset": "50",
+              "reassignmentId": "reassignment-1",
+              "reassignmentCounter": "7",
+              "witnessParties": ["alice::ns1"]
+            }
+            """);
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+
+        projected.Should().HaveCount(2);
+        var created = projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.SynchronizerId.Should().Be(new SynchronizerId("sync-1"));
         created.Offset.Value.Should().Be(42L);
+        var unassigned = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unassigned>().Subject;
+        unassigned.ContractId.Value.Should().Be("00holding");
+        unassigned.Offset.Value.Should().Be(50L);
+        unassigned.Source.Should().Be(new SynchronizerId("sync-1"));
+        unassigned.Target.Should().Be(new SynchronizerId("sync-2"));
+        unassigned.ReassignmentId.Should().Be("reassignment-1");
+        unassigned.ReassignmentCounter.Should().Be(7L);
+        unassigned.WitnessParties.Should().ContainSingle().Which.Should().Be((Party)"alice::ns1");
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_surfaces_Unclassified_instead_of_the_Unassigned_when_the_unassignment_target_is_missing()
+    {
+        var response = await IncompleteUnassignedResponseFrom(
+            "Holding",
+            """{"contractId": "00holding", "source": "sync-1", "offset": "50", "reassignmentCounter": "7"}""");
+
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+
+        projected.Should().HaveCount(2);
+        projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
+        var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_omits_the_Unassigned_when_the_incomplete_unassigned_created_does_not_match_the_marker()
+    {
+        var response = await IncompleteUnassignedResponseFrom(
+            "Other",
+            """{"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "50", "reassignmentCounter": "7"}""");
+
+        var projected = ProjectSingleActiveContractEntry(response);
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_surfaces_an_unparseable_unassignment_counter_as_Unclassified_decode_failure()
+    {
+        var response = await IncompleteUnassignedResponseFrom(
+            "Holding",
+            """{"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "50", "reassignmentCounter": "not-a-number"}""");
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(
+            response, loggerFactory.CreateLogger("test")).ToList();
+
+        projected.Should().HaveCount(2);
+        projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
+        var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_surfaces_an_unassignment_without_a_contract_id_as_Unclassified_decode_failure()
+    {
+        var response = await IncompleteUnassignedResponseFrom(
+            "Holding",
+            """{"source": "sync-1", "target": "sync-2", "offset": "50", "reassignmentCounter": "7"}""");
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(
+            response, loggerFactory.CreateLogger("test")).ToList();
+
+        projected.Should().HaveCount(2);
+        projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
+        var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 
     [Fact]
     public async Task ProjectActiveContractEntry_surfaces_an_incomplete_unassigned_entry_without_a_created_event_at_the_unassignment_offset()
     {
         var response = await ActiveContractsResponseFrom(
-            """{"incomplete_unassigned": {"unassigned_event": {"source": "sync-1", "target": "sync-2", "offset": "50"}}}""");
+            """{"contractEntry": {"JsIncompleteUnassigned": {"unassignedEvent": {"source": "sync-1", "target": "sync-2", "offset": "50"}}}}""");
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response, snapshotOffset: LedgerOffset.At(77));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Offset.Value.Should().Be(50L);
@@ -164,22 +297,24 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseFrom(
             """
             {
-              "incomplete_assigned": {
-                "assigned_event": {
-                  "source": "sync-1",
-                  "target": "sync-2",
-                  "created_event": {
-                    "offset": "43",
-                    "contract_id": "00holding",
-                    "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                    "create_arguments": {"fields": []}
+              "contractEntry": {
+                "JsIncompleteAssigned": {
+                  "assignedEvent": {
+                    "source": "sync-1",
+                    "target": "sync-2",
+                    "createdEvent": {
+                      "offset": "43",
+                      "contractId": "00holding",
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"fields": []}
+                    }
                   }
                 }
               }
             }
             """);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.SynchronizerId.Should().Be(new SynchronizerId("sync-2"));
@@ -192,20 +327,22 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseFrom(
             """
             {
-              "active_contract": {
-                "created_event": {
-                  "offset": "42",
-                  "contract_id": "00holding",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                  "create_arguments": {"fields": [{"label": "owner", "value": {"int64": "not-a-number"}}]}
-                },
-                "synchronizer_id": "sync-1"
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "contractId": "00holding",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                    "createArgument": {"fields": [{"label": "owner", "value": {"int64": "not-a-number"}}]}
+                  },
+                  "synchronizerId": "sync-1"
+                }
               }
             }
             """);
         var loggerFactory = new CapturingLoggerFactory();
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(
+        var projected = ProjectSingleActiveContractEntry(
             response, loggerFactory.CreateLogger("test"));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
@@ -214,18 +351,118 @@ public class ContractStreamProjectorTests
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 
-    private static async Task<GetActiveContractsResponse> ActiveContractsResponseWithArguments(string createArgumentsJson) =>
+    [Fact]
+    public async Task ProjectActiveContractEntry_surfaces_an_unparseable_created_offset_as_Unclassified_decode_failure()
+    {
+        var response = await ActiveContractsResponseFrom(
+            """
+            {
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "not-a-number",
+                    "contractId": "00other",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Other"},
+                    "createArgument": {"fields": []}
+                  },
+                  "synchronizerId": "sync-1"
+                }
+              }
+            }
+            """);
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ProjectSingleActiveContractEntry(
+            response, loggerFactory.CreateLogger("test"));
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(
+            record => record.Level == LogLevel.Warning && record.Message.Contains("not-a-number"));
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_reports_an_unparseable_created_offset_at_the_snapshot_offset()
+    {
+        var response = await ActiveContractsResponseFrom(
+            """
+            {
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "not-a-number",
+                    "contractId": "00other",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Other"},
+                    "createArgument": {"fields": []}
+                  },
+                  "synchronizerId": "sync-1"
+                }
+              }
+            }
+            """);
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ProjectSingleActiveContractEntry(
+            response, loggerFactory.CreateLogger("test"), LedgerOffset.At(77));
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(
+            record => record.Level == LogLevel.Warning
+                && record.Message.Contains("not-a-number")
+                && record.Message.Contains("snapshot offset 77"));
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_surfaces_an_unparseable_unassignment_offset_as_Unclassified_decode_failure()
+    {
+        var response = await ActiveContractsResponseFrom(
+            """{"contractEntry": {"JsIncompleteUnassigned": {"unassignedEvent": {"source": "sync-1", "target": "sync-2", "offset": "not-a-number"}}}}""");
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ProjectSingleActiveContractEntry(
+            response, loggerFactory.CreateLogger("test"));
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(
+            record => record.Level == LogLevel.Warning && record.Message.Contains("not-a-number"));
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_reports_an_unparseable_unassignment_offset_at_the_snapshot_offset()
+    {
+        var response = await ActiveContractsResponseFrom(
+            """{"contractEntry": {"JsIncompleteUnassigned": {"unassignedEvent": {"source": "sync-1", "target": "sync-2", "offset": "not-a-number"}}}}""");
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var projected = ProjectSingleActiveContractEntry(
+            response, loggerFactory.CreateLogger("test"), LedgerOffset.At(77));
+
+        var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(
+            record => record.Level == LogLevel.Warning
+                && record.Message.Contains("not-a-number")
+                && record.Message.Contains("snapshot offset 77"));
+    }
+
+    private static async Task<GetActiveContractsResponse> ActiveContractsResponseWithArguments(string createArgumentJson) =>
         await ActiveContractsResponseFrom(
             $$"""
             {
-              "active_contract": {
-                "created_event": {
-                  "offset": "42",
-                  "contract_id": "00holding",
-                  "template_id": {"package_id": "tmpl-pkg", "module_name": "Sample.Token", "entity_name": "Holding"},
-                  "create_arguments": {{createArgumentsJson}}
-                },
-                "synchronizer_id": "sync-1"
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "42",
+                    "contractId": "00holding",
+                    "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                    "createArgument": {{createArgumentJson}}
+                  },
+                  "synchronizerId": "sync-1"
+                }
               }
             }
             """);
@@ -237,7 +474,7 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseWithArguments(
             $$"""{"fields": [{"label": "v", "value": {{valueJson}}}]}""");
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.Payload.GetRequiredField("v").Should().BeEquivalentTo(
@@ -247,13 +484,15 @@ public class ContractStreamProjectorTests
     public static IEnumerable<object[]> WireValueCases()
     {
         yield return ["""{"bool": true}""", new DamlBool(true)];
+        yield return ["""{"bool": false}""", new DamlBool(false)];
         yield return ["""{"int64": "5"}""", new DamlInt64(5)];
         yield return ["""{"date": 20000}""", DamlDate.FromDaysSinceEpoch(20000)];
+        yield return ["""{"date": 0}""", DamlDate.FromDaysSinceEpoch(0)];
         yield return ["""{"timestamp": "1720000000000000"}""", DamlTimestamp.FromMicrosecondsSinceEpoch(1720000000000000)];
         yield return ["""{"numeric": "1.5"}""", new DamlNumeric(1.5m)];
         yield return ["""{"party": "alice::ns1"}""", new DamlParty("alice::ns1")];
         yield return ["""{"text": "hello"}""", new DamlText("hello")];
-        yield return ["""{"contract_id": "00cid"}""", new DamlContractId("00cid")];
+        yield return ["""{"contractId": "00cid"}""", new DamlContractId("00cid")];
         yield return ["""{"unit": {}}""", DamlUnit.Instance];
         yield return ["""{"optional": {}}""", new DamlOptional(null)];
         yield return ["""{"optional": {"value": {"text": "some"}}}""", new DamlOptional(new DamlText("some"))];
@@ -264,12 +503,12 @@ public class ContractStreamProjectorTests
         ];
         yield return
         [
-            """{"text_map": {"entries": [{"key": "k", "value": {"int64": "1"}}]}}""",
+            """{"textMap": {"entries": [{"key": "k", "value": {"int64": "1"}}]}}""",
             new DamlTextMap(new Dictionary<string, DamlValue> { ["k"] = new DamlInt64(1) }),
         ];
         yield return
         [
-            """{"gen_map": {"entries": [{"key": {"text": "k"}, "value": {"int64": "1"}}]}}""",
+            """{"genMap": {"entries": [{"key": {"text": "k"}, "value": {"int64": "1"}}]}}""",
             new DamlGenMap([(new DamlText("k"), new DamlInt64(1))]),
         ];
         yield return
@@ -287,18 +526,16 @@ public class ContractStreamProjectorTests
 
     [Theory]
     [InlineData("""{}""")]
-    [InlineData("""{"bool": false}""")]
-    [InlineData("""{"date": 0}""")]
     [InlineData("""{"int64": "not-a-number"}""")]
     [InlineData("""{"numeric": "not-a-number"}""")]
     [InlineData("""{"timestamp": "not-a-number"}""")]
-    public async Task ProjectActiveContractEntry_surfaces_a_Value_whose_sum_case_is_ambiguous_or_malformed_as_decode_failure(
+    public async Task ProjectActiveContractEntry_surfaces_a_Value_whose_sum_case_is_unset_or_malformed_as_decode_failure(
         string valueJson)
     {
         var response = await ActiveContractsResponseWithArguments(
             $$"""{"fields": [{"label": "v", "value": {{valueJson}}}]}""");
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
@@ -310,7 +547,7 @@ public class ContractStreamProjectorTests
         var response = await ActiveContractsResponseWithArguments(
             """{"owner": "alice::ns1", "amount": "10.5"}""");
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.Payload.GetRequiredField("owner").As<DamlText>().Value.Should().Be("alice::ns1");
@@ -321,25 +558,13 @@ public class ContractStreamProjectorTests
     [InlineData("""{}""")]
     [InlineData("null")]
     public async Task ProjectActiveContractEntry_projects_absent_or_empty_create_arguments_as_an_empty_record(
-        string createArgumentsJson)
+        string createArgumentJson)
     {
-        var response = await ActiveContractsResponseWithArguments(createArgumentsJson);
+        var response = await ActiveContractsResponseWithArguments(createArgumentJson);
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response);
+        var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
         created.Payload.Fields.Should().BeEmpty();
-    }
-
-    internal sealed record TemplateMarker(string Owner) : ITemplate
-    {
-        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
-        public static string PackageId => "tmpl-pkg";
-        public static string PackageName => "token-impl";
-        public static Version PackageVersion { get; } = new(0, 1, 0);
-        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
-
-        public DamlRecord ToRecord() => DamlRecord.Create(
-            DamlField.Create("owner", new DamlParty(Owner)));
     }
 }

@@ -1,7 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Abstractions;
 using AwesomeAssertions;
 using Xunit;
 

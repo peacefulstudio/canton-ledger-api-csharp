@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
-using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
@@ -12,6 +12,7 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using ProtoV2 = Com.Daml.Ledger.Api.V2;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
@@ -26,8 +27,8 @@ public class LedgerClientDeadlineTests
 
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
-    private readonly CommandService.CommandServiceClient _commandService;
-    private readonly StateService.StateServiceClient _stateService;
+    private readonly ProtoV2.CommandService.CommandServiceClient _commandService;
+    private readonly ProtoV2.StateService.StateServiceClient _stateService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientDeadlineTests()
@@ -41,15 +42,15 @@ public class LedgerClientDeadlineTests
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress);
 
         var callInvoker = Substitute.For<CallInvoker>();
-        _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
-        _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
+        _commandService = Substitute.ForPartsOf<ProtoV2.CommandService.CommandServiceClient>(callInvoker);
+        _stateService = Substitute.ForPartsOf<ProtoV2.StateService.StateServiceClient>(callInvoker);
     }
 
     private LedgerClient CreateClient() => new(
         _options,
         _channel,
         _commandService,
-        new UpdateService.UpdateServiceClient(_channel),
+        new ProtoV2.UpdateService.UpdateServiceClient(_channel),
         _stateService,
         _tokenProvider);
 
@@ -115,7 +116,7 @@ public class LedgerClientDeadlineTests
     [Fact]
     public async Task TrySubmitAndWaitForTransactionAsync_deadline_overrun_surfaces_as_InfraError()
     {
-        StubSubmitAndWaitForTransaction(onDeadline: null, Faulted<SubmitAndWaitForTransactionResponse>(DeadlineExceeded()));
+        StubSubmitAndWaitForTransaction(onDeadline: null, Faulted<ProtoV2.SubmitAndWaitForTransactionResponse>(DeadlineExceeded()));
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
@@ -128,7 +129,7 @@ public class LedgerClientDeadlineTests
     [Fact]
     public async Task TrySubmitAndWaitForTransactionAsync_caller_cancellation_throws_OperationCanceledException()
     {
-        StubSubmitAndWaitForTransaction(onDeadline: null, Faulted<SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Cancelled, "cancelled"))));
+        StubSubmitAndWaitForTransaction(onDeadline: null, Faulted<ProtoV2.SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Cancelled, "cancelled"))));
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
@@ -161,11 +162,11 @@ public class LedgerClientDeadlineTests
         DateTime? captured = null;
         _commandService
             .SubmitAndWaitAsync(
-                Arg.Any<SubmitAndWaitRequest>(),
+                Arg.Any<ProtoV2.SubmitAndWaitRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Do<DateTime?>(d => captured = d),
                 Arg.Any<CancellationToken>())
-            .Returns(Ok(new SubmitAndWaitResponse { UpdateId = "u-1", CompletionOffset = 1L }));
+            .Returns(Ok(new ProtoV2.SubmitAndWaitResponse { UpdateId = "u-1", CompletionOffset = 1L }));
         var timeout = TimeSpan.FromMinutes(7);
 
         var before = DateTime.UtcNow;
@@ -182,11 +183,11 @@ public class LedgerClientDeadlineTests
         DateTime? captured = null;
         _stateService
             .GetLedgerEndAsync(
-                Arg.Any<GetLedgerEndRequest>(),
+                Arg.Any<ProtoV2.GetLedgerEndRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Do<DateTime?>(d => captured = d),
                 Arg.Any<CancellationToken>())
-            .Returns(Ok(new GetLedgerEndResponse { Offset = 9L }));
+            .Returns(Ok(new ProtoV2.GetLedgerEndResponse { Offset = 9L }));
         var timeout = TimeSpan.FromMinutes(7);
 
         var before = DateTime.UtcNow;
@@ -201,7 +202,7 @@ public class LedgerClientDeadlineTests
     public async Task TrySubmitAndWaitForTransactionAsync_server_Cancelled_maps_to_InfraError_when_caller_not_cancelled()
     {
         StubSubmitAndWaitForTransaction(onDeadline: null,
-            Faulted<SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Cancelled, "server cancelled"))));
+            Faulted<ProtoV2.SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Cancelled, "server cancelled"))));
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
@@ -252,13 +253,13 @@ public class LedgerClientDeadlineTests
         DateTime? captured = null;
         _commandService
             .SubmitAndWaitForReassignmentAsync(
-                Arg.Any<SubmitAndWaitForReassignmentRequest>(),
+                Arg.Any<ProtoV2.SubmitAndWaitForReassignmentRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Do<DateTime?>(d => captured = d),
                 Arg.Any<CancellationToken>())
-            .Returns(Ok(new SubmitAndWaitForReassignmentResponse
+            .Returns(Ok(new ProtoV2.SubmitAndWaitForReassignmentResponse
             {
-                Reassignment = new Reassignment { Offset = 1L },
+                Reassignment = new ProtoV2.Reassignment { Offset = 1L },
             }));
         var timeout = TimeSpan.FromMinutes(7);
 
@@ -275,7 +276,7 @@ public class LedgerClientDeadlineTests
     public async Task TrySubmitAndWaitForReassignmentAsync_caller_cancellation_throws_OperationCanceledException()
     {
         StubSubmitAndWaitForReassignment(
-            Faulted<SubmitAndWaitForReassignmentResponse>(new RpcException(new Status(StatusCode.Cancelled, "cancelled"))));
+            Faulted<ProtoV2.SubmitAndWaitForReassignmentResponse>(new RpcException(new Status(StatusCode.Cancelled, "cancelled"))));
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
@@ -291,7 +292,7 @@ public class LedgerClientDeadlineTests
     public async Task TrySubmitAndWaitForReassignmentAsync_server_Cancelled_maps_to_InfraError_when_caller_not_cancelled()
     {
         StubSubmitAndWaitForReassignment(
-            Faulted<SubmitAndWaitForReassignmentResponse>(new RpcException(new Status(StatusCode.Cancelled, "server cancelled"))));
+            Faulted<ProtoV2.SubmitAndWaitForReassignmentResponse>(new RpcException(new Status(StatusCode.Cancelled, "server cancelled"))));
 
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForReassignmentAsync<LedgerClientTests.TestTemplate>(
@@ -301,10 +302,10 @@ public class LedgerClientDeadlineTests
             .Which.StatusCode.Should().Be((int)StatusCode.Cancelled);
     }
 
-    private void StubSubmitAndWaitForReassignment(AsyncUnaryCall<SubmitAndWaitForReassignmentResponse> call) =>
+    private void StubSubmitAndWaitForReassignment(AsyncUnaryCall<ProtoV2.SubmitAndWaitForReassignmentResponse> call) =>
         _commandService
             .SubmitAndWaitForReassignmentAsync(
-                Arg.Any<SubmitAndWaitForReassignmentRequest>(),
+                Arg.Any<ProtoV2.SubmitAndWaitForReassignmentRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Any<DateTime?>(),
                 Arg.Any<CancellationToken>())
@@ -312,11 +313,11 @@ public class LedgerClientDeadlineTests
 
     private void StubSubmitAndWaitForTransaction(
         Action<DateTime?>? onDeadline,
-        AsyncUnaryCall<SubmitAndWaitForTransactionResponse> call)
+        AsyncUnaryCall<ProtoV2.SubmitAndWaitForTransactionResponse> call)
     {
         _commandService
             .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<ProtoV2.SubmitAndWaitForTransactionRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Do<DateTime?>(d => onDeadline?.Invoke(d)),
                 Arg.Any<CancellationToken>())
@@ -338,16 +339,16 @@ public class LedgerClientDeadlineTests
                 new SynchronizerId("sync::target")),
             ActAs);
 
-    private static AsyncUnaryCall<SubmitAndWaitForTransactionResponse> OkTransaction() =>
-        Ok(new SubmitAndWaitForTransactionResponse
+    private static AsyncUnaryCall<ProtoV2.SubmitAndWaitForTransactionResponse> OkTransaction() =>
+        Ok(new ProtoV2.SubmitAndWaitForTransactionResponse
         {
-            Transaction = new Transaction { UpdateId = "u-1", Offset = 1L },
+            Transaction = new ProtoV2.Transaction { UpdateId = "u-1", Offset = 1L },
         });
 
-    private static AsyncUnaryCall<SubmitAndWaitForTransactionResponse> OkExercisedTransaction()
+    private static AsyncUnaryCall<ProtoV2.SubmitAndWaitForTransactionResponse> OkExercisedTransaction()
     {
-        var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
-        transaction.Events.Add(new Event
+        var transaction = new ProtoV2.Transaction { UpdateId = "u-1", Offset = 1L };
+        transaction.Events.Add(new ProtoV2.Event
         {
             Exercised = new ProtoExercisedEvent
             {
@@ -356,7 +357,7 @@ public class LedgerClientDeadlineTests
                 Choice = "Archive",
             }
         });
-        return Ok(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
+        return Ok(new ProtoV2.SubmitAndWaitForTransactionResponse { Transaction = transaction });
     }
 
     private static RpcException DeadlineExceeded() =>

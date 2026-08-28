@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/topology_transaction.proto
 +++ b/com/daml/ledger/api/v2/topology_transaction.proto
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,7 @@ import "com/daml/ledger/api/v2/state_service.proto";
  import "com/daml/ledger/api/v2/trace_context.proto";
  import "google/protobuf/timestamp.proto";
  
@@ -8,3 +8,24 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "TopologyTransactionOuterClass";
  option java_package = "com.daml.ledger.api.v2";
+@@ -60,11 +61,16 @@ message TopologyTransaction {
+ 
+ message TopologyEvent {
+   // Required
++  TopologyEventEvent event = 1 [json_name = "event"];
++}
++
++// Selects which participant authorization change a ``TopologyEvent`` reports.
++message TopologyEventEvent {
+   oneof event {
+-    ParticipantAuthorizationChanged participant_authorization_changed = 1;
+-    ParticipantAuthorizationRevoked participant_authorization_revoked = 2;
+-    ParticipantAuthorizationAdded participant_authorization_added = 3;
+-    ParticipantAuthorizationOnboarding participant_authorization_onboarding = 4;
++    ParticipantAuthorizationChanged participant_authorization_changed = 1 [json_name = "ParticipantAuthorizationChanged"];
++    ParticipantAuthorizationRevoked participant_authorization_revoked = 2 [json_name = "ParticipantAuthorizationRevoked"];
++    ParticipantAuthorizationAdded participant_authorization_added = 3 [json_name = "ParticipantAuthorizationAdded"];
++    ParticipantAuthorizationOnboarding participant_authorization_onboarding = 4 [json_name = "ParticipantAuthorizationOnboarding"];
+   }
+ }
+ 

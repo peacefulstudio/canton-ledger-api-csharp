@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Data;
@@ -9,6 +10,8 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using Google.Protobuf.WellKnownTypes;
+using Interactive = Com.Daml.Ledger.Api.V2.Interactive;
 using RuntimeCommands = Daml.Runtime.Commands;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
@@ -30,6 +33,7 @@ public class LedgerClientD1SurfaceTests
     private readonly CommandSubmissionService.CommandSubmissionServiceClient _submissionService;
     private readonly CommandCompletionService.CommandCompletionServiceClient _completionService;
     private readonly VersionService.VersionServiceClient _versionService;
+    private readonly Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient _interactiveSubmissionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientD1SurfaceTests()
@@ -48,6 +52,8 @@ public class LedgerClientD1SurfaceTests
         _submissionService = Substitute.ForPartsOf<CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
         _completionService = Substitute.ForPartsOf<CommandCompletionService.CommandCompletionServiceClient>(callInvoker);
         _versionService = Substitute.ForPartsOf<VersionService.VersionServiceClient>(callInvoker);
+        _interactiveSubmissionService = Substitute
+            .ForPartsOf<Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient>(callInvoker);
     }
 
     private LedgerClient CreateClient() => new(
@@ -59,7 +65,8 @@ public class LedgerClientD1SurfaceTests
         _submissionService,
         _completionService,
         _tokenProvider,
-        _versionService);
+        _versionService,
+        _interactiveSubmissionService);
 
     [Fact]
     public async Task GetConnectedSynchronizersAsync_projects_response_entries()
@@ -120,7 +127,7 @@ public class LedgerClientD1SurfaceTests
                 Arg.Any<DateTime?>(),
                 Arg.Any<CancellationToken>())
             .Returns(new AsyncUnaryCall<GetLedgerApiVersionResponse>(
-                Task.FromResult(new GetLedgerApiVersionResponse { Version = "3.4.11" }),
+                Task.FromResult(new GetLedgerApiVersionResponse { Version = "3.5.9" }),
                 Task.FromResult(new Metadata()),
                 () => Status.DefaultSuccess,
                 () => new Metadata(),
@@ -129,7 +136,7 @@ public class LedgerClientD1SurfaceTests
         var client = CreateClient();
         var version = await client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
 
-        version.Should().Be("3.4.11");
+        version.Should().Be("3.5.9");
     }
 
     [Fact]
@@ -394,6 +401,114 @@ public class LedgerClientD1SurfaceTests
                 Arg.Any<DateTime?>(),
                 Arg.Any<CancellationToken>())
             .Returns(new AsyncUnaryCall<GetUpdateResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_projects_every_cost_component_and_the_estimation_timestamp()
+    {
+        var estimatedAt = new DateTimeOffset(2026, 8, 15, 9, 30, 0, TimeSpan.Zero);
+        StubPrepareSubmission(new Interactive.PrepareSubmissionResponse
+        {
+            CostEstimation = new Interactive.CostEstimation
+            {
+                EstimationTimestamp = Timestamp.FromDateTimeOffset(estimatedAt),
+                ConfirmationRequestTrafficCostEstimation = 3000UL,
+                ConfirmationResponseTrafficCostEstimation = 1096UL,
+                TotalTrafficCostEstimation = 4096UL,
+            },
+        });
+
+        var estimate = await CreateClient().EstimateTrafficCostAsync(
+            SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
+
+        estimate.Should().NotBeNull();
+        estimate!.EstimatedAt.Should().Be(estimatedAt);
+        estimate.ConfirmationRequestCost.Should().Be(3000L);
+        estimate.ConfirmationResponseCost.Should().Be(1096L);
+        estimate.TotalCost.Should().Be(4096L);
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_returns_null_when_participant_omits_cost_estimation()
+    {
+        StubPrepareSubmission(new Interactive.PrepareSubmissionResponse());
+
+        var estimate = await CreateClient().EstimateTrafficCostAsync(
+            SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
+
+        estimate.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_keeps_the_costs_when_the_participant_omits_the_timestamp()
+    {
+        StubPrepareSubmission(new Interactive.PrepareSubmissionResponse
+        {
+            CostEstimation = new Interactive.CostEstimation { TotalTrafficCostEstimation = 512UL },
+        });
+
+        var estimate = await CreateClient().EstimateTrafficCostAsync(
+            SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
+
+        estimate.Should().NotBeNull();
+        estimate!.EstimatedAt.Should().BeNull();
+        estimate.TotalCost.Should().Be(512L);
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_throws_when_a_cost_exceeds_the_signed_range()
+    {
+        StubPrepareSubmission(new Interactive.PrepareSubmissionResponse
+        {
+            CostEstimation = new Interactive.CostEstimation
+            {
+                TotalTrafficCostEstimation = (ulong)long.MaxValue + 1UL,
+            },
+        });
+
+        var act = () => CreateClient().EstimateTrafficCostAsync(
+            SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*total traffic cost of 9223372036854775808 bytes*");
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_sends_the_submission_and_asks_for_cost_estimation()
+    {
+        Interactive.PrepareSubmissionRequest? captured = null;
+        StubPrepareSubmission(new Interactive.PrepareSubmissionResponse(), r => captured = r);
+
+        await CreateClient().EstimateTrafficCostAsync(
+            SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.EstimateTrafficCost.Should().NotBeNull();
+        captured.ActAs.Should().ContainSingle().Which.Should().Be("party::alice");
+        captured.Commands.Should().ContainSingle();
+        captured.UserId.Should().Be("test-user");
+        captured.CommandId.Should().NotBeEmpty();
+    }
+
+    private static RuntimeCommands.CommandsSubmission SingleCreateSubmission() =>
+        RuntimeCommands.CommandsSubmission.Single(RuntimeCommands.CreateCommand.For(new FooBar("alice")), ActAs);
+
+    private void StubPrepareSubmission(
+        Interactive.PrepareSubmissionResponse response,
+        Action<Interactive.PrepareSubmissionRequest>? capture = null)
+    {
+        _interactiveSubmissionService
+            .PrepareSubmissionAsync(
+                Arg.Do<Interactive.PrepareSubmissionRequest>(r => capture?.Invoke(r)),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<Interactive.PrepareSubmissionResponse>(
                 Task.FromResult(response),
                 Task.FromResult(new Metadata()),
                 () => Status.DefaultSuccess,

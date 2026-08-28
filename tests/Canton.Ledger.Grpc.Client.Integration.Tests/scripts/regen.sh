@@ -9,7 +9,7 @@ OCI_TAG="${1:?usage: regen.sh <oci-version-tag>}"
 OCI_REPO="ghcr.io/peacefulstudio/dpm-codegen-cs"
 
 # Resolve the mutable tag to an immutable digest so the codegen bundle pull is
-# pinned — a GHCR tag overwrite cannot poison the generator output [audit F-55].
+# pinned — a GHCR tag overwrite cannot poison the generator output.
 # Falls back to the bare tag with a warning if no OCI inspection tool is found.
 OCI_REF=""
 if command -v oras >/dev/null 2>&1; then
@@ -33,9 +33,9 @@ export PATH="$HOME/.dpm/bin:$PATH"
 
 # dpm < 1.0.20 keys its OCI component cache by name (not content digest), so a
 # digest-pinned codegen pull can silently reuse a stale same-name extraction and
-# emit pre-0.4.0 code — the digest-keyed pkg/cacheindex landed in dpm 1.0.20 (#338).
-# Refuse to regen on a pre-cacheindex binary (complements the ILedgerWriter output
-# marker below). The CLI version comes from `dpm --version`; the `dpm version`
+# emit pre-0.4.0 code — the digest-keyed pkg/cacheindex landed in dpm 1.0.20.
+# Refuse to regen on a pre-cacheindex binary (complements the Archive-argument
+# guardrail below). The CLI version comes from `dpm --version`; the `dpm version`
 # subcommand lists installed SDKs, not the dpm build.
 DPM_MIN_VERSION="1.0.20"
 dpm_version_raw="$(dpm --version 2>/dev/null || true)"
@@ -77,14 +77,19 @@ EOF
 ( cd "${WORK}" && DPM_AUTO_INSTALL=true dpm codegen-cs --dar ./fixture.dar --out "${GEN}" )
 find "${GEN}" -name '*.csproj' -delete
 
-# Guardrail: dpm materialises OCI components
-# under a name-keyed (not digest-keyed) cache path, so a stale extraction can be
-# reused despite the digest pinned above and silently emit pre-0.4.0 code. Emit
-# into a temp dir and refuse to publish output that predates the
-# ILedgerReader/ILedgerWriter capability split, so a stale bundle fails loudly
-# instead of poisoning the committed fixtures.
-if ! grep -rql "ILedgerWriter" "${GEN}"; then
-  echo "ERROR: regenerated output has no ILedgerWriter reference — the codegen bundle that ran predates the 0.4.0 capability split (likely a stale dpm component reused from cache). Refusing to overwrite ${OUT}." >&2
+# Guardrail: dpm materialises OCI components under a name-keyed (not
+# digest-keyed) cache path, so a stale extraction can be reused despite the
+# digest pinned above and silently emit older code. Emit into a temp dir and
+# assert a wire-level property of the current emitter, so a stale bundle fails
+# loudly instead of poisoning the committed fixtures.
+if grep -rqn 'ArgumentEncoder = _ => DamlUnit.Instance' "${GEN}"; then
+  echo "ERROR: the Archive choice argument still encodes as Unit rather than an empty record; Canton rejects such submissions with COMMAND_PREPROCESSING_FAILED. The codegen bundle that ran predates the fix (likely a stale dpm component reused from cache). Refusing to overwrite ${OUT}." >&2
+  exit 1
+fi
+
+emitted_cs_count="$(find "${GEN}" -name '*.cs' | wc -l | tr -d ' ')"
+if [ "${emitted_cs_count}" -eq 0 ]; then
+  echo "ERROR: dpm codegen-cs produced no .cs files under ${GEN}; the Archive-argument guardrail above passes vacuously on empty output. Refusing to overwrite ${OUT}." >&2
   exit 1
 fi
 

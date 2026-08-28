@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto
 +++ b/com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,7 @@ package com.daml.ledger.api.v2.interactive;
  
  import "com/daml/ledger/api/v2/value.proto";
  

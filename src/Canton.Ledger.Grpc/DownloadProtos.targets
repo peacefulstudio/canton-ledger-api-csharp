@@ -13,18 +13,17 @@
     <ProtoSourceDir>$(MSBuildThisFileDirectory)Proto</ProtoSourceDir>
 
     <!-- Maven artifact versions -->
-    <CantonVersion Condition="'$(CantonVersion)' == ''">3.4.11</CantonVersion>
     <GoogleCommonProtosVersion>2.58.0</GoogleCommonProtosVersion>
 
     <!-- Pinned SHA-256 checksums for each downloaded JAR. Verified before unzip to
-         protect against supply-chain tampering (audit F-33). Hashes were obtained by
+         protect against supply-chain tampering. Hashes were obtained by
          downloading each JAR from Maven Central and computing SHA-256; each download
          was also cross-checked against the SHA-1 checksum published by Maven Central.
          When bumping CantonVersion or GoogleCommonProtosVersion, refresh all three in
          the same commit: curl -sL <jar-url> | shasum -a 256, cross-checked against
          <jar-url>.sha1 from Maven Central. -->
-    <LedgerApiProtoHash>18edce18db92556a2f2945f470afbba27e0ccdeebd43f13995c42c63f59e3262</LedgerApiProtoHash>
-    <LedgerApiValueProtoHash>869d7df5dd2e32f997c2674fea26dc9612dd4b6034d8a583e0275f72303b4668</LedgerApiValueProtoHash>
+    <LedgerApiProtoHash>1a34232ed3c134f13c721c401d1c731c1e1fbb8bb70cfbfd5b91aed31bc639a7</LedgerApiProtoHash>
+    <LedgerApiValueProtoHash>26fd5e353a6c09152aa2799c835694d810799f6b3d4d1eee0c81157819975863</LedgerApiValueProtoHash>
     <GoogleCommonProtosHash>f8640af546c0afe26477fc5e946a7f455a1afebfc73d021b0c8a5034b8e67152</GoogleCommonProtosHash>
 
     <!-- Maven Central URLs -->
@@ -40,8 +39,13 @@
     <ProtoMarkerFile>$(ProtoSourceDir)/.downloaded-$(CantonVersion)-$(GoogleCommonProtosVersion)</ProtoMarkerFile>
   </PropertyGroup>
 
+  <Target Name="RequirePinnedCantonVersion" BeforeTargets="Restore;CollectPackageReferences;PrepareForBuild">
+    <Error Condition="'$(CantonVersion)' == ''"
+           Text="CantonVersion is empty, so every proto download URL, pinned checksum pairing and cache marker in this file would resolve to an unpinned artifact. The Canton version is authored once, as the CantonVersion property in Directory.Build.props; building this project outside that import must pass -p:CantonVersion=X.Y.Z explicitly. Refusing to download protos rather than guessing a version." />
+  </Target>
+
   <!-- Download protos during Restore phase so they exist before build -->
-  <Target Name="DownloadProtos" BeforeTargets="Restore;CollectPackageReferences;PrepareForBuild" Condition="!Exists('$(ProtoMarkerFile)')">
+  <Target Name="DownloadProtos" DependsOnTargets="RequirePinnedCantonVersion" BeforeTargets="Restore;CollectPackageReferences;PrepareForBuild" Condition="!Exists('$(ProtoMarkerFile)')">
     <Message Importance="high" Text="Downloading Canton Ledger API protos (version $(CantonVersion))..." />
 
     <!-- Create directories -->
@@ -67,7 +71,7 @@
       DestinationFileName="proto-google-common-protos-$(GoogleCommonProtosVersion).jar"
       SkipUnchangedFiles="true" />
 
-    <!-- Verify SHA-256 checksums before unzipping (audit F-33, #224) -->
+    <!-- Verify SHA-256 checksums before unzipping -->
     <GetFileHash Files="$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="_LedgerApiProtoActualHash" />
     </GetFileHash>
@@ -112,7 +116,7 @@
 
   <!-- Verify cached JAR checksums on every build, even when DownloadProtos is skipped
        because the marker file exists. Catches tampered cache files and pinned-hash
-       changes without requiring a fresh download (audit F-33, #224). -->
+       changes without requiring a fresh download. -->
   <Target Name="VerifyProtoChecksums" AfterTargets="DownloadProtos"
           Condition="Exists('$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar')">
     <GetFileHash Files="$(ProtoCacheDir)/ledger-api-proto-$(CantonVersion).jar" Algorithm="SHA256">

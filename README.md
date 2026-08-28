@@ -12,11 +12,15 @@ All packages are versioned in lockstep and published to [nuget.org](https://www.
 
 | Package | Version | Description |
 |---------|---------|-------------|
+| [`Canton.Ledger.Abstractions`](https://www.nuget.org/packages/Canton.Ledger.Abstractions/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Abstractions?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Abstractions/) | Transport-neutral Canton contract layer — `ICantonLedgerClient`, `IAdminClient`, `ITokenProvider` and `IPqsClient`, plus the neutral completion, connected-synchronizer, and reassignment type families both transports implement |
+| [`Canton.Ledger.Kernel`](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Kernel?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | Transport-neutral client kernel the clients consume as peers — token providers (`ITokenProvider`, OAuth2 client-credentials/static/unauthenticated), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline |
 | [`Canton.Ledger.Grpc`](https://www.nuget.org/packages/Canton.Ledger.Grpc/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Grpc?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Grpc/) | Generated gRPC stubs from Canton Ledger API protos |
 | [`Canton.Ledger.Grpc.Client`](https://www.nuget.org/packages/Canton.Ledger.Grpc.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Grpc.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Grpc.Client/) | High-level client with `Daml.Runtime` integration |
-| [`Canton.Ledger.Pqs.Client`](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Pqs.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | Type-safe query client for the Participant Query Store (PQS) |
-| [`Canton.Ledger.Kernel`](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Kernel?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Kernel/) | Transport-neutral client kernel the clients consume as peers — token providers (`ITokenProvider`, OAuth2 client-credentials/static/unauthenticated), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline |
-| [`Canton.Ledger.OpenTelemetry`](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.OpenTelemetry?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | OpenTelemetry SDK integration — registers the `LedgerClient`/`AdminClient`/`PqsClient` `ActivitySource`s (plus Npgsql tracing) with a single `AddCantonLedgerInstrumentation()` call |
+| [`Canton.Ledger.Rest`](https://www.nuget.org/packages/Canton.Ledger.Rest/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Rest?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Rest/) | Raw Refit-generated surface over the Canton JSON Ledger API — experimental (`CANTONREST001`), typically consumed through `Canton.Ledger.Rest.Client` |
+| [`Canton.Ledger.Rest.Client`](https://www.nuget.org/packages/Canton.Ledger.Rest.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Rest.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Rest.Client/) | HTTP (JSON Ledger API) client — a full `ILedgerClient` / `ICantonLedgerClient` implementation over the transport-neutral interfaces |
+| [`Canton.Ledger.Pqs.Client`](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Pqs.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | Type-safe query client for the Participant Query Store (PQS) — the Npgsql-backed `IPqsClient` implementation |
+| [`Canton.Ledger.OpenTelemetry`](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.OpenTelemetry?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | OpenTelemetry SDK integration — registers the `LedgerClient`/`AdminClient`/`RestLedgerClient`/`PqsClient` `ActivitySource`s (plus Npgsql tracing) with a single `AddCantonLedgerInstrumentation()` call |
+| [`Canton.Ledger.Testing`](https://www.nuget.org/packages/Canton.Ledger.Testing/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Testing?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Testing/) | In-memory test doubles (`FakeLedgerClient`, `FakeAdminClient`, `FakePqsClient`, `FakeTokenProvider`) and builders for unit-testing against the client surfaces without a live participant |
 | [`Daml.Runtime.Grpc`](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | [![NuGet](https://img.shields.io/nuget/v/Daml.Runtime.Grpc?include_prereleases)](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | Bridge between proto `Value`/`Record` and `Daml.Runtime` `DamlValue`/`DamlRecord` |
 
 ## Quick Start
@@ -34,8 +38,8 @@ dotnet add package Canton.Ledger.Pqs.Client
 ### Ledger Client Usage
 
 ```csharp
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Kernel.Authentication;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
@@ -73,6 +77,7 @@ var contractId = outcome switch
 ### PQS Client Usage
 
 ```csharp
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Pqs.Client;
 using Daml.Runtime.Contracts;
 
@@ -164,8 +169,8 @@ These packages integrate seamlessly with [Daml.Codegen.CSharp](https://github.co
 // Generate C# from your Daml contracts
 // daml-codegen-csharp ./my-contracts.dar -o ./Generated
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Kernel.Authentication;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -203,6 +208,10 @@ var assets = await pqsClient.QueryAsync<Asset>(
     Filter.Field<Asset>(a => a.Owner, owner.Id));
 ```
 
+## Configuration
+
+See the [configuration reference](docs/public/configuration-reference.md) for every client option and its default (`Canton:Ledger`, `Canton:Auth`, `Canton:Pqs`, `Canton:Rest`), environment-variable naming, the authentication precedence rules, `PostConfigure` hooks, and health-check registration.
+
 ## Architecture
 
 See the [architecture overview](docs/public/architecture-overview.md) for how the codegen pipeline, the `Daml.Runtime` library, and the `Canton.Ledger.*` client packages fit together.
@@ -213,11 +222,14 @@ This library targets Canton Ledger API v2. The proto files are automatically dow
 
 | Library Version | Canton Version |
 |-----------------|----------------|
-| 0.4.x | 3.4.x |
+| 0.4.1 and later | 3.5.x |
+| 0.4.0 | 3.4.x |
 | 0.2.x | 3.4.x |
 | 0.1.x | 3.4.x |
 
-From `0.4.x`, the `Canton.Ledger.*` package minor tracks the `Daml.Runtime` / `Daml.Ledger.Abstractions` minor line — package `0.N.x` embeds `Daml.* 0.N.x` — so the Daml runtime line is legible straight off the package version (the `0.3.x` line is skipped to realign). Patch and `-preview.N` suffixes evolve independently. See [ADR 0013](docs/adr/0013-package-version-tracks-daml-line.md).
+From `0.4.1` the vendored protos and JSON Ledger API spec are pinned at Canton `3.5.9`, and the library supports Canton 3.5 only — running it against a 3.4.x participant is untested and unsupported. Any `3.5.x` patch release is fine: the vendored surface is stable within the minor.
+
+From `0.4.x`, the `Canton.Ledger.*` package minor tracks the `Daml.Runtime` / `Daml.Ledger.Abstractions` minor line — package `0.N.x` embeds `Daml.* 0.N.x` — so the Daml runtime line is legible straight off the package version (the `0.3.x` line is skipped to realign). Patch and `-preview.N` suffixes evolve independently.
 
 ## Building from Source
 
@@ -235,12 +247,6 @@ dotnet test
 # Create NuGet packages
 dotnet pack -c Release
 ```
-
-## Future Packages
-
-| Package | Description | Status |
-|---------|-------------|--------|
-| `Canton.Ledger.Rest` | REST/JSON API client | Planned |
 
 ## Contributing
 

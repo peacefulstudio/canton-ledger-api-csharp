@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Microsoft.Extensions.Logging;
 using Xunit;

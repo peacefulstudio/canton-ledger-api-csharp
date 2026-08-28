@@ -55,7 +55,7 @@ public sealed partial record Marker([property: DamlFieldAttribute("owner")] Part
     {
         Name = new ChoiceName("Archive"),
         Consuming = true,
-        ArgumentEncoder = _ => DamlUnit.Instance,
+        ArgumentEncoder = _ => DamlRecord.Create(),
         ResultDecoder = _ => DamlUnit.Instance
     };
 
@@ -99,7 +99,7 @@ public static class MarkerSubmissionExtensions
     /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static Task<ExerciseOutcome<ContractId<Marker>>> CreateAsync(
-        this ILedgerClient client,
+        this ILedgerWriter client,
         Marker payload,
         SubmitterInfo submitter,
         CancellationToken cancellationToken = default)
@@ -108,5 +108,88 @@ public static class MarkerSubmissionExtensions
         ArgumentNullException.ThrowIfNull(payload);
 
         return client.TryCreateAsync<Marker>(payload, submitter, cancellationToken: cancellationToken);
+    }
+}
+
+/// <summary>
+/// Async exerciser extensions for <see cref="Marker"/> contract IDs whose choices
+/// return a non-contract-id payload (Decimal, records, lists, Unit, etc.).
+/// Each method submits the choice via
+/// <c>ILedgerWriter.TrySubmitAndWaitForTransactionAsync</c> and lifts the typed result
+/// into <c>ExerciseOutcome&lt;TReturn&gt;</c>.
+/// </summary>
+public static class MarkerNonContractExtensions
+{
+    /// <summary>
+    /// Builds the <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> for the Archive choice on this contract id.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    public static ExerciseCommand ArchiveCommand(
+        this ContractId<Marker> contractId)
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return new ExerciseCommand(
+            Marker.TemplateId,
+            contractId,
+            new ChoiceName("Archive"),
+            DamlRecord.Create());
+    }
+
+    /// <summary>
+    /// Exercises the Archive choice and lifts the choice's exercise result to
+    /// <see cref="ExerciseOutcome{T}"/> over <c>Unit</c>. Structured Canton/Daml errors
+    /// and infrastructure/transport errors pass through unchanged.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    /// <param name="client">The ledger client.</param>
+    /// <param name="actAs">The party submitting the command.</param>
+    /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<ExerciseOutcome<Unit>> ArchiveAsync(
+        this ContractId<Marker> contractId,
+        ILedgerWriter client,
+        Party actAs,
+        string? workflowId = null,
+        CommandId? commandId = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var command = contractId.ArchiveCommand();
+
+        var submission = CommandsSubmission.Single(command)
+            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
+        if (!string.IsNullOrEmpty(workflowId))
+        {
+            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
+        }
+
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return outcome.ProjectCommitted(tx => ProjectArchiveResult(tx, contractId.Value));
+    }
+
+    private static ExerciseOutcome<Unit> ProjectArchiveResult(TransactionResult tx, string contractId)
+    {
+        foreach (var exercised in tx.ExercisedEvents)
+        {
+            if (string.Equals(exercised.ContractId, contractId, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.ModuleName, Marker.TemplateId.ModuleName, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.EntityName, Marker.TemplateId.EntityName, StringComparison.Ordinal)
+                && string.Equals(exercised.ChoiceName, "Archive", StringComparison.Ordinal))
+            {
+                return new ExerciseOutcome<Unit>.One(Unit.Value);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Submission succeeded but no 'Archive' exercise on contract '{contractId}' was recorded on transaction {tx.UpdateId}. " +
+            "This is most often caused by the ILedgerWriter implementation not populating TransactionResult.ExercisedEvents — " +
+            "your ILedgerWriter implementation must project the transaction's exercised events into TransactionResult.ExercisedEvents. " +
+            "If your implementation does populate ExercisedEvents, ensure the participant is configured to return " +
+            "LedgerEffects with verbose events so the exercise event survives projection.");
     }
 }

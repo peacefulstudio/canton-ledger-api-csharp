@@ -1,8 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Daml.Runtime.Outcomes;
 using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
+using Daml.Runtime.Outcomes;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Google.Rpc;
@@ -40,7 +41,7 @@ public class DamlErrorParserTests
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = raw });
 
-        var (category, _, _, _) = DamlErrorParser.Parse(ex);
+        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(expected);
     }
@@ -68,7 +69,7 @@ public class DamlErrorParserTests
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = wireCategoryId });
 
-        var (category, _, _, _) = DamlErrorParser.Parse(ex);
+        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(expected);
     }
@@ -84,7 +85,7 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string> { ["category"] = raw });
 
-        var (category, _, _, _) = DamlErrorParser.Parse(ex);
+        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(expected);
     }
@@ -98,7 +99,7 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string> { ["category"] = "TotallyMadeUpCategory" });
 
-        var (category, errorId, _, _) = DamlErrorParser.Parse(ex);
+        var (category, errorId, _, _, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(DamlErrorCategory.Unknown);
         errorId.Should().Be("OPAQUE");
@@ -113,7 +114,7 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string>());
 
-        var (category, errorId, _, _) = DamlErrorParser.Parse(ex);
+        var (category, errorId, _, _, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(DamlErrorCategory.Unknown);
         errorId.Should().Be("NO_CATEGORY");
@@ -128,7 +129,7 @@ public class DamlErrorParserTests
             statusMessage: "not found",
             metadata: new Dictionary<string, string> { ["category"] = "InvalidGivenCurrentSystemStateResourceMissing" });
 
-        var (_, errorId, message, _) = DamlErrorParser.Parse(ex);
+        var (_, errorId, message, _, _) = DamlErrorParser.Parse(ex);
 
         errorId.Should().Be("CONTRACT_NOT_FOUND");
         message.Should().Be("not found");
@@ -148,7 +149,7 @@ public class DamlErrorParserTests
                 ["sequence"] = "42",
             });
 
-        var (_, _, _, metadata) = DamlErrorParser.Parse(ex);
+        var (_, _, _, metadata, _) = DamlErrorParser.Parse(ex);
 
         metadata.Should().ContainKey("category");
         metadata.Should().Contain(new KeyValuePair<string, string>("resource_id", "00abc"));
@@ -161,7 +162,7 @@ public class DamlErrorParserTests
         // No trailers → no rich error model available.
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Unavailable, "service down"));
 
-        var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
+        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(DamlErrorCategory.Unknown);
         errorId.Should().BeEmpty();
@@ -178,7 +179,7 @@ public class DamlErrorParserTests
         };
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Internal, "garbled"), trailers);
 
-        var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
+        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(DamlErrorCategory.Unknown);
         errorId.Should().BeEmpty();
@@ -197,7 +198,7 @@ public class DamlErrorParserTests
         };
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Unknown, "no details here"), trailers);
 
-        var (category, errorId, message, metadata) = DamlErrorParser.Parse(ex);
+        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
 
         category.Should().Be(DamlErrorCategory.Unknown);
         errorId.Should().BeEmpty();
@@ -206,21 +207,89 @@ public class DamlErrorParserTests
     }
 
     [Theory]
-    [InlineData("15")]
-    [InlineData("999")]
-    [InlineData("-1")]
-    [InlineData("2147483647")]
-    public void MapCategory_returns_Unknown_for_numeric_values_outside_the_defined_categories(string raw)
+    [InlineData("8", DamlErrorCategory.InvalidIndependentOfSystemState)]
+    [InlineData("11", DamlErrorCategory.InvalidGivenCurrentSystemStateResourceMissing)]
+    [InlineData("ContentionOnSharedResources", DamlErrorCategory.ContentionOnSharedResources)]
+    [InlineData("50", DamlErrorCategory.Unknown)]
+    [InlineData("-1", DamlErrorCategory.Unknown)]
+    [InlineData("TotallyMadeUpCategory", DamlErrorCategory.Unknown)]
+    [InlineData("TransientServerFailure,ContentionOnSharedResources", DamlErrorCategory.Unknown)]
+    public void Parse_classifies_the_wire_category_identically_to_the_REST_transport(
+        string wireCategory, DamlErrorCategory expected)
     {
-        DamlErrorParser.MapCategory(raw).Should().Be(DamlErrorCategory.Unknown);
+        var ex = MakeRpcException(
+            statusCode: StatusCode.FailedPrecondition,
+            errorId: "SOMETHING",
+            statusMessage: "boom",
+            metadata: new Dictionary<string, string> { ["category"] = wireCategory });
+
+        DamlErrorParser.Parse(ex).Category.Should().Be(expected);
     }
 
     [Fact]
-    public void MapCategory_returns_unknown_for_null_or_whitespace()
+    public void Parse_carries_the_gRPC_status_code_as_the_transport_status_code()
     {
-        DamlErrorParser.MapCategory(null).Should().Be(DamlErrorCategory.Unknown);
-        DamlErrorParser.MapCategory("").Should().Be(DamlErrorCategory.Unknown);
-        DamlErrorParser.MapCategory("   ").Should().Be(DamlErrorCategory.Unknown);
+        var ex = MakeRpcException(
+            statusCode: StatusCode.NotFound,
+            errorId: "CONTRACT_NOT_FOUND",
+            statusMessage: "not found",
+            metadata: new Dictionary<string, string> { ["category"] = "11" });
+
+        DamlErrorParser.Parse(ex).StatusCode.Should().Be((int)StatusCode.NotFound);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unauthenticated, DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials)]
+    [InlineData(StatusCode.PermissionDenied, DamlErrorCategory.AuthorizationChecksFailed)]
+    public void Parse_classifies_a_redacted_security_failure_from_the_transport_status_code(
+        StatusCode statusCode, DamlErrorCategory expected)
+    {
+        var ex = MakeRedactedRpcException(statusCode);
+
+        var (category, errorId, message, metadata, transportStatusCode) = DamlErrorParser.Parse(ex);
+
+        category.Should().Be(expected);
+        errorId.Should().BeEmpty();
+        message.Should().Be(RedactedMessage);
+        metadata.Should().BeEmpty();
+        transportStatusCode.Should().Be((int)statusCode);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unknown)]
+    [InlineData(StatusCode.NotFound)]
+    [InlineData(StatusCode.InvalidArgument)]
+    [InlineData(StatusCode.Unavailable)]
+    [InlineData(StatusCode.Internal)]
+    public void Parse_leaves_every_other_status_code_unknown_when_the_status_carries_no_ErrorInfo(
+        StatusCode statusCode)
+    {
+        var ex = MakeRedactedRpcException(statusCode);
+
+        DamlErrorParser.Parse(ex).Category.Should().Be(DamlErrorCategory.Unknown);
+    }
+
+    private const string RedactedCorrelationId = "0123456789abcdef0123456789abcdef";
+
+    private const string RedactedMessage =
+        "An error occurred. Please contact the operator and inquire about the request "
+        + RedactedCorrelationId + " with tid " + RedactedCorrelationId;
+
+    private static RpcException MakeRedactedRpcException(StatusCode statusCode)
+    {
+        var status = new GrpcStatus
+        {
+            Code = (int)statusCode,
+            Message = RedactedMessage,
+        };
+        status.Details.Add(Any.Pack(new RequestInfo { RequestId = RedactedCorrelationId }));
+
+        var trailers = new Metadata
+        {
+            { "grpc-status-details-bin", status.ToByteArray() },
+        };
+
+        return new RpcException(new GrpcCallStatus(statusCode, RedactedMessage), trailers);
     }
 
     private static RpcException MakeRpcException(

@@ -6,3 +6,6 @@
 *.png binary
 *.cmd text eol=crlf
 *.bat text eol=crlf
+
+# Participant-served OpenAPI captures: verbatim evidence, never hand-edited.
+docs/internal/research/served-schemas/*.yaml linguist-generated

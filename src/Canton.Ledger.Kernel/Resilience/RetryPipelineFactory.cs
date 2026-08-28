@@ -7,8 +7,8 @@ using Polly.Retry;
 namespace Canton.Ledger.Kernel.Resilience;
 
 /// <summary>
-/// Builds the shared Polly <see cref="ResiliencePipeline"/> that the gRPC and (future)
-/// HTTP/JSON clients may compose over their own transport-specific calls (ADR 0006). The
+/// Builds the shared Polly <see cref="ResiliencePipeline"/> that the gRPC and HTTP/JSON
+/// clients compose over their own transport-specific calls. The
 /// pipeline built here knows nothing about any transport — no <c>Grpc.Core</c> or
 /// <c>System.Net.Http</c> exception types are referenced — keeping the kernel
 /// transport-neutral.
@@ -24,7 +24,7 @@ public static class RetryPipelineFactory
     /// <param name="options">The retry configuration.</param>
     /// <param name="shouldRetry">
     /// Transport-specific predicate deciding whether a failure is transient and worth retrying. The
-    /// kernel stays transport-neutral (ADR 0006): a caller — e.g. the gRPC client — supplies this to
+    /// kernel stays transport-neutral: a caller — e.g. the gRPC client — supplies this to
     /// classify its own exception types (<c>RpcException</c> / <c>StatusCode</c>), which never enter
     /// the kernel. When <see langword="null"/>, Polly's default (retry on any exception) applies.
     /// </param>

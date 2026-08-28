@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
     <ProjectReference Include="..\..\src\Canton.Ledger.Pqs.Client\Canton.Ledger.Pqs.Client.csproj" />
+    <ProjectReference Include="..\Canton.Ledger.Testing.Localnet\Canton.Ledger.Testing.Localnet.csproj" />
   </ItemGroup>
 
   <ItemGroup>

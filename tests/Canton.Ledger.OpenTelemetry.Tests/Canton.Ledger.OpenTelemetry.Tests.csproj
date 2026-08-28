@@ -14,6 +14,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.OpenTelemetry\Canton.Ledger.OpenTelemetry.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Pqs.Client\Canton.Ledger.Pqs.Client.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Rest.Client\Canton.Ledger.Rest.Client.csproj" />
   </ItemGroup>
 
 </Project>

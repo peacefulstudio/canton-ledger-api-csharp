@@ -1,7 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Diagnostics;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
 using Com.Daml.Ledger.Api.V2;
@@ -14,10 +14,13 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
+using HashFunction = Canton.Ledger.Abstractions.HashFunction;
+using VettedPackage = Canton.Ledger.Abstractions.VettedPackage;
 using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
+[Collection(nameof(AdminClientActivitySourceIsolation))]
 public class AdminClientTests
 {
     private readonly LedgerClientOptions _options;
@@ -820,14 +823,7 @@ public class AdminClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var startedActivities = new List<Activity>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == AdminClient.ActivitySourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = startedActivities.Add
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
 
         using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
         var firstClient = new AdminClient(_options, firstChannel, _partyService, _userService, _tokenProvider);
@@ -837,7 +833,7 @@ public class AdminClientTests
         var secondClient = new AdminClient(_options, secondChannel, secondPartyService, secondUserService, _tokenProvider);
         await secondClient.GetParticipantIdAsync(TestContext.Current.CancellationToken);
 
-        startedActivities.Should().NotBeEmpty(
+        capture.Activities.Should().NotBeEmpty(
             "disposing one AdminClient must not disable tracing for subsequent instances");
     }
 

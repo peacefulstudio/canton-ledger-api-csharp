@@ -9,11 +9,11 @@ namespace Canton.Ledger.Rest.Client;
 
 /// <summary>
 /// Emits an OpenTelemetry HTTP client span for every JSON Ledger API request, following the
-/// kernel's <see cref="LedgerActivitySource"/> naming convention (ADR 0006/0010). Register the
-/// source as <c>tracing.AddSource(LedgerActivitySource.NameFor&lt;RestActivityHandler&gt;())</c>.
+/// kernel's <see cref="LedgerActivitySource"/> naming convention. Register the
+/// source as <c>tracing.AddSource(RestLedgerClient.ActivitySourceName)</c>.
 /// Span names and tags follow the OpenTelemetry HTTP semantic conventions.
 /// </summary>
-public sealed class RestActivityHandler : DelegatingHandler
+internal sealed class RestActivityHandler : DelegatingHandler
 {
     internal const string HttpRequestMethod = "http.request.method";
     internal const string ServerAddress = SemanticConventions.ServerAddress;
@@ -22,7 +22,7 @@ public sealed class RestActivityHandler : DelegatingHandler
     internal const string HttpResponseStatusCode = "http.response.status_code";
     internal const string ErrorType = SemanticConventions.ErrorType;
 
-    private static readonly ActivitySource Source = LedgerActivitySource.Create<RestActivityHandler>();
+    private static readonly ActivitySource Source = LedgerActivitySource.Create<RestLedgerClient>();
 
     /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(

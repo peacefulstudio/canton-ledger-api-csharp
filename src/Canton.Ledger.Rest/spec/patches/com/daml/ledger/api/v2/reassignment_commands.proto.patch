@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/reassignment_commands.proto
 +++ b/com/daml/ledger/api/v2/reassignment_commands.proto
-@@ -5,6 +5,7 @@
+@@ -5,6 +5,7 @@ syntax = "proto3";
  
  package com.daml.ledger.api.v2;
  
@@ -8,3 +8,27 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "ReassignmentCommandOuterClass";
  option java_package = "com.daml.ledger.api.v2";
+@@ -56,14 +57,20 @@ message ReassignmentCommands {
+   repeated ReassignmentCommand commands = 6;
+ }
+ 
+-message ReassignmentCommand {
++// Selects the reassignment a ``ReassignmentCommand`` requests.
++message ReassignmentCommandCommand {
+   // Required
+   oneof command {
+-    UnassignCommand unassign_command = 1;
+-    AssignCommand assign_command = 2;
++    UnassignCommand unassign_command = 1 [json_name = "UnassignCommand"];
++    AssignCommand assign_command = 2 [json_name = "AssignCommand"];
+   }
+ }
+ 
++message ReassignmentCommand {
++  // Required
++  ReassignmentCommandCommand command = 1 [json_name = "command"];
++}
++
+ // Unassign a contract
+ message UnassignCommand {
+   // The ID of the contract the client wants to unassign.

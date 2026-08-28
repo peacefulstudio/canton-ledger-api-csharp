@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
-using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
@@ -12,9 +12,10 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
+using ProtoV2 = Com.Daml.Ledger.Api.V2;
 using RuntimeCommands = Daml.Runtime.Commands;
 using Status = Grpc.Core.Status;
-using TemplateMarker = Canton.Ledger.Grpc.Client.Tests.ContractStreamProjectorTests.TemplateMarker;
+using TemplateMarker = Canton.Ledger.Testing.Helpers.TemplateMarker;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
@@ -26,11 +27,11 @@ public class LedgerClientReassignmentWriteTests
 
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
-    private readonly CommandService.CommandServiceClient _commandService;
-    private readonly UpdateService.UpdateServiceClient _updateService;
-    private readonly StateService.StateServiceClient _stateService;
-    private readonly CommandSubmissionService.CommandSubmissionServiceClient _submissionService;
-    private readonly CommandCompletionService.CommandCompletionServiceClient _completionService;
+    private readonly ProtoV2.CommandService.CommandServiceClient _commandService;
+    private readonly ProtoV2.UpdateService.UpdateServiceClient _updateService;
+    private readonly ProtoV2.StateService.StateServiceClient _stateService;
+    private readonly ProtoV2.CommandSubmissionService.CommandSubmissionServiceClient _submissionService;
+    private readonly ProtoV2.CommandCompletionService.CommandCompletionServiceClient _completionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientReassignmentWriteTests()
@@ -39,11 +40,11 @@ public class LedgerClientReassignmentWriteTests
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress);
 
         var callInvoker = Substitute.For<CallInvoker>();
-        _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
-        _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
-        _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
-        _submissionService = Substitute.ForPartsOf<CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
-        _completionService = Substitute.ForPartsOf<CommandCompletionService.CommandCompletionServiceClient>(callInvoker);
+        _commandService = Substitute.ForPartsOf<ProtoV2.CommandService.CommandServiceClient>(callInvoker);
+        _updateService = Substitute.ForPartsOf<ProtoV2.UpdateService.UpdateServiceClient>(callInvoker);
+        _stateService = Substitute.ForPartsOf<ProtoV2.StateService.StateServiceClient>(callInvoker);
+        _submissionService = Substitute.ForPartsOf<ProtoV2.CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
+        _completionService = Substitute.ForPartsOf<ProtoV2.CommandCompletionService.CommandCompletionServiceClient>(callInvoker);
     }
 
     private LedgerClient CreateClient() => new(
@@ -53,7 +54,7 @@ public class LedgerClientReassignmentWriteTests
     [Fact]
     public async Task SubmitReassignmentAsync_issues_an_unassign_through_the_submission_service_and_returns_the_command_id()
     {
-        SubmitReassignmentRequest? captured = null;
+        ProtoV2.SubmitReassignmentRequest? captured = null;
         StubSubmitReassignment(r => captured = r);
 
         var submission = ReassignmentSubmission
@@ -72,7 +73,7 @@ public class LedgerClientReassignmentWriteTests
     [Fact]
     public async Task SubmitReassignmentAsync_mints_a_command_id_when_omitted_and_returns_it()
     {
-        SubmitReassignmentRequest? captured = null;
+        ProtoV2.SubmitReassignmentRequest? captured = null;
         StubSubmitReassignment(r => captured = r);
 
         var submission = ReassignmentSubmission.Of(
@@ -88,12 +89,12 @@ public class LedgerClientReassignmentWriteTests
     [Fact]
     public async Task TrySubmitAndWaitForReassignmentAsync_projects_the_resulting_Unassigned_event()
     {
-        SubmitAndWaitForReassignmentRequest? captured = null;
+        ProtoV2.SubmitAndWaitForReassignmentRequest? captured = null;
         StubSubmitAndWaitForReassignment(
-            Reassigned(new UnassignedEvent
+            Reassigned(new ProtoV2.UnassignedEvent
             {
                 ContractId = "00holding",
-                TemplateId = new Com.Daml.Ledger.Api.V2.Identifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+                TemplateId = new ProtoV2.Identifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
                 Source = "sync::source",
                 Target = "sync::target",
                 Offset = 7L,
@@ -134,9 +135,9 @@ public class LedgerClientReassignmentWriteTests
     [Fact]
     public async Task TrySubmitAndWaitForReassignmentAsync_surfaces_a_reassignment_with_no_events_as_an_empty_reassignment_Unclassified()
     {
-        StubSubmitAndWaitForReassignment(new SubmitAndWaitForReassignmentResponse
+        StubSubmitAndWaitForReassignment(new ProtoV2.SubmitAndWaitForReassignmentResponse
         {
-            Reassignment = new Reassignment { Offset = 9L },
+            Reassignment = new ProtoV2.Reassignment { Offset = 9L },
         });
 
         var submission = ReassignmentSubmission.Of(
@@ -151,39 +152,39 @@ public class LedgerClientReassignmentWriteTests
         unclassified.Kind.Should().Be(UnclassifiedKind.EmptyReassignment);
     }
 
-    private static SubmitAndWaitForReassignmentResponse Reassigned(UnassignedEvent unassigned) =>
+    private static ProtoV2.SubmitAndWaitForReassignmentResponse Reassigned(ProtoV2.UnassignedEvent unassigned) =>
         new()
         {
-            Reassignment = new Reassignment
+            Reassignment = new ProtoV2.Reassignment
             {
                 Offset = unassigned.Offset,
-                Events = { new ReassignmentEvent { Unassigned = unassigned } },
+                Events = { new ProtoV2.ReassignmentEvent { Unassigned = unassigned } },
             },
         };
 
-    private void StubSubmitReassignment(Action<SubmitReassignmentRequest>? capture = null) =>
+    private void StubSubmitReassignment(Action<ProtoV2.SubmitReassignmentRequest>? capture = null) =>
         _submissionService
             .SubmitReassignmentAsync(
-                Arg.Do<SubmitReassignmentRequest>(r => capture?.Invoke(r)),
+                Arg.Do<ProtoV2.SubmitReassignmentRequest>(r => capture?.Invoke(r)),
                 Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
-            .Returns(Unary(new SubmitReassignmentResponse()));
+            .Returns(Unary(new ProtoV2.SubmitReassignmentResponse()));
 
     private void StubSubmitAndWaitForReassignment(
-        SubmitAndWaitForReassignmentResponse response,
-        Action<SubmitAndWaitForReassignmentRequest>? capture = null) =>
+        ProtoV2.SubmitAndWaitForReassignmentResponse response,
+        Action<ProtoV2.SubmitAndWaitForReassignmentRequest>? capture = null) =>
         _commandService
             .SubmitAndWaitForReassignmentAsync(
-                Arg.Do<SubmitAndWaitForReassignmentRequest>(r => capture?.Invoke(r)),
+                Arg.Do<ProtoV2.SubmitAndWaitForReassignmentRequest>(r => capture?.Invoke(r)),
                 Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
             .Returns(Unary(response));
 
     private void StubSubmitAndWaitForReassignmentFailure(RpcException exception) =>
         _commandService
             .SubmitAndWaitForReassignmentAsync(
-                Arg.Any<SubmitAndWaitForReassignmentRequest>(),
+                Arg.Any<ProtoV2.SubmitAndWaitForReassignmentRequest>(),
                 Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForReassignmentResponse>(
-                Task.FromException<SubmitAndWaitForReassignmentResponse>(exception),
+            .Returns(new AsyncUnaryCall<ProtoV2.SubmitAndWaitForReassignmentResponse>(
+                Task.FromException<ProtoV2.SubmitAndWaitForReassignmentResponse>(exception),
                 Task.FromResult(new Metadata()),
                 () => exception.Status,
                 () => exception.Trailers ?? new Metadata(),

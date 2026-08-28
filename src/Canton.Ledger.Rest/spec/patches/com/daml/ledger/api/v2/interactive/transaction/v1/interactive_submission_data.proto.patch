@@ -1,7 +1,7 @@
 --- a/com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto
 +++ b/com/daml/ledger/api/v2/interactive/transaction/v1/interactive_submission_data.proto
-@@ -7,6 +7,7 @@
- 
+@@ -8,6 +8,7 @@ package com.daml.ledger.api.v2.interactive.transaction.v1;
+ import "com/daml/ledger/api/v2/interactive/interactive_submission_common_data.proto";
  import "com/daml/ledger/api/v2/value.proto";
  
 +option go_package = "github.com/digital-asset/canton/go/ledger/api/v2/interactive/transaction/v1;transactionv1";

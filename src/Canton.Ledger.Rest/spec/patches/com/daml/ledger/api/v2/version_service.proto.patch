@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/version_service.proto
 +++ b/com/daml/ledger/api/v2/version_service.proto
-@@ -6,8 +6,10 @@
+@@ -6,8 +6,10 @@ syntax = "proto3";
  package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/experimental_features.proto";
@@ -11,7 +11,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "VersionServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -15,7 +17,11 @@
+@@ -15,7 +17,11 @@ option java_package = "com.daml.ledger.api.v2";
  // Allows clients to retrieve information about the ledger API version
  service VersionService {
    // Read the Ledger API version

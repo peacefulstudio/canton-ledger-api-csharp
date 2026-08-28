@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Daml.Runtime.Outcomes;
 using Google.Protobuf;
 using Google.Rpc;
@@ -14,25 +15,29 @@ internal static class DamlErrorParser
     private const string GrpcStatusDetailsBinKey = "grpc-status-details-bin";
     private const string CategoryMetadataKey = "category";
 
-    internal static (
-        DamlErrorCategory Category,
-        string ErrorId,
-        string Message,
-        IReadOnlyDictionary<string, string> Metadata)
-        Parse(RpcException exception)
+    private static readonly IReadOnlyDictionary<StatusCode, DamlErrorCategory> RedactedSecurityCategories =
+        new Dictionary<StatusCode, DamlErrorCategory>
+        {
+            [StatusCode.Unauthenticated] = DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials,
+            [StatusCode.PermissionDenied] = DamlErrorCategory.AuthorizationChecksFailed,
+        };
+
+    internal static ParsedLedgerError Parse(RpcException exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
+
+        var statusCode = (int)exception.StatusCode;
 
         var status = TryReadStatus(exception.Trailers);
         if (status is null)
         {
-            return UnknownError(exception.Status.Detail);
+            return ParsedLedgerError.Untyped(exception.Status.Detail, statusCode);
         }
 
         var errorInfo = ExtractErrorInfo(status);
         if (errorInfo is null)
         {
-            return UnknownError(status.Message);
+            return WithoutErrorInfo(exception.StatusCode, status.Message, statusCode);
         }
 
         var metadata = new Dictionary<string, string>(errorInfo.Metadata.Count, StringComparer.Ordinal);
@@ -41,33 +46,22 @@ internal static class DamlErrorParser
             metadata[kvp.Key] = kvp.Value;
         }
 
-        var category = MapCategory(metadata.TryGetValue(CategoryMetadataKey, out var raw) ? raw : null);
-
-        return (
-            category,
+        return new ParsedLedgerError(
+            ParsedLedgerError.MapCategory(metadata.TryGetValue(CategoryMetadataKey, out var raw) ? raw : null),
             ErrorId: errorInfo.Reason ?? string.Empty,
             Message: status.Message ?? string.Empty,
-            Metadata: metadata);
+            Metadata: metadata,
+            StatusCode: statusCode);
     }
 
-    private static (
-        DamlErrorCategory Category,
-        string ErrorId,
-        string Message,
-        IReadOnlyDictionary<string, string> Metadata)
-        UnknownError(string? message) =>
-        (DamlErrorCategory.Unknown, ErrorId: string.Empty,
-            Message: message ?? string.Empty,
-            Metadata: new Dictionary<string, string>(0));
-
-    internal static DamlErrorCategory MapCategory(string? raw)
+    private static ParsedLedgerError WithoutErrorInfo(
+        StatusCode transportStatus, string? message, int statusCode)
     {
-        if (string.IsNullOrWhiteSpace(raw))
-            return DamlErrorCategory.Unknown;
+        var untyped = ParsedLedgerError.Untyped(message, statusCode);
 
-        return Enum.TryParse<DamlErrorCategory>(raw, ignoreCase: true, out var category) && Enum.IsDefined(category)
-            ? category
-            : DamlErrorCategory.Unknown;
+        return RedactedSecurityCategories.TryGetValue(transportStatus, out var category)
+            ? untyped with { Category = category }
+            : untyped;
     }
 
     private static GrpcStatus? TryReadStatus(Metadata? trailers)

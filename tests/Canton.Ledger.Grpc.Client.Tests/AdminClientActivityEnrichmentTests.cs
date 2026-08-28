@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
@@ -16,6 +16,7 @@ using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
+[Collection(nameof(AdminClientActivitySourceIsolation))]
 public class AdminClientActivityEnrichmentTests
 {
     private readonly LedgerClientOptions _options;
@@ -44,17 +45,6 @@ public class AdminClientActivityEnrichmentTests
 
     private static string Unique(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
-    private static (ActivityListener Listener, ConcurrentQueue<Activity> SharedActivities) ListenTo(string sourceName)
-    {
-        var activities = new ConcurrentQueue<Activity>();
-        var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == sourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = activities.Enqueue
-        };
-        return (listener, activities);
-    }
 
     [Fact]
     public async Task AllocatePartyAsync_tags_the_activity_with_grpc_semconv_and_canton_party_id_hint()
@@ -77,14 +67,12 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(AdminClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonPartyIdHint) as string == partyIdHint)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
@@ -113,15 +101,13 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(AdminClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
 
         var client = CreateClient();
         var act = () => client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<RpcException>();
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonPartyIdHint) as string == partyIdHint)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
@@ -152,14 +138,12 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(AdminClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.GetPackageAsync(packageId, TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlPackageId) as string == packageId)
             .Subject;
         activity.GetTagItem(ActivityHelper.RpcService).Should().Be("com.daml.ledger.api.v2.PackageService");

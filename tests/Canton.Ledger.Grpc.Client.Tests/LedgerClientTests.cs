@@ -1,7 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Diagnostics;
+using System.Reflection;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
@@ -16,6 +17,7 @@ using NSubstitute;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
@@ -24,6 +26,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
+[Collection("LedgerClient global ActivitySource")]
 public class LedgerClientTests
 {
     private static readonly Party ActAs = new("party::alice");
@@ -354,6 +357,53 @@ public class LedgerClientTests
     }
 
     [Fact]
+    public void LedgerClient_declares_its_own_DisposeAsync()
+    {
+        var method = typeof(LedgerClient).GetMethod(
+            nameof(IAsyncDisposable.DisposeAsync),
+            BindingFlags.Public | BindingFlags.Instance,
+            System.Type.EmptyTypes);
+
+        method.Should().NotBeNull(
+            "LedgerClient must override DisposeAsync so the gRPC channel shuts down asynchronously instead of inheriting the synchronous bridge");
+        method!.ReturnType.Should().Be<ValueTask>();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_does_not_throw()
+    {
+        IAsyncDisposable client = CreateClient();
+
+        var action = async () => await client.DisposeAsync();
+
+        await action.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_is_idempotent()
+    {
+        IAsyncDisposable client = CreateClient();
+        await client.DisposeAsync();
+
+        var action = async () => await client.DisposeAsync();
+
+        await action.Should().NotThrowAsync(
+            "the IAsyncDisposable contract requires disposal to ignore every call after the first");
+    }
+
+    [Fact]
+    public async Task DisposeAsync_then_Dispose_does_not_throw()
+    {
+        var client = CreateClient();
+        await ((IAsyncDisposable)client).DisposeAsync();
+
+        var action = client.Dispose;
+
+        action.Should().NotThrow(
+            "a synchronous Dispose after an asynchronous one must be a no-op, not a second channel teardown");
+    }
+
+    [Fact]
     public async Task Dispose_does_not_disable_tracing_for_subsequent_instances()
     {
         var response = new SubmitAndWaitForTransactionResponse
@@ -376,14 +426,7 @@ public class LedgerClientTests
                 () => new Metadata(),
                 () => { }));
 
-        var startedActivities = new List<Activity>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == LedgerClient.ActivitySourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = startedActivities.Add
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
         var firstClient = new LedgerClient(_options, firstChannel, _commandService, _tokenProvider);
@@ -400,7 +443,7 @@ public class LedgerClientTests
 
         await secondClient.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        startedActivities.Should().NotBeEmpty(
+        capture.Activities.Should().NotBeEmpty(
             "disposing one LedgerClient must not disable tracing for subsequent instances");
     }
 
@@ -903,6 +946,142 @@ public class LedgerClientTests
 
         loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_requests_the_ledger_effects_shape()
+    {
+        SubmitAndWaitForTransactionRequest? capturedRequest = null;
+        StubSubmitAndWaitForTransaction(TreeShapedTransaction(), r => capturedRequest = r);
+
+        var client = CreateClient();
+        await client.TrySubmitAndWaitForTransactionTreeAsync(
+            RuntimeCommands.CommandsSubmission.Single(CreateCmd()).WithCommandId(TestCommandId),
+            new RuntimeCommands.SubmitterInfo(new HashSet<Party> { ActAs }),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.TransactionFormat.Should().NotBeNull();
+        capturedRequest.TransactionFormat.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_still_leaves_the_transaction_format_unset()
+    {
+        SubmitAndWaitForTransactionRequest? capturedRequest = null;
+        StubSubmitAndWaitForTransaction(TreeShapedTransaction(), r => capturedRequest = r);
+
+        var client = CreateClient();
+        await client.TrySubmitAndWaitForTransactionAsync(
+            RuntimeCommands.CommandsSubmission.Single(CreateCmd()).WithActAs(ActAs).WithCommandId(TestCommandId),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.TransactionFormat.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_still_returns_the_flattened_shape_for_a_nested_transaction()
+    {
+        StubSubmitAndWaitForTransaction(TreeShapedTransaction());
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(
+            RuntimeCommands.CommandsSubmission.Single(CreateCmd()).WithActAs(ActAs).WithCommandId(TestCommandId),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var flat = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.One>().Subject.Result;
+        flat.CreatedContracts.Select(c => c.ContractId).Should().Equal("00child", "00sibling");
+        flat.ExercisedEvents.Select(e => e.ChoiceName).Should().Equal("ExecuteSwap");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_the_hierarchy_of_the_committed_transaction()
+    {
+        StubSubmitAndWaitForTransaction(TreeShapedTransaction());
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionTreeAsync(
+            RuntimeCommands.CommandsSubmission.Single(CreateCmd()).WithCommandId(TestCommandId),
+            new RuntimeCommands.SubmitterInfo(new HashSet<Party> { ActAs }),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var tree = outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.One>().Subject.Result;
+        tree.UpdateId.Should().Be("update-tree");
+        tree.RootEvents.Should().HaveCount(2);
+        var swap = tree.RootEvents[0].Should().BeOfType<TreeEvent.Exercised>().Subject;
+        swap.ChoiceName.Should().Be("ExecuteSwap");
+        swap.ChildEvents.Should().ContainSingle().Which.Should().BeOfType<TreeEvent.Created>()
+            .Which.ContractId.Should().Be("00child");
+        tree.RootEvents[1].Should().BeOfType<TreeEvent.Created>().Which.ContractId.Should().Be("00sibling");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_InfraError_when_the_node_ids_cannot_form_a_tree()
+    {
+        var transaction = new Transaction { UpdateId = "update-broken", Offset = 7L };
+        transaction.Events.Add(TreeCreated(nodeId: 3, "00late"));
+        transaction.Events.Add(TreeCreated(nodeId: 1, "00early"));
+        StubSubmitAndWaitForTransaction(transaction);
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionTreeAsync(
+            RuntimeCommands.CommandsSubmission.Single(CreateCmd()).WithCommandId(TestCommandId),
+            new RuntimeCommands.SubmitterInfo(new HashSet<Party> { ActAs }),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.InfraError>()
+            .Which.Message.Should().Contain("node ids must strictly ascend");
+    }
+
+    private void StubSubmitAndWaitForTransaction(
+        Transaction transaction,
+        Action<SubmitAndWaitForTransactionRequest>? capture = null)
+    {
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capture?.Invoke(r)),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+    }
+
+    private static Transaction TreeShapedTransaction()
+    {
+        var transaction = new Transaction { UpdateId = "update-tree", Offset = 99L, CommandId = "test-cmd" };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                NodeId = 0,
+                LastDescendantNodeId = 1,
+                ContractId = "00target",
+                TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+                Choice = "ExecuteSwap",
+                ExerciseResult = new ProtoValue { Unit = new Empty() },
+            },
+        });
+        transaction.Events.Add(TreeCreated(nodeId: 1, "00child"));
+        transaction.Events.Add(TreeCreated(nodeId: 2, "00sibling"));
+        return transaction;
+    }
+
+    private static Event TreeCreated(int nodeId, string contractId) => new()
+    {
+        Created = new ProtoCreatedEvent
+        {
+            NodeId = nodeId,
+            ContractId = contractId,
+            TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+            CreateArguments = new ProtoRecord(),
+        },
+    };
 
     internal sealed record TestTemplate(string Owner) : ITemplate
     {

@@ -1,15 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <PackageId>Canton.Ledger.Rest.Client</PackageId>
+    <Description>HTTP (JSON Ledger API) client for the Canton Ledger API — a full ILedgerClient / ICantonLedgerClient implementation over the transport-neutral Daml.Ledger.Abstractions interfaces.</Description>
+    <PackageTags>canton;daml;ledger;rest;json;http;blockchain;smart-contracts;client</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Canton.Ledger.Rest.Client.Tests" />
+    <InternalsVisibleTo Include="Canton.Ledger.Rest.Client.Integration.Tests" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Daml.Ledger.Abstractions" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Refit" />
@@ -19,11 +24,17 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Abstractions\Canton.Ledger.Abstractions.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Kernel\Canton.Ledger.Kernel.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Rest\Canton.Ledger.Rest.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

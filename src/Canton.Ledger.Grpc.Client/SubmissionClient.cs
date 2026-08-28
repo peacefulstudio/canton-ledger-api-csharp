@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
@@ -28,23 +29,27 @@ internal sealed partial class SubmissionClient
     private readonly LedgerClientOptions _options;
     private readonly ILogger _logger;
     private readonly Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionResult>> _pointReadByOffset;
+    private readonly Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionTree>> _treePointReadByOffset;
     private readonly CommandBuilder _commandBuilder;
 
     internal SubmissionClient(
         LedgerCallInvoker invoker,
         CommandService.CommandServiceClient commandService,
         CommandSubmissionService.CommandSubmissionServiceClient commandSubmissionService,
+        CommandBuilder commandBuilder,
         LedgerClientOptions options,
         ILogger logger,
-        Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionResult>> pointReadByOffset)
+        Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionResult>> pointReadByOffset,
+        Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionTree>> treePointReadByOffset)
     {
         _invoker = invoker;
         _commandService = commandService;
         _commandSubmissionService = commandSubmissionService;
+        _commandBuilder = commandBuilder;
         _options = options;
         _logger = logger;
         _pointReadByOffset = pointReadByOffset;
-        _commandBuilder = new CommandBuilder(options);
+        _treePointReadByOffset = treePointReadByOffset;
     }
 
     internal async Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
@@ -62,7 +67,8 @@ internal sealed partial class SubmissionClient
 
         var commands = _commandBuilder.BuildCommands(submission);
         var outcome = await TrySubmitCoreAsync(
-            commands, transactionFormat, submitter, timeout, cancellationToken).ConfigureAwait(false);
+            commands, transactionFormat, submitter, GrpcTransactionResultProjector.Project, _pointReadByOffset,
+            timeout, cancellationToken).ConfigureAwait(false);
 
         switch (outcome)
         {
@@ -233,7 +239,8 @@ internal sealed partial class SubmissionClient
 
         var commands = _commandBuilder.BuildCommands(submission);
         var outcome = await TrySubmitCoreAsync(
-            commands, transactionFormat: null, SubmitterFrom(submission), timeout, cancellationToken).ConfigureAwait(false);
+            commands, transactionFormat: null, SubmitterFrom(submission), GrpcTransactionResultProjector.Project,
+            _pointReadByOffset, timeout, cancellationToken).ConfigureAwait(false);
 
         switch (outcome)
         {
@@ -241,6 +248,40 @@ internal sealed partial class SubmissionClient
                 activity.RecordDamlError(damlError.ErrorId);
                 break;
             case ExerciseOutcome<TransactionResult>.InfraError infraError:
+                activity.RecordInfraError(infraError.StatusCode, infraError.Message);
+                break;
+        }
+
+        return outcome;
+    }
+
+    internal async Task<ExerciseOutcome<TransactionTree>> TrySubmitAndWaitForTransactionTreeAsync(
+        RuntimeCommands.CommandsSubmission submission,
+        RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
+        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWaitForTransaction");
+        activity.SetSubmitterTags(submitter);
+        LogSubmittingCommands(_logger, submission.Commands.Count);
+
+        var commands = _commandBuilder.BuildCommands(submission.WithSubmitter(submitter));
+        var outcome = await TrySubmitCoreAsync(
+            commands,
+            SubscribeRequestBuilder.BuildTransactionFormat(submitter),
+            submitter,
+            GrpcTransactionTreeProjector.Project,
+            _treePointReadByOffset,
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+
+        switch (outcome)
+        {
+            case ExerciseOutcome<TransactionTree>.DamlError damlError:
+                activity.RecordDamlError(damlError.ErrorId);
+                break;
+            case ExerciseOutcome<TransactionTree>.InfraError infraError:
                 activity.RecordInfraError(infraError.StatusCode, infraError.Message);
                 break;
         }
@@ -267,7 +308,7 @@ internal sealed partial class SubmissionClient
         LogCreatingContract(_logger, typeof(TTemplate).Name);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken).ConfigureAwait(false);
-        return TransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
+        return GrpcTransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
     }
 
     internal async Task<ExerciseOutcome<ContractId<TMarker>>> TryExerciseForCreatedAsync<TMarker>(
@@ -283,13 +324,15 @@ internal sealed partial class SubmissionClient
         var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
 
         var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken).ConfigureAwait(false);
-        return TransactionResultProjector.ProjectToContractId<TMarker>(outcome);
+        return GrpcTransactionResultProjector.ProjectToContractId<TMarker>(outcome);
     }
 
-    private async Task<ExerciseOutcome<TransactionResult>> TrySubmitCoreAsync(
+    private async Task<ExerciseOutcome<TProjection>> TrySubmitCoreAsync<TProjection>(
         Commands commands,
         TransactionFormat? transactionFormat,
         RuntimeCommands.SubmitterInfo? submitter,
+        Func<Transaction, TProjection> project,
+        Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TProjection>> pointReadByOffset,
         TimeSpan? timeout,
         CancellationToken cancellationToken)
     {
@@ -311,60 +354,91 @@ internal sealed partial class SubmissionClient
                 cancellationToken,
                 timeout).ConfigureAwait(false);
 
-            TransactionResult transactionResult;
+            Transaction transaction;
+            TProjection projected;
             try
             {
-                transactionResult = TransactionResultProjector.Project(response);
+                transaction = response.Transaction
+                    ?? throw new InvalidOperationException(
+                        "Server returned a successful response but no Transaction was present.");
+                projected = project(transaction);
             }
             catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
             {
                 LogTransactionResponseUndecodable(_logger, decodeFailure);
-                return new ExerciseOutcome<TransactionResult>.InfraError(
+                return new ExerciseOutcome<TProjection>.InfraError(
                     (int)StatusCode.Internal,
                     $"Could not decode the transaction in the ledger response: {decodeFailure.Message}");
             }
 
-            LogTransactionCompleted(
-                _logger,
-                transactionResult.UpdateId,
-                transactionResult.CreatedContracts.Count,
-                transactionResult.ArchivedContractIds.Count);
-            return new ExerciseOutcome<TransactionResult>.One(transactionResult);
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                var (createdCount, archivedCount) = CountCreatedAndArchived(transaction);
+                LogTransactionCompleted(_logger, transaction.UpdateId, createdCount, archivedCount);
+            }
+            return new ExerciseOutcome<TProjection>.One(projected);
         }
         catch (RpcException ex)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             LogSubmitFailed(_logger, ex.StatusCode, ex.Status.Detail);
-            var outcome = ToFailureOutcome<TransactionResult>(activity: null, ex);
+            var outcome = ToFailureOutcome<TProjection>(activity: null, ex);
             if (attemptCount > 1
-                && outcome is ExerciseOutcome<TransactionResult>.DamlError { ErrorId: DuplicateCommandErrorId } duplicate)
+                && outcome is ExerciseOutcome<TProjection>.DamlError { ErrorId: DuplicateCommandErrorId } duplicate)
             {
                 return await ResolveRetriedDuplicateAsync(
-                    commands.CommandId, submitter, duplicate, cancellationToken).ConfigureAwait(false);
+                    commands.CommandId, submitter, duplicate, pointReadByOffset, cancellationToken).ConfigureAwait(false);
             }
 
             return outcome;
         }
     }
 
+    private static (int CreatedCount, int ArchivedCount) CountCreatedAndArchived(Transaction transaction)
+    {
+        var createdCount = 0;
+        var archivedCount = 0;
+        foreach (var evt in transaction.Events)
+        {
+            if (evt.EventCase == Event.EventOneofCase.Created)
+            {
+                createdCount++;
+            }
+            else if (ArchivesItsContract(evt))
+            {
+                archivedCount++;
+            }
+        }
+        return (createdCount, archivedCount);
+    }
+
+    private static bool ArchivesItsContract(Event evt) => evt.EventCase switch
+    {
+        Event.EventOneofCase.Archived => true,
+        Event.EventOneofCase.Exercised => evt.Exercised.Consuming,
+        _ => false,
+    };
+
     private static ExerciseOutcome<T> ToFailureOutcome<T>(Activity? activity, RpcException exception)
     {
-        var (category, errorId, message, metadata) = DamlErrorParser.Parse(exception);
-        if (errorId.Length > 0)
+        var parsed = DamlErrorParser.Parse(exception);
+        if (parsed.ErrorId.Length > 0)
         {
-            activity.RecordDamlError(errorId);
-            return new ExerciseOutcome<T>.DamlError(category, errorId, message, metadata);
+            activity.RecordDamlError(parsed.ErrorId);
+            return new ExerciseOutcome<T>.DamlError(
+                parsed.Category, parsed.ErrorId, parsed.Message, parsed.Metadata);
         }
 
         activity.RecordInfraError((int)exception.StatusCode, exception.Status.Detail ?? exception.Message);
         return new ExerciseOutcome<T>.InfraError((int)exception.StatusCode, exception.Status.Detail ?? exception.Message);
     }
 
-    private async Task<ExerciseOutcome<TransactionResult>> ResolveRetriedDuplicateAsync(
+    private async Task<ExerciseOutcome<TProjection>> ResolveRetriedDuplicateAsync<TProjection>(
         string commandId,
         RuntimeCommands.SubmitterInfo? submitter,
-        ExerciseOutcome<TransactionResult>.DamlError duplicateError,
+        ExerciseOutcome<TProjection>.DamlError duplicateError,
+        Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TProjection>> pointReadByOffset,
         CancellationToken cancellationToken)
     {
         if (submitter is not { } dedupReader
@@ -378,9 +452,9 @@ internal sealed partial class SubmissionClient
 
         try
         {
-            var transactionResult = await _pointReadByOffset(completionOffset, dedupReader, cancellationToken).ConfigureAwait(false);
+            var projected = await pointReadByOffset(completionOffset, dedupReader, cancellationToken).ConfigureAwait(false);
             LogRetriedDuplicateResolved(_logger, commandId, completionOffset);
-            return new ExerciseOutcome<TransactionResult>.One(transactionResult);
+            return new ExerciseOutcome<TProjection>.One(projected);
         }
         catch (RpcException pointReadFailure)
         {

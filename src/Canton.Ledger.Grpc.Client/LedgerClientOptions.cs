@@ -15,7 +15,7 @@ public class LedgerClientOptions : IValidatableObject
     /// <summary>
     /// The gRPC endpoint address (e.g., "https://localhost:5001"). An <c>http</c> address opens a
     /// cleartext channel: when a token-issuing
-    /// <see cref="Canton.Ledger.Kernel.Authentication.ITokenProvider"/> is configured, bearer
+    /// <see cref="Canton.Ledger.Abstractions.ITokenProvider"/> is configured, bearer
     /// tokens are sent in cleartext, readable by anyone on the network path, and the client
     /// logs a warning at construction. Use <c>https</c> for anything beyond local development.
     /// </summary>
@@ -66,12 +66,12 @@ public class LedgerClientOptions : IValidatableObject
     public TimeSpan? Timeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// The opt-in retry pipeline applied to each unary RPC (ADR 0006). Disabled by default, so the
+    /// The opt-in retry pipeline applied to each unary RPC. Disabled by default, so the
     /// client's transport behavior is unchanged unless a consumer explicitly opts in. Only transient
     /// transport failures (gRPC <c>Unavailable</c> / <c>DeadlineExceeded</c>) are retried; Daml
     /// business errors and non-transient status codes are surfaced without retry. Retries reuse the
     /// stable <c>command_id</c> fixed above the retry boundary, so ledger-side deduplication makes a
-    /// resubmission idempotent — the pipeline itself confers no idempotency (ADR 0006).
+    /// resubmission idempotent — the pipeline itself confers no idempotency.
     /// </summary>
     /// <remarks>
     /// A first attempt can commit while its response is lost; the participant then rejects the

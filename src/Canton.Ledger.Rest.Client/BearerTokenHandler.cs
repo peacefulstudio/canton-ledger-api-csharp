@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Net.Http.Headers;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,7 +23,7 @@ namespace Canton.Ledger.Rest.Client;
 /// may re-emit it after a rotation — deliberately, so the misconfiguration stays visible in logs
 /// without introducing the process-global mutable state that true once-per-lifetime would require.
 /// </remarks>
-public sealed partial class BearerTokenHandler : DelegatingHandler
+internal sealed partial class BearerTokenHandler : DelegatingHandler
 {
     private const string BearerScheme = "Bearer";
 

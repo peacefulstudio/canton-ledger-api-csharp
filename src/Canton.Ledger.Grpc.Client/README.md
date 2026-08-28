@@ -8,13 +8,13 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 |------|---------|
 | `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `TryExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
 | `LedgerClientExtensions` (from `Daml.Ledger.Abstractions`) | Throwing convenience extension methods on `ILedgerClient`: `ExerciseAsync` (wraps `TryExerciseAsync`, throws on non-`One` outcomes) |
-| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `SubmitAsync`, `CompletionStreamAsync`, `GetConnectedSynchronizersAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync`, `GetLedgerApiVersionAsync` |
-| `IAdminClient` | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
+| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `SubmitAsync`, `CompletionStreamAsync`, `GetConnectedSynchronizersAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync`, `GetLedgerApiVersionAsync`, and typed interface-view queries via `QueryActiveAsync<TInterface, TView>` |
+| `IAdminClient` (from `Canton.Ledger.Abstractions`) | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
 | `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout`, `Retry` (opt-in retry pipeline, disabled by default) |
 
 ## Authentication
 
-Clients receive an `ITokenProvider` from `Canton.Ledger.Kernel`. Four modes:
+Clients receive an `ITokenProvider` (from `Canton.Ledger.Abstractions`; the providers that implement it ship in `Canton.Ledger.Kernel`). Four modes:
 
 ### 1. Convention-based (recommended) — `AddCantonLedger`
 
@@ -95,7 +95,7 @@ await ledgerClient.ExerciseAsync(
 
 ### Async Submission + Completions
 
-`SubmitAsync` is a true fire path: it returns once the participant accepts the commands (yielding the `command_id`), not when the transaction commits. The verdict arrives separately on `CompletionStreamAsync`, surfaced as `IAsyncEnumerable<CompletionStreamEvent>` — a small union of `CommandCompleted` (wrapping the raw `Completion`) and `Checkpoint` (the participant's offset checkpoints, so your persisted resume offset keeps advancing during quiet periods instead of falling arbitrarily far behind). The client keeps no pending-set — you correlate completions by `command_id`/`submission_id` and own your offset.
+`SubmitAsync` is a true fire path: it returns once the participant accepts the commands (yielding the `command_id`), not when the transaction commits. The verdict arrives separately on `CompletionStreamAsync`, surfaced as `IAsyncEnumerable<CompletionStreamEvent>` — a small union where the verdict *is* the event type: `CommandAccepted` (the neutral `Completion` plus the resulting `UpdateId`), `CommandRejected` (the neutral `Completion` plus a `CompletionStatus` carrying the `google.rpc.Code` verdict), `Checkpoint` (the participant's offset checkpoints, so your persisted resume offset keeps advancing during quiet periods instead of falling arbitrarily far behind), and `StreamError` (a mid-stream transport fault surfaced in-band as a terminal event rather than thrown). The client keeps no pending-set — you correlate completions by `command_id`/`submission_id` and own your offset.
 
 ```csharp
 var actAs = new Party("Alice::1234...");
@@ -110,19 +110,39 @@ CommandId commandId = await ledgerClient.SubmitAsync(submission);
 
 await foreach (var streamEvent in ledgerClient.CompletionStreamAsync(actAs, beginOffset, ct))
 {
-    if (streamEvent is CompletionStreamEvent.Checkpoint checkpoint)
+    switch (streamEvent)
     {
-        // Persist this even when no completions arrive — it is the offset
-        // to resume from without re-processing or hitting pruned data.
-        resumeOffset = checkpoint.Offset;
-        continue;
-    }
+        case CompletionStreamEvent.Checkpoint checkpoint:
+            // Persist this even when no completions arrive — it is the offset
+            // to resume from without re-processing or hitting pruned data.
+            resumeOffset = checkpoint.Offset;
+            continue;
 
-    if (streamEvent is not CompletionStreamEvent.CommandCompleted { Completion: var completion }) continue;
-    resumeOffset = completion.Offset;
-    if (completion.CommandId != commandId.Value) continue;
-    if (completion.Status is null or { Code: 0 }) { /* accepted */ }
-    break;
+        case CompletionStreamEvent.CommandAccepted accepted:
+            resumeOffset = accepted.Completion.Offset;
+            if (accepted.Completion.CommandId.Value == commandId.Value)
+            {
+                // Accepted — accepted.UpdateId is the resulting update id.
+                return accepted.UpdateId;
+            }
+            continue;
+
+        case CompletionStreamEvent.CommandRejected rejected:
+            resumeOffset = rejected.Completion.Offset;
+            if (rejected.Completion.CommandId.Value == commandId.Value)
+            {
+                // Rejected — rejected.Status carries the google.rpc.Code and message.
+                throw new InvalidOperationException(
+                    $"Command {commandId.Value} rejected ({rejected.Status.Code}): {rejected.Status.Message}");
+            }
+            continue;
+
+        case CompletionStreamEvent.StreamError error:
+            // Mid-stream transport fault surfaced in-band — reopen from
+            // resumeOffset, log, or stop. Terminal: no further events follow.
+            throw new InvalidOperationException(
+                $"Completion stream failed ({error.StatusCode}): {error.Message}");
+    }
 }
 ```
 
@@ -152,6 +172,25 @@ var rights = await adminClient.ListUserRightsAsync("alice-user");
 
 var users = await adminClient.ListUsersAsync();
 ```
+
+### Raw gRPC Stubs (Escape Hatch)
+
+For Ledger API services or overloads the typed surface does not cover, `CreateCallInvoker()` (on
+both `LedgerClient` and `AdminClient`) returns a `Grpc.Core.CallInvoker` bound to the client's
+channel that reuses its authentication, deadline, and retry plumbing — no hand-built
+`GrpcChannel`, Bearer-header `CallOptions`, or deadlines needed:
+
+```csharp
+var stateService = new StateService.StateServiceClient(ledgerClient.CreateCallInvoker());
+var ledgerEnd = await stateService.GetLedgerEndAsync(new GetLedgerEndRequest());
+```
+
+Bearer tokens come from the configured `ITokenProvider` on every call (`ITokenProvider.None`
+sends no `authorization` header); unary calls get the configured `Timeout` as a per-attempt
+deadline and run through the opt-in `Retry` pipeline, while streaming calls attach auth headers
+but no default deadline and are never retried. A caller-supplied `authorization` header or
+deadline in `CallOptions` wins over the SDK's. The invoker is valid until the client that
+created it is disposed.
 
 ## Dependency Injection
 
@@ -183,7 +222,8 @@ tracing.AddSource(AdminClient.ActivitySourceName);
 
 ## Related Packages
 
-- `Canton.Ledger.Kernel` — Transport-neutral client kernel: authentication providers (`ITokenProvider`), telemetry convention, retry pipeline
+- `Canton.Ledger.Abstractions` — Transport-neutral Canton contract layer: `ICantonLedgerClient`, `IAdminClient`, `ITokenProvider`, `IPqsClient`, the completion and reassignment families
+- `Canton.Ledger.Kernel` — Transport-neutral client kernel: the `ITokenProvider` implementations, telemetry convention, retry pipeline
 - `Canton.Ledger.Grpc` — Low-level gRPC stubs
 - `Canton.Ledger.Pqs.Client` — PQS query client
 - `Daml.Runtime` — Runtime types for generated Daml contracts

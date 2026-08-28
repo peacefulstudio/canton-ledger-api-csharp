@@ -6,6 +6,8 @@ Type-safe query client for the Canton Participant Query Store (PQS). Provides ex
 
 PQS exposes the ledger state as a PostgreSQL database. This package provides a strongly-typed client that queries active contracts using the generated Daml C# bindings. Filter field names are derived from expressions against those bindings, and values are always parameterized — eliminating SQL injection by construction.
 
+The query surface itself — `IPqsClient`, the `Filter`/`PqsFilter` DSL, `PqsPage` and `InterfaceContract<TInterface, TView>` — is declared in `Canton.Ledger.Abstractions`, so code written against `IPqsClient` (and the `FakePqsClient` in `Canton.Ledger.Testing`) needs no PostgreSQL dependency. This package supplies `PqsClient`, the Npgsql-backed implementation, plus its options, health check and DI wiring.
+
 ## Installation
 
 ```bash
@@ -17,6 +19,7 @@ dotnet add package Canton.Ledger.Pqs.Client
 ### Basic Setup
 
 ```csharp
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Pqs.Client;
 
 var options = new PqsClientOptions
@@ -108,6 +111,8 @@ services.AddPqsClient(options =>
 
 ## Related Packages
 
+- `Canton.Ledger.Abstractions` - declares `IPqsClient`, `Filter`/`PqsFilter`, `PqsPage` and `InterfaceContract<TInterface, TView>`
+- `Canton.Ledger.Testing` - `FakePqsClient`, an in-memory `IPqsClient` for unit tests
 - `Canton.Ledger.Grpc.Client` - gRPC client for command submission
 - `Daml.Runtime` - Runtime types for generated Daml contracts
 - `Daml.Codegen.CSharp` - Code generator for Daml contracts

@@ -1,7 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;

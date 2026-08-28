@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/reassignment.proto
 +++ b/com/daml/ledger/api/v2/reassignment.proto
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,7 @@ import "com/daml/ledger/api/v2/trace_context.proto";
  import "com/daml/ledger/api/v2/value.proto";
  import "google/protobuf/timestamp.proto";
  
@@ -8,3 +8,14 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "ReassignmentOuterClass";
  option java_package = "com.daml.ledger.api.v2";
+@@ -85,8 +86,8 @@ message Reassignment {
+ message ReassignmentEvent {
+   // Required
+   oneof event {
+-    UnassignedEvent unassigned = 1;
+-    AssignedEvent assigned = 2;
++    UnassignedEvent unassigned = 1 [json_name = "JsUnassignedEvent"];
++    AssignedEvent assigned = 2 [json_name = "JsAssignmentEvent"];
+   }
+ }
+ 

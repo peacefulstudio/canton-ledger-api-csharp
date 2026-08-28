@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/value.proto
 +++ b/com/daml/ledger/api/v2/value.proto
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,7 @@ package com.daml.ledger.api.v2;
  
  import "google/protobuf/empty.proto";
  

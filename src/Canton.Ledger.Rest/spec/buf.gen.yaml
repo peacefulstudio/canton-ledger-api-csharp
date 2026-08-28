@@ -11,5 +11,6 @@ plugins:
     out: gen
     opt:
       - title=Canton Ledger API (proto-derived)
-      - version=3.4.11
-      - naming=proto
+      - version=@CantonVersion@
+      - naming=json
+      - enum_type=string

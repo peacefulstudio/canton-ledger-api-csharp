@@ -3,8 +3,11 @@
 
 using System.Net;
 using AwesomeAssertions;
+using Canton.Ledger.Rest.Client.Raw;
 using Refit;
 using Xunit;
+
+#pragma warning disable CANTONREST001
 
 namespace Canton.Ledger.Rest.Client.Tests;
 
@@ -19,7 +22,7 @@ public class AuthenticatedUserApiTests
         var (api, transport) = BuildApi();
         transport.WithResponse(
             HttpStatusCode.OK,
-            """{"user":{"id":"participant_admin","primary_party":"operator::ns1"}}""");
+            """{"user":{"id":"participant_admin","primaryParty":"operator::ns1"}}""");
 
         var response = await api.GetAuthenticatedUser(cancellationToken: TestContext.Current.CancellationToken);
 

@@ -1,9 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
 using Com.Daml.Ledger.Api.V2;
@@ -23,6 +23,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
+[Collection("LedgerClient global ActivitySource")]
 public class LedgerClientRetryTests
 {
     private const string RetryAttemptActivityName = "LedgerClient.RetryAttempt";
@@ -31,7 +32,7 @@ public class LedgerClientRetryTests
     private static readonly Party ActAs = new("party::alice");
 
     /// <summary>
-    /// Encodes the ADR 0006 retry policy per status code: only transient transport failures
+    /// Encodes the retry policy per status code: only transient transport failures
     /// (<see cref="StatusCode.Unavailable"/>/<see cref="StatusCode.DeadlineExceeded"/>) are retried, so they
     /// reach <c>InitialAttempt + RetriesWhenTransient</c> calls; every other code — including
     /// <see cref="StatusCode.Aborted"/> optimistic-concurrency contention, which the SDK deliberately surfaces
@@ -389,19 +390,12 @@ public class LedgerClientRetryTests
             Faulted<SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Unavailable, uniqueDetail))),
             Ok(new SubmitAndWaitForTransactionResponse { Transaction = new Transaction { UpdateId = "u-1", Offset = 1L } }));
 
-        var activities = new ConcurrentQueue<Activity>();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == LedgerClient.ActivitySourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStopped = activities.Enqueue,
-        };
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var retrySpans = activities
+        var retrySpans = capture.Activities
             .Where(a => a.OperationName == RetryAttemptActivityName && a.StatusDescription == uniqueDetail)
             .ToList();
         retrySpans.Should().HaveCount(2, "two retries precede the third, successful attempt");

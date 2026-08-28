@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using AwesomeAssertions;
-using Canton.Ledger.Kernel.Authentication;
 using Xunit;
 
 namespace Canton.Ledger.ReadmeSnippets.Tests;
@@ -30,7 +30,7 @@ public class ReadmeSnippetsCompileTests
     {
         var readme = ReadReadme();
 
-        // Corrected surface (audit F-07).
+        // Corrected surface.
         readme.Should().Contain("ITokenProvider.None");
         readme.Should().Contain("TryCreateAsync");
         readme.Should().Contain("TryExerciseAsync");
@@ -38,7 +38,7 @@ public class ReadmeSnippetsCompileTests
         readme.Should().Contain("new ChoiceName(");
         readme.Should().Contain("new PqsClient(pqsOptions)");
 
-        // Distribution metadata points at nuget.org, not GitHub Packages (audit F-09).
+        // Distribution metadata points at nuget.org, not GitHub Packages.
         readme.Should().Contain("nuget.org");
         readme.Should().NotContain("github.com/peacefulstudio/canton-ledger-api-csharp/pkgs/nuget");
         readme.Should().NotContain("GitHub Packages");

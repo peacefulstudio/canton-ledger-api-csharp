@@ -17,4 +17,9 @@
     <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Testing.Helpers\Canton.Ledger.Testing.Helpers.csproj" />
+    <Using Include="Canton.Ledger.Testing.Helpers" />
+  </ItemGroup>
+
 </Project>

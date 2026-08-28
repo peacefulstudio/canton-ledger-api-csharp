@@ -1,10 +1,36 @@
 --- a/com/daml/ledger/api/v2/completion.proto
 +++ b/com/daml/ledger/api/v2/completion.proto
-@@ -10,6 +10,7 @@
- import "google/protobuf/duration.proto";
+@@ -5,11 +5,12 @@ syntax = "proto3";
+ 
+ package com.daml.ledger.api.v2;
+ 
++import "com/daml/ledger/api/v2/commands.proto";
+ import "com/daml/ledger/api/v2/offset_checkpoint.proto";
+ import "com/daml/ledger/api/v2/trace_context.proto";
+-import "google/protobuf/duration.proto";
  import "google/rpc/status.proto";
  
 +option go_package = "github.com/digital-asset/canton/go/ledger/api/v2;ledgerapiv2";
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "CompletionOuterClass";
  option java_package = "com.daml.ledger.api.v2";
+@@ -66,18 +67,7 @@ message Completion {
+   // The deduplication guarantee applies even if the completion omits this field.
+   //
+   // Optional
+-  oneof deduplication_period {
+-    // Specifies the start of the deduplication period by a completion stream offset (exclusive).
+-    //
+-    // Must be a valid absolute offset (positive integer) or participant begin (zero).
+-    int64 deduplication_offset = 7;
+-
+-    // Specifies the length of the deduplication period.
+-    // It is measured in record time of completions.
+-    //
+-    // Must be non-negative.
+-    google.protobuf.Duration deduplication_duration = 8;
+-  }
++  DeduplicationPeriod deduplication_period = 7 [json_name = "deduplicationPeriod"];
+ 
+   // The Ledger API trace context
+   //

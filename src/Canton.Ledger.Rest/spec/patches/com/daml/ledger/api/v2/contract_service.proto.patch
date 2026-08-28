@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/contract_service.proto
 +++ b/com/daml/ledger/api/v2/contract_service.proto
-@@ -6,7 +6,9 @@
+@@ -6,7 +6,9 @@ syntax = "proto3";
  package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/event.proto";
@@ -10,7 +10,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "ContractServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -19,7 +21,12 @@
+@@ -19,7 +21,12 @@ service ContractService {
    // or repair service.
    // If there is no contract exist with the contract ID, or there is no intersection with the querying_parties,
    // an CONTRACT_PAYLOAD_NOT_FOUND error will be raised.

@@ -1,17 +1,17 @@
 # Canton.Ledger.Kernel
 
-The transport-neutral client kernel for Canton participant nodes: the `Authentication`, `Telemetry`, and `Resilience` modules — authentication (`ITokenProvider`), the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline. Both the gRPC client and the future JSON client consume this package as peers — neither depends on the other. `Authentication` sits at the bottom of the kernel's namespace DAG (it depends on neither of the other modules), so it can later be extracted into its own package without a breaking change.
+The transport-neutral client kernel for Canton participant nodes: the `Authentication`, `Telemetry`, `Resilience`, and `Streams` modules — the token providers that implement `Canton.Ledger.Abstractions.ITokenProvider`, the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline. Both the gRPC client and the future JSON client consume this package as peers — neither depends on the other. `Authentication` sits at the bottom of the kernel's namespace DAG (it depends on neither of the other modules), so it can later be extracted into its own package without a breaking change.
 
 ## Key Types
 
 | Type | Purpose |
 |------|---------|
-| `ITokenProvider` | Interface — `Task<string> GetTokenAsync(CancellationToken)` |
-| `ITokenProvider.None` | Static singleton signaling unauthenticated access (no Authorization header) |
-| `StaticTokenProvider` | Returns a fixed token string. Use for short-lived processes or testing |
+| `StaticTokenProvider` | Returns a fixed token string. Use for short-lived processes or testing. Implements `Canton.Ledger.Abstractions.ITokenProvider` |
+| `TokenProviderExtensions.ResolveBearerTokenAsync` | The shared token-resolution guard every transport applies — `ITokenProvider.None` (or `null`) resolves to no header, a blank token throws |
 | `ClientCredentialsProvider` | OAuth2 client-credentials flow with thread-safe TTL cache (`SemaphoreSlim` + `Volatile` reads/writes) |
 | `ClientCredentialsOptions` | Config: `Domain`, `ClientId`, `ClientSecret`, `Audience`, `TokenEndpoint`, `SafetyMargin`, `AllowInsecureTokenEndpoint` |
 | `Telemetry.LedgerActivitySource` | Shared `ActivitySource` naming convention — `NameFor<T>()`, `Create<T>()`, `StartActivity<T>()` |
+| `Telemetry.LedgerActivitySourceNames` | The well-known source names of every Canton client (`All` plus one constant each), so a host can register the whole set without referencing a concrete client assembly |
 | `Resilience.RetryOptions` | Config for the opt-in retry pipeline. `Enabled` defaults to `false` |
 | `Resilience.RetryPipelineFactory` | Builds a Polly `ResiliencePipeline` from `RetryOptions` — `ResiliencePipeline.Empty` (a genuine no-op) when disabled |
 
@@ -110,6 +110,7 @@ var pipeline = RetryPipelineFactory.Create(new RetryOptions
 
 ## Internals
 
+- `Streams.StreamEventClassifier` — the single implementation of the no-silent-drop stream-classification policy that both the gRPC and HTTP projectors delegate to: which decoded shape becomes which `UnclassifiedKind`, the missing-synchronizer rule, and the decode-failure fallback with its warning. Wire decoding stays per-transport; the classifier consumes a `DecodedStreamEvent<TSynchronizerScope>` and hands back the synchronizer scope it validated, so no projector can reach a `SynchronizerId` without passing the rule. Internal — visible to the transports via `InternalsVisibleTo`, not part of the package's public surface
 - `IHttpClientFactory` named client `"CantonAuth"` — no `using` on the `HttpClient` (factory manages handler lifetime)
 - `TimeProvider` for testable time (pass `FakeTimeProvider` in tests)
 - `Volatile.Read`/`Volatile.Write` for cache fields — write order: token before expiry (matches read order)
@@ -118,5 +119,6 @@ var pipeline = RetryPipelineFactory.Create(new RetryOptions
 
 ## Related Packages
 
+- `Canton.Ledger.Abstractions` — transport-neutral contract layer that declares `ITokenProvider`
 - `Canton.Ledger.Grpc.Client` — gRPC client that consumes `ITokenProvider`
 - `Canton.Ledger.Pqs.Client` — PQS query client

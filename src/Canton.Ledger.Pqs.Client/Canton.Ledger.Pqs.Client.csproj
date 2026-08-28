@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Abstractions\Canton.Ledger.Abstractions.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Kernel\Canton.Ledger.Kernel.csproj" />
   </ItemGroup>
 

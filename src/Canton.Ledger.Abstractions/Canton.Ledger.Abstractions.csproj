@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Canton.Ledger.Abstractions</PackageId>
+    <Description>Transport-neutral Canton contract layer: the Canton-participant surface types both the gRPC and HTTP clients implement — the ICantonLedgerClient interface, the neutral command-completion family (CompletionStreamEvent with its CommandAccepted/CommandRejected verdict split, Completion, CompletionStatus, SynchronizerTime), connected-synchronizer descriptors (ConnectedSynchronizer, SynchronizerPermissionLevel), the reassignment command family (ReassignmentSubmission, UnassignCommand, AssignCommand), the participant administration surface (IAdminClient with PartyDetails, UserDetails, UserRight, PackageDetails, PackageArchive, HashFunction, VettedPackage), the ITokenProvider authentication contract both transports resolve bearer tokens through, and the Participant Query Store read surface (IPqsClient with its expression-built PqsFilter/Filter DSL, PqsPage and InterfaceContract). Depends only on Daml.Ledger.Abstractions and Daml.Runtime, dragging in neither transport nor PostgreSQL.</Description>
+    <PackageTags>canton;daml;ledger;abstractions;transport-neutral;reassignment;synchronizer</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client" />
+    <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Runtime" />
+  </ItemGroup>
+
+</Project>

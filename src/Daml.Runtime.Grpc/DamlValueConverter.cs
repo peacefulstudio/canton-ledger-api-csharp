@@ -87,7 +87,7 @@ public static class DamlValueConverter
     /// <summary>
     /// Projects a Runtime <see cref="DamlValue"/> onto its proto wire form.
     /// <see cref="DamlNumeric"/> values are encoded via <see cref="DamlNumeric.ToCanonicalString"/>,
-    /// which emits the canonical unpadded decimal form committed by codegen ADR-0011: trailing zeros
+    /// which emits the canonical unpadded decimal form committed by codegen: trailing zeros
     /// stripped, at least one fractional digit, never scientific notation (e.g. <c>1.50m</c> →
     /// <c>"1.5"</c>, <c>0m</c> → <c>"0.0"</c>). The full Daml Numeric range and precision (up to 38
     /// significant digits) is preserved, including values beyond <see cref="decimal"/>'s range.

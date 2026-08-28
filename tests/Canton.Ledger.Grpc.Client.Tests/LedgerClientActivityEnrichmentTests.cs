@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
@@ -12,12 +12,14 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using Interactive = Com.Daml.Ledger.Api.V2.Interactive;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
+[Collection("LedgerClient global ActivitySource")]
 public class LedgerClientActivityEnrichmentTests
 {
     private static readonly Party ActAs = new("party::alice");
@@ -26,6 +28,7 @@ public class LedgerClientActivityEnrichmentTests
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
     private readonly StateService.StateServiceClient _stateService;
+    private readonly Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient _interactiveSubmissionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientActivityEnrichmentTests()
@@ -36,6 +39,8 @@ public class LedgerClientActivityEnrichmentTests
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
+        _interactiveSubmissionService = Substitute
+            .ForPartsOf<Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient>(callInvoker);
     }
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
@@ -48,6 +53,17 @@ public class LedgerClientActivityEnrichmentTests
         _stateService,
         tokenProvider: _tokenProvider);
 
+    private LedgerClient CreateClientWithInteractiveSubmissionService() => new(
+        _options,
+        _channel,
+        _commandService,
+        new UpdateService.UpdateServiceClient(_channel),
+        new StateService.StateServiceClient(_channel),
+        new CommandSubmissionService.CommandSubmissionServiceClient(_channel),
+        new CommandCompletionService.CommandCompletionServiceClient(_channel),
+        _tokenProvider,
+        interactiveSubmissionService: _interactiveSubmissionService);
+
     private static RuntimeCommands.ExerciseCommand ArchiveCommand(string contractId) =>
         new(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -57,17 +73,6 @@ public class LedgerClientActivityEnrichmentTests
 
     private static string UniqueContractId() => $"00{Guid.NewGuid():N}";
 
-    private static (ActivityListener Listener, ConcurrentQueue<Activity> SharedActivities) ListenTo(string sourceName)
-    {
-        var activities = new ConcurrentQueue<Activity>();
-        var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == sourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = activities.Enqueue
-        };
-        return (listener, activities);
-    }
 
     [Fact]
     public async Task TryExerciseAsync_tags_the_activity_with_grpc_semconv_and_daml_attributes()
@@ -105,15 +110,13 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.TryExerciseAsync<DamlUnit>(
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
@@ -135,15 +138,13 @@ public class LedgerClientActivityEnrichmentTests
             errorId, "contract not found", "InvalidGivenCurrentSystemStateOther");
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.TryExerciseAsync<object>(
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
@@ -157,15 +158,13 @@ public class LedgerClientActivityEnrichmentTests
         var ex = new RpcException(new Status(StatusCode.Unavailable, $"network down {Guid.NewGuid()}"));
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClient();
         await client.TryExerciseAsync<object>(
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
@@ -190,14 +189,12 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClientWithStateService();
         await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonOffset) as long? == offset)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
@@ -224,16 +221,14 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var client = CreateClientWithStateService();
 
         var act = () => client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<RpcException>();
 
-        var activity = sharedActivities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
+        var activity = capture.Activities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
     }
@@ -254,9 +249,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
             .WithActAs(ActAs);
@@ -264,7 +257,7 @@ public class LedgerClientActivityEnrichmentTests
         var client = CreateClient();
         await client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var activity = sharedActivities.Should()
+        var activity = capture.Activities.Should()
             .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "SubmitAndWait")
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
@@ -292,9 +285,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        var (listener, sharedActivities) = ListenTo(LedgerClient.ActivitySourceName);
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
             .WithActAs(ActAs);
@@ -304,9 +295,50 @@ public class LedgerClientActivityEnrichmentTests
         var act = () => client.SubmitAndWaitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
         await act.Should().ThrowAsync<RpcException>();
 
-        var activity = sharedActivities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
+        var activity = capture.Activities.Should().ContainSingle(a => a.StatusDescription == detail).Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
         activity.GetTagItem(ActivityHelper.RpcGrpcStatusCode).Should().Be((int)StatusCode.Unavailable);
+    }
+
+    [Fact]
+    public async Task EstimateTrafficCostAsync_tags_the_activity_with_grpc_semconv_and_the_total_traffic_cost()
+    {
+        var totalCost = Random.Shared.NextInt64(1_000_000, 2_000_000);
+        _interactiveSubmissionService
+            .PrepareSubmissionAsync(
+                Arg.Any<Interactive.PrepareSubmissionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<Interactive.PrepareSubmissionResponse>(
+                Task.FromResult(new Interactive.PrepareSubmissionResponse
+                {
+                    CostEstimation = new Interactive.CostEstimation
+                    {
+                        TotalTrafficCostEstimation = (ulong)totalCost,
+                    },
+                }),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
+
+        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+
+        var client = CreateClientWithInteractiveSubmissionService();
+        await client.EstimateTrafficCostAsync(
+            RuntimeCommands.CommandsSubmission.Single(
+                RuntimeCommands.CreateCommand.For(new FooBar("alice")), ActAs),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should()
+            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonTrafficCostBytes) as long? == totalCost)
+            .Subject;
+        activity.Kind.Should().Be(ActivityKind.Client);
+        activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
+        activity.GetTagItem(ActivityHelper.RpcService).Should()
+            .Be("com.daml.ledger.api.v2.interactive.InteractiveSubmissionService");
+        activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("PrepareSubmission");
     }
 }

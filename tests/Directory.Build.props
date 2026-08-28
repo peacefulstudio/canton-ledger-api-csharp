@@ -10,4 +10,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <PackageReference Include="AwesomeAssertions" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="CantonVersion" Value="$(CantonVersion)" />
+  </ItemGroup>
 </Project>

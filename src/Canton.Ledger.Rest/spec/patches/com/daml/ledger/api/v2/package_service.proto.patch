@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/package_service.proto
 +++ b/com/daml/ledger/api/v2/package_service.proto
-@@ -6,7 +6,9 @@
+@@ -6,7 +6,9 @@ syntax = "proto3";
  package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/package_reference.proto";
@@ -10,7 +10,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "PackageServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -53,17 +55,34 @@
+@@ -59,17 +61,34 @@ enum HashFunction {
  // Allows clients to query the Daml-LF packages that are supported by the server.
  service PackageService {
    // Returns the identifiers of all supported packages.

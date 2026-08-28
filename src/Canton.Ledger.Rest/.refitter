@@ -1,6 +1,6 @@
 {
   "openApiPath": "./spec/openapi.yaml",
-  "namespace": "Canton.Ledger.Rest",
+  "namespace": "Canton.Ledger.Rest.Client.Raw",
   "outputFolder": "./Generated",
   "outputFilename": "CantonLedgerApi.g.cs",
   "multipleInterfaces": "ByTag",
@@ -13,5 +13,8 @@
   "naming": {
     "useOpenApiTitle": false,
     "interfaceName": "CantonLedgerApi"
+  },
+  "codeGeneratorSettings": {
+    "generateOptionalPropertiesAsNullable": true
   }
 }

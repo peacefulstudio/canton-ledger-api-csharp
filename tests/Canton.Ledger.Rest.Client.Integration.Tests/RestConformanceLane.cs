@@ -1,10 +1,14 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Abstractions;
+using Canton.Ledger.Rest.Client.Raw;
+using Canton.Ledger.Testing.Localnet;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Xunit;
+
+#pragma warning disable CANTONREST001
 
 namespace Canton.Ledger.Rest.Client.Integration.Tests;
 
@@ -25,13 +29,16 @@ internal sealed class RestConformanceLane : IAsyncDisposable
 
     internal LocalnetFixture Fixture { get; }
 
+    internal RestLedgerClient LedgerClient => _services.GetRequiredService<RestLedgerClient>();
+
     internal TApi Api<TApi>() where TApi : notnull => _services.GetRequiredService<TApi>();
 
     internal HttpClient CreateWireLevelClient() =>
         _services.GetRequiredService<IHttpClientFactory>()
             .CreateClient(ServiceCollectionExtensions.HttpClientName);
 
-    internal static async Task<RestConformanceLane> OpenAsync(CancellationToken cancellationToken)
+    internal static async Task<RestConformanceLane> OpenAsync(
+        CancellationToken cancellationToken, RecordingRequestHandler? recordingHandler = null)
     {
         if (!EndpointDiscovery.IsLocalnetAvailable())
         {
@@ -42,12 +49,21 @@ internal sealed class RestConformanceLane : IAsyncDisposable
         ServiceProvider? services = null;
         try
         {
-            services = new ServiceCollection()
+            var registrations = new ServiceCollection()
                 .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
-                .AddRestLedgerApis(options => options.HttpAddress = fixture.Endpoints.JsonLedgerApi.ToString())
-                .BuildServiceProvider();
+                .AddRestLedgerRawApis(options => options.HttpAddress = fixture.Endpoints.JsonLedgerApi.ToString())
+                .AddRestLedgerClient(options => options.HttpAddress = fixture.Endpoints.JsonLedgerApi.ToString());
 
-            await LedgerApiVersionSkewGuard.AssertConformableOrSkipAsync(
+            if (recordingHandler is not null)
+            {
+                registrations
+                    .AddHttpClient(ServiceCollectionExtensions.HttpClientName)
+                    .AddHttpMessageHandler(() => recordingHandler);
+            }
+
+            services = registrations.BuildServiceProvider();
+
+            await LedgerApiVersionSkewGuard.AssertConformableAsync(
                 services.GetRequiredService<IVersionServiceApi>(), cancellationToken);
 
             return new RestConformanceLane(fixture, services);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
@@ -192,7 +193,7 @@ public class SubscribeArchivedRoundTripTests
                     active.Add(created.ContractId.Value);
                     break;
                 case AcsSnapshotEntry<Marker>.Checkpoint checkpoint:
-                    snapshotOffset = checkpoint.Offset;
+                    snapshotOffset = checkpoint.Resume.Offset;
                     break;
             }
         }

@@ -18,13 +18,15 @@ namespace Canton.Ledger.Grpc.Client;
 internal static class MarkerMatcher<TMarker>
     where TMarker : IDamlType
 {
-    public static bool IsInterface { get; } = typeof(IDamlInterface).IsAssignableFrom(typeof(TMarker));
-
     private const bool InterfaceReassignmentFilterSelectsUnassignedEventsServerSide = true;
 
-    private static readonly RuntimeIdentifier MarkerIdentity = ResolveMarkerIdentity();
+    private static readonly DamlTypeDescriptor MarkerDescriptor = ResolveMarkerDescriptor();
 
-    private static readonly string PackageName = MarkerPackageName();
+    public static bool IsInterface { get; } = MarkerDescriptor.Kind == DamlTypeKind.Interface;
+
+    private static readonly RuntimeIdentifier MarkerIdentity = MarkerDescriptor.Identifier;
+
+    private static readonly string PackageName = MarkerDescriptor.PackageName;
 
     public static bool Matches(CreatedContract created) =>
         IsInterface
@@ -109,36 +111,16 @@ internal static class MarkerMatcher<TMarker>
         return false;
     }
 
-    private static RuntimeIdentifier ResolveMarkerIdentity()
+    private static DamlTypeDescriptor ResolveMarkerDescriptor()
     {
-        if (typeof(IDamlInterface).IsAssignableFrom(typeof(TMarker)))
+        if (!typeof(IDamlInterface).IsAssignableFrom(typeof(TMarker))
+            && !typeof(ITemplate).IsAssignableFrom(typeof(TMarker)))
         {
-            return MarkerIdentifier(nameof(IDamlInterface.InterfaceId));
+            throw new InvalidOperationException(
+                $"{typeof(TMarker).FullName} implements IDamlType but is neither IDamlInterface nor ITemplate.");
         }
 
-        if (typeof(ITemplate).IsAssignableFrom(typeof(TMarker)))
-        {
-            return MarkerIdentifier(nameof(ITemplate.TemplateId));
-        }
-
-        throw new InvalidOperationException(
-            $"{typeof(TMarker).FullName} implements IDamlType but is neither IDamlInterface nor ITemplate.");
-    }
-
-    private static RuntimeIdentifier MarkerIdentifier(string propertyName) =>
-        (RuntimeIdentifier)ReadStaticMember(propertyName);
-
-    private static string MarkerPackageName() =>
-        (string)ReadStaticMember("PackageName");
-
-    private static object ReadStaticMember(string propertyName)
-    {
-        var property = typeof(TMarker).GetProperty(propertyName)
-            ?? throw new InvalidOperationException(
-                $"Marker type {typeof(TMarker).FullName} does not expose static member '{propertyName}'.");
-        return property.GetValue(null)
-            ?? throw new InvalidOperationException(
-                $"Static member '{propertyName}' on marker type {typeof(TMarker).FullName} returned null.");
+        return TMarker.DamlTypeId;
     }
 
     private static bool IsModuleEntityMatch(RuntimeIdentifier candidate, RuntimeIdentifier expected) =>

@@ -57,9 +57,22 @@ public interface IHolding : IDamlInterface, IHasView<HoldingView>
 public static class IHoldingExtensions
 {
     /// <summary>
-    /// Exercises the <c>Archive</c> interface choice on this contract id.
+    /// Builds the interface-typed <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> for the <c>Archive</c> choice on this contract id.
     /// The wire-level <c>template_id</c> slot carries the interface id — Canton's
     /// ledger API resolves the concrete implementing template at the participant.
+    /// </summary>
+    /// <param name="contractId">The interface-typed contract id to exercise on.</param>
+    public static ExerciseCommand ArchiveCommand(
+        this ContractId<IHolding> contractId)
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return ExerciseCommand.ForInterface<IHolding>(contractId, new ChoiceName("Archive"), DamlRecord.Create());
+    }
+
+    /// <summary>
+    /// Exercises the <c>Archive</c> interface choice on this contract id, submitting the
+    /// resulting <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> through
+    /// <see cref="global::Daml.Ledger.Abstractions.ILedgerWriter.TrySubmitAndWaitForTransactionAsync"/> and awaiting the outcome.
     /// </summary>
     /// <param name="contractId">The interface-typed contract id to exercise on.</param>
     /// <param name="client">The ledger client.</param>
@@ -77,18 +90,16 @@ public static class IHoldingExtensions
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(contractId);
         ArgumentNullException.ThrowIfNull(client);
-        var command = ExerciseCommand.ForInterface<IHolding>(contractId, new ChoiceName("Archive"), DamlUnit.Instance);
+        var command = contractId.ArchiveCommand();
 
         var submission = CommandsSubmission.Single(command)
-            .WithActAs(actAs)
             .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
         if (!string.IsNullOrEmpty(workflowId))
         {
             submission = submission.WithWorkflowId(new WorkflowId(workflowId));
         }
 
-        return await client.TrySubmitAndWaitForTransactionAsync(submission, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

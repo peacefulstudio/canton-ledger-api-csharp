@@ -1,8 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Pqs.Client;
+using Canton.Ledger.Kernel.Telemetry;
 using Npgsql;
 
 namespace OpenTelemetry.Trace;
@@ -14,16 +13,22 @@ namespace OpenTelemetry.Trace;
 public static class CantonLedgerTracerProviderBuilderExtensions
 {
     /// <summary>
-    /// Registers OpenTelemetry tracing for the Canton Ledger API clients: the gRPC
-    /// <see cref="LedgerClient"/>/<see cref="AdminClient"/> and PQS <see cref="PqsClient"/>
-    /// <see cref="System.Diagnostics.ActivitySource"/>s, plus Npgsql's own PostgreSQL
-    /// instrumentation for the PQS client's underlying queries. Equivalent to calling
-    /// <c>.AddSource(LedgerClient.ActivitySourceName, AdminClient.ActivitySourceName, PqsClient.ActivitySourceName).AddNpgsql()</c>
-    /// by hand. This package is the only place in the Canton Ledger API client libraries that
-    /// takes an OpenTelemetry SDK dependency (ADR 0010) — the clients themselves emit only BCL
+    /// Registers OpenTelemetry tracing for every Canton Ledger API client — the gRPC
+    /// <c>LedgerClient</c>/<c>AdminClient</c>, the JSON <c>RestLedgerClient</c>, and the PQS
+    /// <c>PqsClient</c> <see cref="System.Diagnostics.ActivitySource"/>s named by
+    /// <see cref="LedgerActivitySourceNames.All"/> — plus Npgsql's own PostgreSQL instrumentation
+    /// for the PQS client's underlying queries. Equivalent to calling
+    /// <c>.AddSource([.. LedgerActivitySourceNames.All]).AddNpgsql()</c> by hand.
+    /// </summary>
+    /// <remarks>
+    /// The source names come from <c>Canton.Ledger.Kernel</c>, so this package references no
+    /// concrete client assembly: a host tracing only the REST client does not drag in the gRPC
+    /// stack, and a client added to the kernel's list is instrumented without a change here.
+    /// This package is also the only place in the Canton Ledger API client libraries that takes an
+    /// OpenTelemetry SDK dependency — the clients themselves emit only BCL
     /// <see cref="System.Diagnostics.Activity"/> spans and take no OpenTelemetry package reference,
     /// so a consumer who does not call this method pays no OpenTelemetry cost at all.
-    /// </summary>
+    /// </remarks>
     /// <param name="builder">The tracer provider builder to register the Canton sources on.</param>
     /// <returns>The same <paramref name="builder"/>, for chaining.</returns>
     public static TracerProviderBuilder AddCantonLedgerInstrumentation(this TracerProviderBuilder builder)
@@ -31,7 +36,7 @@ public static class CantonLedgerTracerProviderBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder
-            .AddSource(LedgerClient.ActivitySourceName, AdminClient.ActivitySourceName, PqsClient.ActivitySourceName)
+            .AddSource([.. LedgerActivitySourceNames.All])
             .AddNpgsql();
     }
 }

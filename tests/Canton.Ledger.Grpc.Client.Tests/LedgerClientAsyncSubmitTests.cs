@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Data;
@@ -9,6 +10,8 @@ using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
 using Xunit;
+using Completion = Com.Daml.Ledger.Api.V2.Completion;
+using CompletionStreamEvent = Canton.Ledger.Abstractions.CompletionStreamEvent;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using Status = Grpc.Core.Status;
@@ -111,6 +114,16 @@ public class LedgerClientAsyncSubmitTests
     }
 
     [Fact]
+    public async Task SubmitAsync_throws_ArgumentNullException_for_null_submission()
+    {
+        var client = CreateClient();
+
+        var act = async () => await client.SubmitAsync(null!, TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("submission");
+    }
+
+    [Fact]
     public async Task CompletionStreamAsync_yields_completions()
     {
         StubCompletionStream(
@@ -120,9 +133,9 @@ public class LedgerClientAsyncSubmitTests
         var client = CreateClient();
         var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        var completions = events.Should().AllBeOfType<CompletionStreamEvent.CommandCompleted>().Subject.ToList();
-        completions.Select(c => c.Completion.CommandId).Should().Equal("c1", "c2");
-        completions.Select(c => c.Completion.UpdateId).Should().Equal("u1", "u2");
+        var completions = events.Should().AllBeOfType<CompletionStreamEvent.CommandAccepted>().Subject.ToList();
+        completions.Select(c => c.Completion.CommandId.Value).Should().Equal("c1", "c2");
+        completions.Select(c => c.UpdateId).Should().Equal("u1", "u2");
     }
 
     [Fact]
@@ -138,8 +151,8 @@ public class LedgerClientAsyncSubmitTests
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<CompletionStreamEvent.Checkpoint>()
             .Which.Offset.Should().Be(5L);
-        events[1].Should().BeOfType<CompletionStreamEvent.CommandCompleted>()
-            .Which.Completion.CommandId.Should().Be("c1");
+        events[1].Should().BeOfType<CompletionStreamEvent.CommandAccepted>()
+            .Which.Completion.CommandId.Value.Should().Be("c1");
     }
 
     [Fact]
@@ -165,8 +178,8 @@ public class LedgerClientAsyncSubmitTests
         var client = CreateClient();
         var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.Should().ContainSingle().Which.Should().BeOfType<CompletionStreamEvent.CommandCompleted>()
-            .Which.Completion.CommandId.Should().Be("c1");
+        events.Should().ContainSingle().Which.Should().BeOfType<CompletionStreamEvent.CommandAccepted>()
+            .Which.Completion.CommandId.Value.Should().Be("c1");
     }
 
     [Fact]
@@ -215,7 +228,7 @@ public class LedgerClientAsyncSubmitTests
         var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().HaveCount(3, "both already-read completions are yielded before the terminal fault");
-        events.OfType<CompletionStreamEvent.CommandCompleted>().Select(e => e.Completion.CommandId)
+        events.OfType<CompletionStreamEvent.CommandAccepted>().Select(e => e.Completion.CommandId.Value)
             .Should().Equal("c1", "c2");
         events[2].Should().BeOfType<CompletionStreamEvent.StreamError>()
             .Which.StatusCode.Should().Be((int)StatusCode.Unavailable);
@@ -237,6 +250,43 @@ public class LedgerClientAsyncSubmitTests
         error.StatusCode.Should().Be((int)StatusCode.Unavailable);
         error.Message.Should().NotBeNullOrEmpty(
             "an empty transport Detail must fall back to the status string, not silently empty the diagnostic Message");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_surfaces_completion_with_no_command_id_as_terminal_StreamError()
+    {
+        StubCompletionStream(
+            CompletionResponse(new Completion { Offset = 7L, UpdateId = "u1" }),
+            CompletionResponse(new Completion { CommandId = "c2", UpdateId = "u2" }));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle(
+            "the undecodable completion terminates the stream, so the completion behind it is never yielded")
+            .Subject.Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.StatusCode.Should().Be(
+            (int)StatusCode.OK,
+            "the call itself succeeded — the message arrived and could not be read");
+        error.Message.Should().NotBeNullOrEmpty().And.Contain("command_id");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_yields_completions_read_before_an_undecodable_completion()
+    {
+        StubCompletionStream(
+            CompletionResponse(new Completion { CommandId = "c1", UpdateId = "u1" }),
+            CompletionResponse(new Completion { Offset = 7L, UpdateId = "u2" }),
+            CompletionResponse(new Completion { CommandId = "c3", UpdateId = "u3" }));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<CompletionStreamEvent.CommandAccepted>()
+            .Which.Completion.CommandId.Value.Should().Be("c1");
+        events[1].Should().BeOfType<CompletionStreamEvent.StreamError>()
+            .Which.StatusCode.Should().Be((int)StatusCode.OK);
     }
 
     [Fact]

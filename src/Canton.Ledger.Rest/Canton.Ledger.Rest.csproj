@@ -1,11 +1,44 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <PackageId>Canton.Ledger.Rest</PackageId>
+    <Description>Raw Refit-generated surface over the Canton JSON Ledger API. Experimental (CANTONREST001); typically consumed through the supported adapter in Canton.Ledger.Rest.Client.</Description>
+    <PackageTags>canton;daml;ledger;rest;json;http;refit</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Refit's InterfaceStubGeneratorV3 analyzer (generator type Refit.Generator.InterfaceStubGeneratorV2)
+         emits, into obj/, a stub implementation of every
+         [Experimental("CANTONREST001")] raw Ledger API interface, every one of which is declared in
+         this project, and a source-generated file cannot carry a #pragma. CANTONREST001 is emitted
+         as an error, not a warning, so there is no severity for .editorconfig to lower; neither it nor per-file NoWarn
+         metadata reaches the compiler's experimental diagnostic — both were measured against this
+         project and left all 101 occurrences reported — so the suppression can only be project-wide.
+         The cost is real: the wire-repair converters that live alongside the raw surface would have any
+         use of a raw *interface* silenced here. They use only the generated DTOs, which carry no
+         [Experimental]. A hand-written consumer of a raw interface belongs in Canton.Ledger.Rest.Client,
+         which does NOT suppress this and guards each call site with #pragma. -->
+    <NoWarn>$(NoWarn);CANTONREST001</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Canton.Ledger.Rest.Client" />
+    <InternalsVisibleTo Include="Canton.Ledger.Rest.Client.Tests" />
+    <InternalsVisibleTo Include="Canton.Ledger.Rest.Client.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Refit" />
+
+    <!-- IPartyManagementServiceApi.GetParties binds an unattributed IEnumerable<string> path parameter
+         through SimpleStylePathParameterFormatter, which Refit's source generator cannot build inline,
+         so that one method falls back to the reflection-based RestService.For path this package
+         supplies. Refit 14.0.1's generator no longer reports RF006 for it; the suppression that used to
+         accompany this reference was measured to silence nothing and has been dropped. -->
+    <PackageReference Include="Refit.Reflection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

@@ -1,8 +1,9 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
-using Com.Daml.Ledger.Api.V2;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
@@ -70,24 +71,23 @@ public class CompletionStreamRoundTripTests
         var returnedCommandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
         Assert.Equal(commandId, returnedCommandId.Value);
 
-        var completion = await ObserveCompletionAsync(client, owner, preSubmitOffset, commandId);
+        var accepted = await ObserveAcceptedAsync(client, owner, preSubmitOffset, commandId);
 
-        Assert.NotNull(completion);
-        Assert.Equal(commandId, completion!.CommandId);
-        Assert.Equal(0, completion.Status?.Code ?? 0);
-        Assert.False(string.IsNullOrWhiteSpace(completion.UpdateId), "successful completion carries an update id");
+        Assert.NotNull(accepted);
+        Assert.Equal(commandId, accepted!.Completion.CommandId.Value);
+        Assert.False(string.IsNullOrWhiteSpace(accepted.UpdateId), "an accepted completion carries an update id");
     }
 
-    private static async Task<Completion?> ObserveCompletionAsync(
+    private static async Task<CompletionStreamEvent.CommandAccepted?> ObserveAcceptedAsync(
         LedgerClient client, Party owner, long beginExclusiveOffset, string commandId)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await foreach (var streamEvent in client.CompletionStreamAsync(owner, beginExclusiveOffset, cts.Token))
         {
-            if (streamEvent is CompletionStreamEvent.CommandCompleted { Completion: var completion }
-                && completion.CommandId == commandId)
+            if (streamEvent is CompletionStreamEvent.CommandAccepted accepted
+                && accepted.Completion.CommandId.Value == commandId)
             {
-                return completion;
+                return accepted;
             }
         }
         return null;

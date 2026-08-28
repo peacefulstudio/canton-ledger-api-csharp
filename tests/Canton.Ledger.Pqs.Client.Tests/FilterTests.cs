@@ -1,10 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using AwesomeAssertions;
-using Npgsql;
 using Xunit;
 
 namespace Canton.Ledger.Pqs.Client.Tests;
@@ -16,12 +16,12 @@ public class FilterTests
     {
         var filter = Filter.Field<SampleTemplate>(t => t.Initiator, "party::123");
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("payload->>'initiator' = @p0");
-        cmd.Parameters["@p0"].Value.Should().Be("party::123");
+        parameters.Should().ContainSingle().Which.Should().Be(("@p0", "party::123"));
         paramIndex.Should().Be(1);
     }
 
@@ -30,12 +30,12 @@ public class FilterTests
     {
         var filter = Filter.Field<SampleTemplate>(t => t.NumSwaps, "5");
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("payload->>'numSwaps' = @p0");
-        cmd.Parameters["@p0"].Value.Should().Be("5");
+        parameters.Should().ContainSingle().Which.Should().Be(("@p0", "5"));
     }
 
     [Fact]
@@ -58,13 +58,13 @@ public class FilterTests
         const string nasty = "alice'; DROP TABLE active; --";
         var filter = Filter.Field<SampleTemplate>(t => t.Initiator, nasty);
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("payload->>'initiator' = @p0");
         sql.Should().NotContain(nasty);
-        cmd.Parameters["@p0"].Value.Should().Be(nasty);
+        parameters.Should().ContainSingle().Which.Should().Be(("@p0", nasty));
     }
 
     [Theory]
@@ -85,9 +85,9 @@ public class FilterTests
     {
         var filter = new PqsFilter.FieldEquals(fieldName, "value");
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var act = () => filter.ToSqlClause(cmd, ref paramIndex);
+        var act = () => filter.ToSqlClause(parameters, ref paramIndex);
 
         act.Should().Throw<ArgumentException>().WithMessage($"*'{fieldName}'*");
     }
@@ -105,9 +105,9 @@ public class FilterTests
     {
         var filter = new PqsFilter.FieldEquals(fieldName, "value");
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be($"payload->>'{fieldName}' = @p0");
     }
@@ -119,13 +119,12 @@ public class FilterTests
             Filter.Field<SampleTemplate>(t => t.Initiator, "alice"),
             Filter.Field<SampleTemplate>(t => t.Counterparty, "alice"));
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("(payload->>'initiator' = @p0 OR payload->>'counterparty' = @p1)");
-        cmd.Parameters["@p0"].Value.Should().Be("alice");
-        cmd.Parameters["@p1"].Value.Should().Be("alice");
+        parameters.Should().Equal(("@p0", "alice"), ("@p1", "alice"));
         paramIndex.Should().Be(2);
     }
 
@@ -166,13 +165,12 @@ public class FilterTests
             Filter.Field<SampleTemplate>(t => t.Initiator, "alice"),
             Filter.Field<SampleTemplate>(t => t.Status, "Active"));
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("(payload->>'initiator' = @p0 AND payload->>'status' = @p1)");
-        cmd.Parameters["@p0"].Value.Should().Be("alice");
-        cmd.Parameters["@p1"].Value.Should().Be("Active");
+        parameters.Should().Equal(("@p0", "alice"), ("@p1", "Active"));
     }
 
     [Fact]
@@ -213,9 +211,9 @@ public class FilterTests
             Filter.Field<SampleTemplate>(t => t.Counterparty, "alice"),
             Filter.Field<SampleTemplate>(t => t.Status, "Active"));
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("(payload->>'initiator' = @p0 OR payload->>'counterparty' = @p1 OR payload->>'status' = @p2)");
         paramIndex.Should().Be(3);
@@ -230,9 +228,9 @@ public class FilterTests
                 Filter.Field<SampleTemplate>(t => t.Counterparty, "alice")),
             Filter.Field<SampleTemplate>(t => t.Status, "Active"));
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("((payload->>'initiator' = @p0 OR payload->>'counterparty' = @p1) AND payload->>'status' = @p2)");
         paramIndex.Should().Be(3);
@@ -247,9 +245,9 @@ public class FilterTests
                 Filter.Field<SampleTemplate>(t => t.Status, "Active")),
             Filter.Field<SampleTemplate>(t => t.Counterparty, "bob"));
 
-        using var cmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var sql = filter.ToSqlClause(cmd, ref paramIndex);
+        var sql = filter.ToSqlClause(parameters, ref paramIndex);
 
         sql.Should().Be("((payload->>'initiator' = @p0 AND payload->>'status' = @p1) OR payload->>'counterparty' = @p2)");
         paramIndex.Should().Be(3);

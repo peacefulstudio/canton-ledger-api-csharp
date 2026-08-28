@@ -5,6 +5,7 @@ using System.Diagnostics;
 using AwesomeAssertions;
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Pqs.Client;
+using Canton.Ledger.Rest.Client;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Xunit;
@@ -85,6 +86,24 @@ public class CantonLedgerTracerProviderBuilderExtensionsTests
         provider.ForceFlush();
 
         exportedItems.Should().ContainSingle(a => a.OperationName == "test-pqs-client");
+    }
+
+    [Fact]
+    public void AddCantonLedgerInstrumentation_registers_the_RestLedgerClient_ActivitySource()
+    {
+        var exportedItems = new List<Activity>();
+        using var provider = Sdk.CreateTracerProviderBuilder()
+            .AddCantonLedgerInstrumentation()
+            .AddInMemoryExporter(exportedItems)
+            .Build();
+
+        using var source = new ActivitySource(RestLedgerClient.ActivitySourceName);
+        using (source.StartActivity("test-rest-ledger-client"))
+        {
+        }
+        provider.ForceFlush();
+
+        exportedItems.Should().ContainSingle(a => a.OperationName == "test-rest-ledger-client");
     }
 
     [Fact]
