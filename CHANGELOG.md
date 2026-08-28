@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Covers: `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Pqs.Client`, `Daml.Runtime.Grpc`, `Canton.Ledger.Kernel`, `Canton.Ledger.OpenTelemetry` — versioned in lockstep.
+Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Rest`, `Canton.Ledger.Rest.Client`, `Canton.Ledger.Testing`, `Canton.Ledger.Pqs.Client`, `Daml.Runtime.Grpc`, `Canton.Ledger.Kernel`, `Canton.Ledger.OpenTelemetry` — versioned in lockstep.
 
 ## [Unreleased]
 
