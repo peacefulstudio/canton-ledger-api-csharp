@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Pqs.Client;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics;
-using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
@@ -12,6 +12,10 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using HashFunction = Canton.Ledger.Abstractions.HashFunction;
+using PackageDetails = Canton.Ledger.Abstractions.PackageDetails;
+using PartyDetails = Canton.Ledger.Abstractions.PartyDetails;
+using VettedPackage = Canton.Ledger.Abstractions.VettedPackage;
 using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -25,7 +29,7 @@ public sealed partial class AdminClient : IAdminClient
     /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
     /// Register with <c>tracing.AddSource(AdminClient.ActivitySourceName)</c>.
     /// </summary>
-    public static string ActivitySourceName => LedgerActivitySource.NameFor<AdminClient>();
+    public static string ActivitySourceName => LedgerActivitySourceNames.GrpcAdminClient;
 
     internal const int MaxPagesPerPaginatedCall = 10_000;
 
@@ -40,6 +44,7 @@ public sealed partial class AdminClient : IAdminClient
     private readonly ITokenProvider? _tokenProvider;
     private readonly LedgerCallInvoker _invoker;
     private readonly ILogger<AdminClient> _logger;
+    private bool _disposed;
 
     /// <summary>
     /// Creates a new AdminClient with the specified options and token provider.
@@ -564,10 +569,45 @@ public sealed partial class AdminClient : IAdminClient
         new(user.Id, user.PrimaryParty);
 
     /// <summary>
+    /// Creates a <see cref="CallInvoker"/> bound to this client's channel for driving raw generated
+    /// gRPC stubs — services or overloads the typed surface does not cover — through the client's own
+    /// authentication, deadline, and retry plumbing: construct any generated stub over it, e.g.
+    /// <c>new PartyManagementService.PartyManagementServiceClient(client.CreateCallInvoker())</c>,
+    /// and call it without building any <see cref="CallOptions"/> by hand.
+    /// </summary>
+    /// <remarks>
+    /// A bearer token is resolved from the configured
+    /// <see cref="Canton.Ledger.Abstractions.ITokenProvider"/> on every call;
+    /// <see cref="Canton.Ledger.Abstractions.ITokenProvider.None"/> sends no
+    /// <c>authorization</c> header, and a caller-supplied <c>authorization</c> metadata entry wins
+    /// over the resolved token. Unary calls carry the configured
+    /// <see cref="LedgerClientOptions.Timeout"/> as a per-attempt deadline when the caller sets none
+    /// and run through the configured <see cref="LedgerClientOptions.Retry"/> pipeline, with auth
+    /// headers and deadline recomputed on each attempt; a caller-supplied deadline is kept verbatim.
+    /// Streaming calls attach auth headers but carry no default deadline — a server stream may
+    /// legitimately outlive any unary budget — and are never retried. Because retried unary calls
+    /// only surface the winning attempt, <c>AsyncUnaryCall&lt;TResponse&gt;.ResponseHeadersAsync</c>
+    /// resolves only once the response itself is available — headers from a failed attempt never
+    /// leak, but callers awaiting headers ahead of the body will wait for the body. The invoker
+    /// stays valid until this client is disposed; dispose the client, not the invoker.
+    /// </remarks>
+    /// <returns>A <see cref="CallInvoker"/> that authenticated raw stubs can be constructed over.</returns>
+    /// <exception cref="ObjectDisposedException">The client has been disposed.</exception>
+    public CallInvoker CreateCallInvoker()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return new AuthenticatedCallInvoker(_channel.CreateCallInvoker(), _invoker);
+    }
+
+    /// <summary>
     /// Releases the underlying gRPC channel.
     /// </summary>
     public void Dispose()
     {
+        if (_disposed)
+            return;
+        _disposed = true;
+
         _channel.Dispose();
     }
 }

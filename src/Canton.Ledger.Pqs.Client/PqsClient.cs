@@ -1,9 +1,11 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Data.Common;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -24,7 +26,7 @@ public sealed partial class PqsClient : IPqsClient
     /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
     /// Register with <c>tracing.AddSource(PqsClient.ActivitySourceName)</c>.
     /// </summary>
-    public static string ActivitySourceName => LedgerActivitySource.NameFor<PqsClient>();
+    public static string ActivitySourceName => LedgerActivitySourceNames.PqsClient;
 
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<PqsClient>();
 
@@ -50,10 +52,15 @@ public sealed partial class PqsClient : IPqsClient
         return options;
     }
 
+    private const string SelectActiveSql = "SELECT contract_id, payload FROM active(@typeId)";
+    private const string PageLimitParameter = "@pageLimit";
+    private const string PageOffsetParameter = "@pageOffset";
+
     private readonly PqsClientOptions _options;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PqsClient> _logger;
     private readonly Func<CancellationToken, ValueTask<NpgsqlConnection>> _openConnectionAsync;
+    private readonly Func<NpgsqlCommand, CancellationToken, Task<DbDataReader>> _executeReaderAsync;
 
     /// <summary>
     /// Creates a new PqsClient from explicit options.
@@ -76,13 +83,19 @@ public sealed partial class PqsClient : IPqsClient
     internal PqsClient(
         PqsClientOptions options,
         Func<CancellationToken, ValueTask<NpgsqlConnection>>? openConnectionAsync,
-        ILogger<PqsClient>? logger)
+        ILogger<PqsClient>? logger,
+        Func<NpgsqlCommand, CancellationToken, Task<DbDataReader>>? executeReaderAsync = null)
     {
         _options = ValidateOptions(options);
         _jsonOptions = options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
         _logger = logger ?? NullLogger<PqsClient>.Instance;
         _openConnectionAsync = openConnectionAsync ?? OpenConnectionFromOptionsAsync;
+        _executeReaderAsync = executeReaderAsync ?? ExecuteReaderDirectlyAsync;
     }
+
+    private static async Task<DbDataReader> ExecuteReaderDirectlyAsync(
+        NpgsqlCommand command, CancellationToken cancellationToken) =>
+        await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
     private async ValueTask<NpgsqlConnection> OpenConnectionFromOptionsAsync(CancellationToken cancellationToken)
     {
@@ -112,8 +125,22 @@ public sealed partial class PqsClient : IPqsClient
         where T : ITemplate
     {
         return ExecuteQueryManyAsync<T>(
-            "SELECT contract_id, payload FROM active(@typeId)",
+            SelectActiveSql,
             configureParams: null,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
+        PqsPage page,
+        CancellationToken cancellationToken = default)
+        where T : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        return ExecuteQueryManyAsync<T>(
+            WithPageClause(SelectActiveSql),
+            cmd => AddPageParameters(cmd, page),
             cancellationToken);
     }
 
@@ -123,12 +150,30 @@ public sealed partial class PqsClient : IPqsClient
         where TInterface : IDamlInterface, IHasView<TView>
         where TView : IDamlRecord =>
         ExecuteProjectingQueryManyAsync(
-            "SELECT contract_id, payload FROM active(@typeId)",
+            SelectActiveSql,
             GetDamlTypeId<TInterface>(),
             configureParams: null,
             (contractId, payloadJson) =>
                 DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson, _jsonOptions),
             cancellationToken);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
+        PqsPage page,
+        CancellationToken cancellationToken = default)
+        where TInterface : IDamlInterface, IHasView<TView>
+        where TView : IDamlRecord
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        return ExecuteProjectingQueryManyAsync(
+            WithPageClause(SelectActiveSql),
+            GetDamlTypeId<TInterface>(),
+            cmd => AddPageParameters(cmd, page),
+            (contractId, payloadJson) =>
+                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson, _jsonOptions),
+            cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
@@ -142,6 +187,27 @@ public sealed partial class PqsClient : IPqsClient
         return ExecuteQueryManyAsync<T>(
             sql,
             cmd => ApplyParameters(cmd, parameters),
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
+        PqsFilter filter,
+        PqsPage page,
+        CancellationToken cancellationToken = default)
+        where T : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+        ArgumentNullException.ThrowIfNull(page);
+
+        var (sql, parameters) = BuildFilteredQuery(filter);
+        return ExecuteQueryManyAsync<T>(
+            WithPageClause(sql),
+            cmd =>
+            {
+                ApplyParameters(cmd, parameters);
+                AddPageParameters(cmd, page);
+            },
             cancellationToken);
     }
 
@@ -200,22 +266,26 @@ public sealed partial class PqsClient : IPqsClient
     internal static (string Sql, IReadOnlyList<(string Name, string Value)> Parameters) BuildFilteredQuery(
         PqsFilter filter)
     {
-        using var tempCmd = new NpgsqlCommand();
+        var parameters = new List<(string Name, string Value)>();
         var paramIndex = 0;
-        var whereClause = filter.ToSqlClause(tempCmd, ref paramIndex);
-        var sql = $"SELECT contract_id, payload FROM active(@typeId) WHERE {whereClause}";
+        var whereClause = filter.ToSqlClause(parameters, ref paramIndex);
 
-        var parameters = new List<(string Name, string Value)>(tempCmd.Parameters.Count);
-        foreach (NpgsqlParameter p in tempCmd.Parameters)
-            parameters.Add((p.ParameterName, (string)p.Value!));
-
-        return (sql, parameters);
+        return ($"{SelectActiveSql} WHERE {whereClause}", parameters);
     }
 
     private static void ApplyParameters(NpgsqlCommand cmd, IReadOnlyList<(string Name, string Value)> parameters)
     {
         foreach (var (name, value) in parameters)
             cmd.Parameters.AddWithValue(name, value);
+    }
+
+    internal static string WithPageClause(string sql) =>
+        $"{sql} ORDER BY contract_id LIMIT {PageLimitParameter} OFFSET {PageOffsetParameter}";
+
+    private static void AddPageParameters(NpgsqlCommand cmd, PqsPage page)
+    {
+        cmd.Parameters.AddWithValue(PageLimitParameter, page.Limit);
+        cmd.Parameters.AddWithValue(PageOffsetParameter, page.Offset);
     }
 
     private Task<IReadOnlyList<Contract<T>>> ExecuteQueryManyAsync<T>(
@@ -246,7 +316,7 @@ public sealed partial class PqsClient : IPqsClient
             async (command, activity) =>
             {
                 var items = new List<TItem>();
-                var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                var reader = await _executeReaderAsync(command, cancellationToken).ConfigureAwait(false);
                 await using (reader.ConfigureAwait(false))
                 {
                     while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -278,7 +348,7 @@ public sealed partial class PqsClient : IPqsClient
             notFoundResult: null,
             async (command, _) =>
             {
-                var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                var reader = await _executeReaderAsync(command, cancellationToken).ConfigureAwait(false);
                 await using (reader.ConfigureAwait(false))
                 {
                     if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))

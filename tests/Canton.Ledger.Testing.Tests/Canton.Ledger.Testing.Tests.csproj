@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- snake_case test method names (CA1707); inline literal arrays in arrange blocks (CA1861) -->
+    <NoWarn>$(NoWarn);CA1707;CA1861</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Ledger.Abstractions.Testing.Conformance" />
+    <PackageReference Include="Daml.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Canton.Ledger.Testing\Canton.Ledger.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

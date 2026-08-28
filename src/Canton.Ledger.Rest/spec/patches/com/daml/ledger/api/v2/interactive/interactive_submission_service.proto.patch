@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
 +++ b/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
-@@ -13,9 +13,11 @@
+@@ -13,9 +13,11 @@ import "com/daml/ledger/api/v2/package_reference.proto";
  import "com/daml/ledger/api/v2/transaction.proto";
  import "com/daml/ledger/api/v2/transaction_filter.proto";
  import "com/daml/ledger/api/v2/value.proto";
@@ -12,7 +12,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2.Interactive";
  option java_outer_classname = "InteractiveSubmissionServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2.interactive";
-@@ -30,18 +32,38 @@
+@@ -30,15 +32,35 @@ option java_package = "com.daml.ledger.api.v2.interactive";
  // This gives callers the ability to sign the daml transaction with their own signing keys
  service InteractiveSubmissionService {
    // Requires `readAs` scope for the submitting party when LAPI User authorization is enabled
@@ -24,6 +24,7 @@
 +    };
 +  }
    // Execute a prepared submission _asynchronously_ on the ledger.
+   // Requires `actAs` or `executeAs` scope for the submitting party when LAPI User authorization is enabled
    // Requires a signature of the transaction from the submitting external party.
 -  rpc ExecuteSubmission(ExecuteSubmissionRequest) returns (ExecuteSubmissionResponse);
 +  rpc ExecuteSubmission(ExecuteSubmissionRequest) returns (ExecuteSubmissionResponse) {
@@ -33,8 +34,6 @@
 +    };
 +  }
    // Similar to ExecuteSubmission but _synchronously_ wait for the completion of the transaction
-   // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-   // A malicious node could make a successfully committed request appeared failed and vice versa
 -  rpc ExecuteSubmissionAndWait(ExecuteSubmissionAndWaitRequest) returns (ExecuteSubmissionAndWaitResponse);
 +  rpc ExecuteSubmissionAndWait(ExecuteSubmissionAndWaitRequest) returns (ExecuteSubmissionAndWaitResponse) {
 +    option (google.api.http) = {
@@ -43,8 +42,6 @@
 +    };
 +  }
    // Similar to ExecuteSubmissionAndWait but additionally returns the transaction
-   // IMPORTANT: Relying on the response from this endpoint requires trusting the Participant Node to be honest.
-   // A malicious node could make a successfully committed request appear as failed and vice versa
 -  rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse);
 +  rpc ExecuteSubmissionAndWaitForTransaction(ExecuteSubmissionAndWaitForTransactionRequest) returns (ExecuteSubmissionAndWaitForTransactionResponse) {
 +    option (google.api.http) = {
@@ -55,7 +52,7 @@
  
    // A preferred package is the highest-versioned package for a provided package-name
    // that is vetted by all the participants hosting the provided parties.
-@@ -55,7 +77,11 @@
+@@ -52,7 +74,11 @@ service InteractiveSubmissionService {
    // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
    //
    // Provided for backwards compatibility, it will be removed in the Canton version 3.4.0
@@ -68,7 +65,7 @@
  
    // Compute the preferred packages for the vetting requirements in the request.
    // A preferred package is the highest-versioned package for a provided package-name
-@@ -73,7 +99,12 @@
+@@ -70,7 +96,12 @@ service InteractiveSubmissionService {
    // Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
    //
    // Experimental API: this endpoint is not guaranteed to provide backwards compatibility in future releases
@@ -82,3 +79,57 @@
  }
  
  // Hints to improve cost estimation precision of a prepared transaction
+@@ -314,16 +345,7 @@ message ExecuteSubmissionRequest {
+   // If omitted, the participant will assume the configured maximum deduplication time.
+   //
+   // Optional
+-  oneof deduplication_period {
+-    // Specifies the length of the deduplication period.
+-    // It is interpreted relative to the local clock at some point during the submission's processing.
+-    // Must be non-negative. Must not exceed the maximum deduplication time.
+-    google.protobuf.Duration deduplication_duration = 3;
+-
+-    // Specifies the start of the deduplication period by a completion stream offset (exclusive).
+-    // Must be a valid absolute offset (positive integer).
+-    int64 deduplication_offset = 4;
+-  }
++  DeduplicationPeriod deduplication_period = 3 [json_name = "deduplicationPeriod"];
+ 
+   // A unique identifier to distinguish completions for different submissions with the same change ID.
+   // Typically a random UUID. Applications are expected to use a different UUID for each retry of a submission
+@@ -372,16 +394,7 @@ message ExecuteSubmissionAndWaitRequest {
+   // If omitted, the participant will assume the configured maximum deduplication time.
+   //
+   // Optional
+-  oneof deduplication_period {
+-    // Specifies the length of the deduplication period.
+-    // It is interpreted relative to the local clock at some point during the submission's processing.
+-    // Must be non-negative. Must not exceed the maximum deduplication time.
+-    google.protobuf.Duration deduplication_duration = 3;
+-
+-    // Specifies the start of the deduplication period by a completion stream offset (exclusive).
+-    // Must be a valid absolute offset (positive integer).
+-    int64 deduplication_offset = 4;
+-  }
++  DeduplicationPeriod deduplication_period = 3 [json_name = "deduplicationPeriod"];
+ 
+   // A unique identifier to distinguish completions for different submissions with the same change ID.
+   // Typically a random UUID. Applications are expected to use a different UUID for each retry of a submission
+@@ -441,16 +454,7 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
+   // If omitted, the participant will assume the configured maximum deduplication time.
+   //
+   // Optional
+-  oneof deduplication_period {
+-    // Specifies the length of the deduplication period.
+-    // It is interpreted relative to the local clock at some point during the submission's processing.
+-    // Must be non-negative. Must not exceed the maximum deduplication time.
+-    google.protobuf.Duration deduplication_duration = 3;
+-
+-    // Specifies the start of the deduplication period by a completion stream offset (exclusive).
+-    // Must be a valid absolute offset (positive integer).
+-    int64 deduplication_offset = 4;
+-  }
++  DeduplicationPeriod deduplication_period = 3 [json_name = "deduplicationPeriod"];
+ 
+   // A unique identifier to distinguish completions for different submissions with the same change ID.
+   // Typically a random UUID. Applications are expected to use a different UUID for each retry of a submission

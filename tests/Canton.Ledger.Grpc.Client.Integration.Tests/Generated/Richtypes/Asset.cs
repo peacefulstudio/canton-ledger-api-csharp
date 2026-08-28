@@ -20,7 +20,7 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml template RichTypes:Asset
 /// </summary>
-public sealed partial record Asset([property: DamlFieldAttribute("issuer")] Party Issuer, [property: DamlFieldAttribute("amount")] decimal Amount) : ITemplate
+public sealed partial record Asset([property: DamlFieldAttribute("issuer")] Party Issuer, [property: DamlFieldAttribute("amount")] decimal Amount) : ITemplate, IImplements<IHolding>
 {
     /// <summary>Gets the template identifier.</summary>
     public static Identifier TemplateId { get; } = new("3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc", "RichTypes", "Asset");
@@ -57,7 +57,7 @@ public sealed partial record Asset([property: DamlFieldAttribute("issuer")] Part
     {
         Name = new ChoiceName("Archive"),
         Consuming = true,
-        ArgumentEncoder = _ => DamlUnit.Instance,
+        ArgumentEncoder = _ => DamlRecord.Create(),
         ResultDecoder = _ => DamlUnit.Instance
     };
 
@@ -101,7 +101,7 @@ public static class AssetSubmissionExtensions
     /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static Task<ExerciseOutcome<ContractId<Asset>>> CreateAsync(
-        this ILedgerClient client,
+        this ILedgerWriter client,
         Asset payload,
         SubmitterInfo submitter,
         CancellationToken cancellationToken = default)
@@ -110,5 +110,88 @@ public static class AssetSubmissionExtensions
         ArgumentNullException.ThrowIfNull(payload);
 
         return client.TryCreateAsync<Asset>(payload, submitter, cancellationToken: cancellationToken);
+    }
+}
+
+/// <summary>
+/// Async exerciser extensions for <see cref="Asset"/> contract IDs whose choices
+/// return a non-contract-id payload (Decimal, records, lists, Unit, etc.).
+/// Each method submits the choice via
+/// <c>ILedgerWriter.TrySubmitAndWaitForTransactionAsync</c> and lifts the typed result
+/// into <c>ExerciseOutcome&lt;TReturn&gt;</c>.
+/// </summary>
+public static class AssetNonContractExtensions
+{
+    /// <summary>
+    /// Builds the <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> for the Archive choice on this contract id.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    public static ExerciseCommand ArchiveCommand(
+        this ContractId<Asset> contractId)
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return new ExerciseCommand(
+            Asset.TemplateId,
+            contractId,
+            new ChoiceName("Archive"),
+            DamlRecord.Create());
+    }
+
+    /// <summary>
+    /// Exercises the Archive choice and lifts the choice's exercise result to
+    /// <see cref="ExerciseOutcome{T}"/> over <c>Unit</c>. Structured Canton/Daml errors
+    /// and infrastructure/transport errors pass through unchanged.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    /// <param name="client">The ledger client.</param>
+    /// <param name="actAs">The party submitting the command.</param>
+    /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<ExerciseOutcome<Unit>> ArchiveAsync(
+        this ContractId<Asset> contractId,
+        ILedgerWriter client,
+        Party actAs,
+        string? workflowId = null,
+        CommandId? commandId = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var command = contractId.ArchiveCommand();
+
+        var submission = CommandsSubmission.Single(command)
+            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
+        if (!string.IsNullOrEmpty(workflowId))
+        {
+            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
+        }
+
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return outcome.ProjectCommitted(tx => ProjectArchiveResult(tx, contractId.Value));
+    }
+
+    private static ExerciseOutcome<Unit> ProjectArchiveResult(TransactionResult tx, string contractId)
+    {
+        foreach (var exercised in tx.ExercisedEvents)
+        {
+            if (string.Equals(exercised.ContractId, contractId, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.ModuleName, Asset.TemplateId.ModuleName, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.EntityName, Asset.TemplateId.EntityName, StringComparison.Ordinal)
+                && string.Equals(exercised.ChoiceName, "Archive", StringComparison.Ordinal))
+            {
+                return new ExerciseOutcome<Unit>.One(Unit.Value);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Submission succeeded but no 'Archive' exercise on contract '{contractId}' was recorded on transaction {tx.UpdateId}. " +
+            "This is most often caused by the ILedgerWriter implementation not populating TransactionResult.ExercisedEvents — " +
+            "your ILedgerWriter implementation must project the transaction's exercised events into TransactionResult.ExercisedEvents. " +
+            "If your implementation does populate ExercisedEvents, ensure the participant is configured to return " +
+            "LedgerEffects with verbose events so the exercise event survives projection.");
     }
 }

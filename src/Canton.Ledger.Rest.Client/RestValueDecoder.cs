@@ -7,21 +7,22 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Serialization;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
-using WireEnum = Canton.Ledger.Rest.Enum;
-using WireGenMap = Canton.Ledger.Rest.GenMap;
-using WireIdentifier = Canton.Ledger.Rest.Identifier;
-using WireList = Canton.Ledger.Rest.List;
-using WireOptional = Canton.Ledger.Rest.Optional;
-using WireRecord = Canton.Ledger.Rest.Record;
-using WireTextMap = Canton.Ledger.Rest.TextMap;
-using WireValue = Canton.Ledger.Rest.Value;
-using WireVariant = Canton.Ledger.Rest.Variant;
+using WireEnum = Canton.Ledger.Rest.Client.Raw.Enum;
+using WireGenMap = Canton.Ledger.Rest.Client.Raw.GenMap;
+using WireIdentifier = Canton.Ledger.Rest.Client.Raw.Identifier;
+using WireList = Canton.Ledger.Rest.Client.Raw.List;
+using WireOptional = Canton.Ledger.Rest.Client.Raw.Optional;
+using WireRecord = Canton.Ledger.Rest.Client.Raw.Record;
+using WireTextMap = Canton.Ledger.Rest.Client.Raw.TextMap;
+using WireValue = Canton.Ledger.Rest.Client.Raw.Value;
+using WireVariant = Canton.Ledger.Rest.Client.Raw.Variant;
 
 namespace Canton.Ledger.Rest.Client;
 
 internal static class RestValueDecoder
 {
-    private const string UnitPropertyName = "unit";
+    private static InvalidOperationException MalformedResponse(string detail) =>
+        new($"{RestTransactionResultProjector.MalformedResponsePrefix}{detail}");
 
     public static DamlRecord ToDamlRecord(WireRecord? record)
     {
@@ -33,7 +34,7 @@ internal static class RestValueDecoder
             foreach (var field in fields)
             {
                 var fieldValue = field?.Value
-                    ?? throw new InvalidOperationException($"Record field '{field?.Label}' has no value set.");
+                    ?? throw MalformedResponse($"Record field '{field?.Label}' has no value set.");
                 damlFields.Add(new DamlField(field.Label, ToDamlValue(fieldValue)));
             }
             return new DamlRecord(ToRuntimeIdentifier(record.RecordId), damlFields);
@@ -62,16 +63,16 @@ internal static class RestValueDecoder
         if (value.Party is not null) return new DamlParty(value.Party);
         if (value.Text is not null) return new DamlText(value.Text);
         if (value.ContractId is not null) return new DamlContractId(value.ContractId);
-        if (value.Bool) return new DamlBool(true);
-        if (value.Date != 0) return DamlDate.FromDaysSinceEpoch(value.Date);
-        if (value.AdditionalProperties.ContainsKey(UnitPropertyName)) return DamlUnit.Instance;
-        throw new InvalidOperationException("Received a wire Value with no recognisable sum case set.");
+        if (value.Bool is { } boolean) return new DamlBool(boolean);
+        if (value.Date is { } days) return DamlDate.FromDaysSinceEpoch(days);
+        if (value.AdditionalProperties.ContainsKey(WireValueNames.Unit)) return DamlUnit.Instance;
+        throw MalformedResponse("Received a wire Value with no recognisable sum case set.");
     }
 
     private static DamlVariant ToDamlVariant(WireVariant variant)
     {
         var inner = variant.Value
-            ?? throw new InvalidOperationException($"Variant '{variant.Constructor}' has no value set.");
+            ?? throw MalformedResponse($"Variant '{variant.Constructor}' has no value set.");
         return new DamlVariant(ToRuntimeIdentifier(variant.VariantId), variant.Constructor, ToDamlValue(inner));
     }
 
@@ -81,7 +82,7 @@ internal static class RestValueDecoder
         var values = new List<DamlValue>(elements.Count);
         foreach (var element in elements)
         {
-            values.Add(ToDamlValue(element ?? throw new InvalidOperationException("List contains a null element.")));
+            values.Add(ToDamlValue(element ?? throw MalformedResponse("List contains a null element.")));
         }
         return new DamlList(values);
     }
@@ -96,10 +97,10 @@ internal static class RestValueDecoder
         foreach (var entry in entries)
         {
             var entryValue = entry?.Value
-                ?? throw new InvalidOperationException($"TextMap entry '{entry?.Key}' has no value set.");
+                ?? throw MalformedResponse($"TextMap entry '{entry?.Key}' has no value set.");
             if (!decoded.TryAdd(entry.Key, ToDamlValue(entryValue)))
             {
-                throw new InvalidOperationException($"TextMap contains duplicate key '{entry.Key}'.");
+                throw MalformedResponse($"TextMap contains duplicate key '{entry.Key}'.");
             }
         }
         return new DamlTextMap(decoded);
@@ -111,8 +112,8 @@ internal static class RestValueDecoder
         var pairs = new List<(DamlValue Key, DamlValue Value)>(entries.Count);
         foreach (var entry in entries)
         {
-            var entryKey = entry?.Key ?? throw new InvalidOperationException("GenMap entry has no key set.");
-            var entryValue = entry.Value ?? throw new InvalidOperationException("GenMap entry has no value set.");
+            var entryKey = entry?.Key ?? throw MalformedResponse("GenMap entry has no key set.");
+            var entryValue = entry.Value ?? throw MalformedResponse("GenMap entry has no value set.");
             pairs.Add((ToDamlValue(entryKey), ToDamlValue(entryValue)));
         }
         return new DamlGenMap(pairs);

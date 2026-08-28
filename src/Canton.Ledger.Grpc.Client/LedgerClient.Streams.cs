@@ -1,13 +1,17 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Canton.Ledger.Abstractions;
+using Canton.Ledger.Kernel.Streams;
 using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Streams;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using ProtoCompletion = Com.Daml.Ledger.Api.V2.Completion;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
 
@@ -17,9 +21,10 @@ public sealed partial class LedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
-    /// Fault contract (ADR 0015): a mid-stream transport fault is surfaced
-    /// in-band as a terminal <see cref="CompletionStreamEvent.StreamError"/>,
-    /// never thrown — the same value-not-exception contract as
+    /// Fault contract: a mid-stream transport fault, and a completion whose
+    /// payload cannot be decoded, are both surfaced in-band as a terminal
+    /// <see cref="CompletionStreamEvent.StreamError"/>, never thrown — the same
+    /// value-not-exception contract as
     /// <see cref="SubscribeAsync{T}"/>. A caller cancelling via
     /// <paramref name="cancellationToken"/> still gets an
     /// <see cref="OperationCanceledException"/>.
@@ -69,7 +74,14 @@ public sealed partial class LedgerClient
             switch (stream.Current.CompletionResponseCase)
             {
                 case CompletionStreamResponse.CompletionResponseOneofCase.Completion:
-                    yield return new CompletionStreamEvent.CommandCompleted(stream.Current.Completion);
+                    if (!TryProjectCompletion(stream.Current.Completion, out var completion, out var decodeFailure))
+                    {
+                        LogCompletionStreamDecodeFailed(_logger, stream.Current.Completion.Offset, decodeFailure);
+                        yield return new CompletionStreamEvent.StreamError((int)StatusCode.OK, decodeFailure.Message);
+                        yield break;
+                    }
+
+                    yield return completion;
                     break;
                 case CompletionStreamResponse.CompletionResponseOneofCase.OffsetCheckpoint:
                     yield return new CompletionStreamEvent.Checkpoint(stream.Current.OffsetCheckpoint.Offset);
@@ -78,6 +90,25 @@ public sealed partial class LedgerClient
                     LogCompletionStreamVariantSkipped(_logger, stream.Current.CompletionResponseCase);
                     break;
             }
+        }
+    }
+
+    private static bool TryProjectCompletion(
+        ProtoCompletion completion,
+        [NotNullWhen(true)] out CompletionStreamEvent? projected,
+        [NotNullWhen(false)] out Exception? decodeFailure)
+    {
+        try
+        {
+            projected = GrpcCompletionProjector.Project(completion);
+            decodeFailure = null;
+            return true;
+        }
+        catch (Exception failure) when (StreamEventClassifier.IsDecodeFailure(failure))
+        {
+            projected = null;
+            decodeFailure = failure;
+            return false;
         }
     }
 
@@ -111,7 +142,7 @@ public sealed partial class LedgerClient
 
     /// <inheritdoc />
     /// <remarks>
-    /// Fault contract (ADR 0015): a mid-stream transport fault is surfaced
+    /// Fault contract: a mid-stream transport fault is surfaced
     /// in-band as a terminal <see cref="ContractStreamEvent{T}.StreamError"/>,
     /// never thrown, so a caller draining with <c>await foreach</c> decides
     /// policy. A caller cancelling via <paramref name="cancellationToken"/>
@@ -130,7 +161,7 @@ public sealed partial class LedgerClient
 
     /// <inheritdoc />
     /// <remarks>
-    /// Fault contract (ADR 0015): a mid-stream transport fault is surfaced
+    /// Fault contract: a mid-stream transport fault is surfaced
     /// in-band as a terminal <see cref="ContractStreamEvent{T}.StreamError"/>,
     /// never thrown. A caller cancelling via <paramref name="cancellationToken"/>
     /// still gets an <see cref="OperationCanceledException"/>.
@@ -230,7 +261,7 @@ public sealed partial class LedgerClient
 
     /// <inheritdoc />
     /// <remarks>
-    /// Fault contract (ADR 0015): a mid-snapshot transport fault is surfaced
+    /// Fault contract: a mid-snapshot transport fault is surfaced
     /// in-band as a terminal <see cref="AcsSnapshotEntry{T}.StreamError"/>,
     /// never thrown — at parity with <see cref="SubscribeAsync{T}"/>. It is
     /// mutually exclusive with the success-path terminal
@@ -301,15 +332,17 @@ public sealed partial class LedgerClient
 
             if (!step.Moved)
             {
-                yield return new AcsSnapshotEntry<T>.Checkpoint(LedgerOffset.At(effectiveOffset));
+                yield return new AcsSnapshotEntry<T>.Checkpoint(new StakeholderResume(LedgerOffset.At(effectiveOffset)));
                 yield break;
             }
 
-            foreach (var projected in ContractStreamProjector.ProjectActiveContractEntry<T>(stream.Current, _logger))
+            foreach (var projected in ContractStreamProjector.ProjectActiveContractEntry<T>(
+                stream.Current, _logger, LedgerOffset.At(effectiveOffset)))
             {
                 if (projected is ContractStreamEvent<T>.Unclassified unclassified)
                 {
-                    LogActiveContractEntryUnclassified(_logger, typeof(T).Name, stream.Current.ContractEntryCase, unclassified.Kind);
+                    LogActiveContractEntryUnclassified(
+                        _logger, typeof(T).Name, stream.Current.ContractEntryCase, unclassified.Kind, unclassified.Offset.Value);
                 }
                 yield return ToAcsSnapshotEntry(projected);
             }
@@ -352,6 +385,9 @@ public sealed partial class LedgerClient
     [LoggerMessage(Level = LogLevel.Debug, Message = "Completion stream skipped variant {Variant}")]
     private static partial void LogCompletionStreamVariantSkipped(ILogger logger, CompletionStreamResponse.CompletionResponseOneofCase variant);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Completion stream could not decode the completion at offset {Offset} — surfaced as a terminal StreamError")]
+    private static partial void LogCompletionStreamDecodeFailed(ILogger logger, long offset, Exception exception);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Subscribing to {TemplateType} updates from offset {FromOffset}")]
     private static partial void LogSubscribeStarted(ILogger logger, string templateType, long fromOffset);
 
@@ -364,6 +400,6 @@ public sealed partial class LedgerClient
     [LoggerMessage(Level = LogLevel.Debug, Message = "Subscribe stream for {TemplateType} skipped variant {Variant}")]
     private static partial void LogStreamVariantSkipped(ILogger logger, string templateType, GetUpdatesResponse.UpdateOneofCase variant);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Active contracts snapshot for {TemplateType} could not classify entry {ContractEntryCase} — surfaced as Unclassified ({Kind})")]
-    private static partial void LogActiveContractEntryUnclassified(ILogger logger, string templateType, GetActiveContractsResponse.ContractEntryOneofCase contractEntryCase, UnclassifiedKind kind);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Active contracts snapshot for {TemplateType} could not classify entry {ContractEntryCase} — surfaced as Unclassified ({Kind}) carrying offset {Offset}")]
+    private static partial void LogActiveContractEntryUnclassified(ILogger logger, string templateType, GetActiveContractsResponse.ContractEntryOneofCase contractEntryCase, UnclassifiedKind kind, long offset);
 }

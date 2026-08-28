@@ -87,7 +87,7 @@ public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] 
     {
         Name = new ChoiceName("Archive"),
         Consuming = true,
-        ArgumentEncoder = _ => DamlUnit.Instance,
+        ArgumentEncoder = _ => DamlRecord.Create(),
         ResultDecoder = _ => DamlUnit.Instance
     };
 
@@ -185,6 +185,24 @@ public sealed record RelabelResult(ContractId<RichRecord> RichRecord)
 public static class RichRecordExtensions
 {
     /// <summary>
+    /// Builds the <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> for the Relabel choice on this contract id.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    /// <param name="argument">The choice argument.</param>
+    public static ExerciseCommand RelabelCommand(
+        this ContractId<RichRecord> contractId,
+        RichRecord.Relabel argument)
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        ArgumentNullException.ThrowIfNull(argument);
+        return new ExerciseCommand(
+            RichRecord.TemplateId,
+            contractId,
+            new ChoiceName("Relabel"),
+            argument.ToRecord());
+    }
+
+    /// <summary>
     /// Exercises the Relabel choice and projects the resulting transaction's created contracts to a typed <see cref="RelabelResult"/>.
     /// One <c>Party</c> parameter is emitted per Daml controller (declaration order).
     /// The wrapper builds a <see cref="SubmitterInfo"/> from those parties before
@@ -208,27 +226,60 @@ public static class RichRecordExtensions
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(contractId);
         ArgumentNullException.ThrowIfNull(client);
-        ArgumentNullException.ThrowIfNull(argument);
 
         SubmitterInfo submitter = owner;
 
-        var command = new ExerciseCommand(
-            RichRecord.TemplateId,
-            contractId,
-            new ChoiceName("Relabel"),
-            argument.ToRecord());
+        var command = contractId.RelabelCommand(argument);
 
         var submission = CommandsSubmission.Single(command)
-            .WithSubmitter(submitter)
             .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
         if (!string.IsNullOrEmpty(workflowId))
         {
             submission = submission.WithWorkflowId(new WorkflowId(workflowId));
         }
 
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, submitter, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return outcome.ProjectCommitted(tx => RelabelResult.FromCreatedContracts(tx.CreatedContracts));
+    }
+
+    /// <summary>
+    /// Exercises the Relabel choice with an explicit <see cref="SubmitterInfo"/> and projects the resulting transaction's created contracts to a typed <see cref="RelabelResult"/>.
+    /// Companion to the named-<c>Party</c> overload for the case where the submitter must
+    /// read contracts it does not act as — the choice's created contracts are visible to an
+    /// observer but not to the submitter, so the caller supplies the <c>readAs</c> parties.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    /// <param name="client">The ledger client.</param>
+    /// <param name="argument">The choice argument.</param>
+    /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
+    /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
+        this ContractId<RichRecord> contractId,
+        ILedgerWriter client,
+        RichRecord.Relabel argument,
+        SubmitterInfo submitter,
+        string? workflowId = null,
+        CommandId? commandId = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var command = contractId.RelabelCommand(argument);
+
+        var submission = CommandsSubmission.Single(command)
+            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
+        if (!string.IsNullOrEmpty(workflowId))
+        {
+            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
+        }
+
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, submitter, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return outcome.ProjectCommitted(tx => RelabelResult.FromCreatedContracts(tx.CreatedContracts));
     }
@@ -303,5 +354,88 @@ public static class RichRecordSubmissionExtensions
         ArgumentNullException.ThrowIfNull(payload);
 
         return client.TryCreateAsync<RichRecord>(payload, submitter, cancellationToken: cancellationToken);
+    }
+}
+
+/// <summary>
+/// Async exerciser extensions for <see cref="RichRecord"/> contract IDs whose choices
+/// return a non-contract-id payload (Decimal, records, lists, Unit, etc.).
+/// Each method submits the choice via
+/// <c>ILedgerWriter.TrySubmitAndWaitForTransactionAsync</c> and lifts the typed result
+/// into <c>ExerciseOutcome&lt;TReturn&gt;</c>.
+/// </summary>
+public static class RichRecordNonContractExtensions
+{
+    /// <summary>
+    /// Builds the <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> for the Archive choice on this contract id.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    public static ExerciseCommand ArchiveCommand(
+        this ContractId<RichRecord> contractId)
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return new ExerciseCommand(
+            RichRecord.TemplateId,
+            contractId,
+            new ChoiceName("Archive"),
+            DamlRecord.Create());
+    }
+
+    /// <summary>
+    /// Exercises the Archive choice and lifts the choice's exercise result to
+    /// <see cref="ExerciseOutcome{T}"/> over <c>Unit</c>. Structured Canton/Daml errors
+    /// and infrastructure/transport errors pass through unchanged.
+    /// </summary>
+    /// <param name="contractId">The contract on which to exercise the choice.</param>
+    /// <param name="client">The ledger client.</param>
+    /// <param name="actAs">The party submitting the command.</param>
+    /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task<ExerciseOutcome<Unit>> ArchiveAsync(
+        this ContractId<RichRecord> contractId,
+        ILedgerWriter client,
+        Party actAs,
+        string? workflowId = null,
+        CommandId? commandId = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+
+        var command = contractId.ArchiveCommand();
+
+        var submission = CommandsSubmission.Single(command)
+            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
+        if (!string.IsNullOrEmpty(workflowId))
+        {
+            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
+        }
+
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return outcome.ProjectCommitted(tx => ProjectArchiveResult(tx, contractId.Value));
+    }
+
+    private static ExerciseOutcome<Unit> ProjectArchiveResult(TransactionResult tx, string contractId)
+    {
+        foreach (var exercised in tx.ExercisedEvents)
+        {
+            if (string.Equals(exercised.ContractId, contractId, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.ModuleName, RichRecord.TemplateId.ModuleName, StringComparison.Ordinal)
+                && string.Equals(exercised.TemplateId.EntityName, RichRecord.TemplateId.EntityName, StringComparison.Ordinal)
+                && string.Equals(exercised.ChoiceName, "Archive", StringComparison.Ordinal))
+            {
+                return new ExerciseOutcome<Unit>.One(Unit.Value);
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Submission succeeded but no 'Archive' exercise on contract '{contractId}' was recorded on transaction {tx.UpdateId}. " +
+            "This is most often caused by the ILedgerWriter implementation not populating TransactionResult.ExercisedEvents — " +
+            "your ILedgerWriter implementation must project the transaction's exercised events into TransactionResult.ExercisedEvents. " +
+            "If your implementation does populate ExercisedEvents, ensure the participant is configured to return " +
+            "LedgerEffects with verbose events so the exercise event survives projection.");
     }
 }

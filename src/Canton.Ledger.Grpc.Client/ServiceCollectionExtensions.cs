@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.DependencyInjection;
 using Daml.Ledger.Abstractions;
@@ -158,9 +159,6 @@ public static class ServiceCollectionExtensions
     /// <see cref="AddAdminClient(IServiceCollection, IConfiguration)"/> with the same configuration
     /// section is safe — both share <see cref="LedgerClientOptions"/> and the binding delegates
     /// will produce the same result.
-    /// Note: despite the method name, the health check registered by
-    /// <see cref="HealthCheckBuilderExtensions.AddLedgerClient"/> depends on <see cref="IAdminClient"/>
-    /// because it calls <see cref="IAdminClient.GetParticipantIdAsync"/> to verify connectivity.
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">

@@ -19,4 +19,5 @@ internal static class LedgerClientActivityTags
     public const string CantonPartyIdHint = "canton.party_id_hint";
     public const string CantonUserId = "canton.user_id";
     public const string CantonSubmissionId = "canton.submission_id";
+    public const string CantonTrafficCostBytes = "canton.traffic_cost_bytes";
 }

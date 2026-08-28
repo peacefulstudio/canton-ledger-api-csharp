@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/event_query_service.proto
 +++ b/com/daml/ledger/api/v2/event_query_service.proto
-@@ -7,7 +7,9 @@
+@@ -7,7 +7,9 @@ package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/event.proto";
  import "com/daml/ledger/api/v2/transaction_filter.proto";
@@ -10,7 +10,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "EventQueryServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -34,7 +36,12 @@
+@@ -36,7 +38,12 @@ service EventQueryService {
    // No events will be returned for contracts that have been pruned because they
    // have already been archived before the latest pruning offset.
    // If the contract cannot be found for the request, or all the contract-events are filtered, a CONTRACT_EVENTS_NOT_FOUND error will be raised.

@@ -159,6 +159,68 @@ public class SubscribeRequestBuilderTests
             .Should().Be("#richtypes");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildGetUpdatesRequest_gives_every_party_its_own_Filters_instance(bool isInterface)
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice", (Party)"bob" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
+            submitter, TemplateId, fromOffset: null, toOffset: null, isInterface: isInterface);
+
+        var filtersByParty = request.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
+        filtersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            TemplateFilter = new TemplateFilter { TemplateId = TemplateId },
+        });
+
+        filtersByParty["bob"].Cumulative.Should().HaveCount(1);
+        filtersByParty["observer"].Cumulative.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_gives_reassignments_an_EventFormat_independent_of_the_transaction_one()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: null, toOffset: null);
+
+        var transactions = request.UpdateFormat.IncludeTransactions.EventFormat;
+        transactions.Verbose = false;
+        transactions.FiltersByParty.Remove("observer");
+        transactions.FiltersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            WildcardFilter = new WildcardFilter(),
+        });
+
+        var reassignments = request.UpdateFormat.IncludeReassignments;
+        reassignments.Verbose.Should().BeTrue();
+        reassignments.FiltersByParty.Keys.Should().BeEquivalentTo(["alice", "observer"]);
+        reassignments.FiltersByParty["alice"].Cumulative.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void BuildTransactionFormat_gives_every_party_its_own_wildcard_Filters_instance()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice", (Party)"bob" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var filtersByParty = SubscribeRequestBuilder.BuildTransactionFormat(submitter).EventFormat.FiltersByParty;
+        filtersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            TemplateFilter = new TemplateFilter { TemplateId = TemplateId },
+        });
+
+        filtersByParty["bob"].Cumulative.Should().BeEmpty();
+        filtersByParty["observer"].Cumulative.Should().BeEmpty();
+    }
+
     [Fact]
     public void BuildTransactionFormat_covers_every_actAs_and_readAs_party_with_a_wildcard_filter()
     {

@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Canton.Ledger.Kernel.Resilience;
@@ -441,6 +442,21 @@ public class ServiceCollectionExtensionsTests
         var cantonClient = provider.GetRequiredService<ICantonLedgerClient>();
         cantonClient.Should().BeOfType<LedgerClient>();
         cantonClient.Should().BeSameAs(provider.GetRequiredService<ILedgerClient>());
+    }
+
+    [Fact]
+    public async Task Provider_DisposeAsync_disposes_the_ledger_client_without_throwing()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(o => o.GrpcAddress = "https://localhost:5001");
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ICantonLedgerClient>();
+        provider.GetRequiredService<ILedgerClient>();
+
+        var action = async () => await provider.DisposeAsync();
+
+        await action.Should().NotThrowAsync(
+            "the container captures the single client instance under both service types, so async disposal must tolerate being invoked more than once");
     }
 
     [Fact]

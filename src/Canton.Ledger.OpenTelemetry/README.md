@@ -1,12 +1,14 @@
 # Canton.Ledger.OpenTelemetry
 
-Opt-in OpenTelemetry wiring for the Canton Ledger API clients. The gRPC (`Canton.Ledger.Grpc.Client`) and PQS (`Canton.Ledger.Pqs.Client`) clients emit only BCL `System.Diagnostics.Activity` spans and take no OpenTelemetry dependency — this package is the only assembly in the repo that references the OpenTelemetry SDK, and a consumer who never references it pays no OpenTelemetry cost at all.
+Opt-in OpenTelemetry wiring for the Canton Ledger API clients. The gRPC (`Canton.Ledger.Grpc.Client`), JSON (`Canton.Ledger.Rest.Client`), and PQS (`Canton.Ledger.Pqs.Client`) clients emit only BCL `System.Diagnostics.Activity` spans and take no OpenTelemetry dependency — this package is the only assembly in the repo that references the OpenTelemetry SDK, and a consumer who never references it pays no OpenTelemetry cost at all.
+
+The source names come from `Canton.Ledger.Kernel`, which is this package's only project dependency: enabling tracing never drags a concrete client assembly — or its transport stack — into a host that does not use it.
 
 ## Key Types
 
 | Type | Purpose |
 |------|---------|
-| `OpenTelemetry.Trace.CantonLedgerTracerProviderBuilderExtensions.AddCantonLedgerInstrumentation()` | `TracerProviderBuilder` extension registering the `LedgerClient`/`AdminClient`/`PqsClient` `ActivitySource`s plus Npgsql's own instrumentation |
+| `OpenTelemetry.Trace.CantonLedgerTracerProviderBuilderExtensions.AddCantonLedgerInstrumentation()` | `TracerProviderBuilder` extension registering the `LedgerClient`/`AdminClient`/`RestLedgerClient`/`PqsClient` `ActivitySource`s plus Npgsql's own instrumentation |
 
 ## Usage
 
@@ -23,7 +25,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
 
 ```csharp
 builder
-    .AddSource(LedgerClient.ActivitySourceName, AdminClient.ActivitySourceName, PqsClient.ActivitySourceName)
+    .AddSource([.. LedgerActivitySourceNames.All])
     .AddNpgsql();
 ```
 

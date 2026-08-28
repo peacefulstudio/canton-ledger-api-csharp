@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Canton.Ledger.Kernel</PackageId>
-    <Description>Transport-neutral client kernel for Canton participant nodes: OAuth2 client-credentials token provider, OpenTelemetry ActivitySource naming convention, and an opt-in Polly retry pipeline, consumed as peers by both the gRPC and (future) HTTP clients.</Description>
+    <Description>Transport-neutral client kernel for Canton participant nodes: OAuth2 client-credentials and static token providers implementing Canton.Ledger.Abstractions.ITokenProvider, the OpenTelemetry ActivitySource naming convention, and an opt-in Polly retry pipeline, consumed as peers by both the gRPC and HTTP clients.</Description>
     <PackageTags>canton;daml;auth;oauth2;token;client-credentials;opentelemetry;resilience;polly</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Abstractions\Canton.Ledger.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Polly.Core" />

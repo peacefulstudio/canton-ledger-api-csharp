@@ -8,12 +8,29 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Daml.Ledger.Abstractions.Testing.Conformance" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.Rest.Client\Canton.Ledger.Rest.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\LedgerApiVersionSkewGuard.cs"
+             Link="Shared\LedgerApiVersionSkewGuard.cs" />
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\ServedOpenApiDocument.cs"
+             Link="Shared\ServedOpenApiDocument.cs" />
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\YamlBlock.cs"
+             Link="Shared\YamlBlock.cs" />
+    <None Include="..\..\src\Canton.Ledger.Rest\spec\openapi.yaml"
+          Link="spec\openapi.yaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Testing.Helpers\Canton.Ledger.Testing.Helpers.csproj" />
+    <Using Include="Canton.Ledger.Testing.Helpers" />
   </ItemGroup>
 
 </Project>

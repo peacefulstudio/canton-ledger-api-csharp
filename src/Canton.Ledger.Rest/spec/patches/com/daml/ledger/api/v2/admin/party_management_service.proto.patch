@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/admin/party_management_service.proto
 +++ b/com/daml/ledger/api/v2/admin/party_management_service.proto
-@@ -7,8 +7,10 @@
+@@ -7,8 +7,10 @@ package com.daml.ledger.api.v2.admin;
  
  import "com/daml/ledger/api/v2/admin/object_meta.proto";
  import "com/daml/ledger/api/v2/crypto.proto";
@@ -11,7 +11,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
  option java_outer_classname = "PartyManagementServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2.admin";
-@@ -39,16 +41,28 @@
+@@ -39,16 +41,28 @@ service PartyManagementService {
    // All horizontally scaled replicas should return the same id.
    // daml-on-kv-ledger: returns an identifier supplied on command line at launch time
    // canton: returns globally unique identifier of the participant
@@ -43,7 +43,7 @@
  
    // Allocates a new party on a ledger and adds it to the set managed by the participant.
    // Caller specifies a party identifier suggestion, the actual identifier
-@@ -67,7 +81,12 @@
+@@ -67,7 +81,12 @@ service PartyManagementService {
    // is richer than the surface protocol, the arguments take implicit values
    // The party identifier suggestion must be a valid party name. Party names are required to be non-empty US-ASCII strings built from letters, digits, space,
    // colon, minus and underscore limited to 255 chars
@@ -55,9 +55,9 @@
 +    };
 +  }
  
-   // Alpha 3.3: Endpoint to allocate a new external party on a synchronizer
-   //
-@@ -82,11 +101,21 @@
+   // The external party must be hosted (at least) on this node with either confirmation or observation permissions
+   // It can optionally be hosted on other nodes (then called a multi-hosted party).
+@@ -78,11 +97,21 @@ service PartyManagementService {
    // In the simple case of a non-multi hosted, non-decentralized party, the RPC will return once the party is
    // effectively allocated and ready to use, similarly to the AllocateParty behavior.
    // For more complex scenarios applications may need to query the party status explicitly (only through the admin API as of now).
@@ -81,7 +81,7 @@
  
    // Update the assignment of a party from one IDP to another.
    rpc UpdatePartyIdentityProviderId(UpdatePartyIdentityProviderIdRequest) returns (UpdatePartyIdentityProviderIdResponse);
-@@ -101,7 +130,12 @@
+@@ -93,7 +122,12 @@ service PartyManagementService {
    // Note that this request will create a normal namespace using the same key for the
    // identity as for signing. More elaborate schemes such as multi-signature
    // or decentralized parties require you to construct the topology transactions yourself.

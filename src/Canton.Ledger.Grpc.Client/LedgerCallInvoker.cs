@@ -3,7 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Resilience;
 using Canton.Ledger.Kernel.Telemetry;
 using Google.Protobuf.Reflection;

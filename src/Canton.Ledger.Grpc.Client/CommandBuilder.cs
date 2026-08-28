@@ -1,8 +1,11 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Grpc;
+using Google.Protobuf;
+using static Canton.Ledger.Kernel.Commands.ReassignmentCommandPolicy;
 using RuntimeCommands = Daml.Runtime.Commands;
 using ProtoUnassignCommand = Com.Daml.Ledger.Api.V2.UnassignCommand;
 using ProtoAssignCommand = Com.Daml.Ledger.Api.V2.AssignCommand;
@@ -17,6 +20,7 @@ internal sealed class CommandBuilder
 
     internal Commands BuildCommands(RuntimeCommands.CommandsSubmission submission)
     {
+        ArgumentNullException.ThrowIfNull(submission);
         var commands = new Commands
         {
             CommandId = submission.CommandId?.Value ?? Guid.NewGuid().ToString(),
@@ -41,6 +45,11 @@ internal sealed class CommandBuilder
         if (submission.SynchronizerId is { } synchronizerId)
         {
             commands.SynchronizerId = synchronizerId.Id;
+        }
+
+        if (submission.DisclosedContracts is { Count: > 0 } disclosedContracts)
+        {
+            commands.DisclosedContracts.AddRange(disclosedContracts.Select(ToProtoDisclosedContract));
         }
 
         foreach (var cmd in submission.Commands)
@@ -96,10 +105,18 @@ internal sealed class CommandBuilder
         return reassignmentCommands;
     }
 
+    private static DisclosedContract ToProtoDisclosedContract(RuntimeCommands.DisclosedContract disclosed) =>
+        new()
+        {
+            TemplateId = DamlValueConverter.ToProtoIdentifier(disclosed.TemplateId),
+            ContractId = disclosed.ContractId,
+            CreatedEventBlob = ByteString.CopyFrom(disclosed.CreatedEventBlob.Span),
+        };
+
     private static ReassignmentCommand ToProtoReassignmentCommand(IReassignmentCommand command) =>
         command switch
         {
-            UnassignCommand unassign => new ReassignmentCommand
+            Canton.Ledger.Abstractions.UnassignCommand unassign => new ReassignmentCommand
             {
                 UnassignCommand = new ProtoUnassignCommand
                 {
@@ -108,7 +125,7 @@ internal sealed class CommandBuilder
                     Target = RequireNonEmpty(unassign.Target.Id, "unassign target synchronizer id"),
                 },
             },
-            AssignCommand assign => new ReassignmentCommand
+            Canton.Ledger.Abstractions.AssignCommand assign => new ReassignmentCommand
             {
                 AssignCommand = new ProtoAssignCommand
                 {
@@ -120,9 +137,4 @@ internal sealed class CommandBuilder
             _ => throw new NotSupportedException(
                 $"Reassignment command type {command.GetType().Name} is not supported"),
         };
-
-    private static string RequireNonEmpty(string value, string field) =>
-        string.IsNullOrWhiteSpace(value)
-            ? throw new ArgumentException($"A reassignment requires a non-empty {field}.", field)
-            : value;
 }

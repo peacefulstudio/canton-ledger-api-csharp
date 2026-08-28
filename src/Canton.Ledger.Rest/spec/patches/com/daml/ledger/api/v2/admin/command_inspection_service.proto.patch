@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/admin/command_inspection_service.proto
 +++ b/com/daml/ledger/api/v2/admin/command_inspection_service.proto
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,7 @@ import "com/daml/ledger/api/v2/completion.proto";
  import "com/daml/ledger/api/v2/value.proto";
  import "google/protobuf/timestamp.proto";
  

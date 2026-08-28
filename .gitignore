@@ -65,6 +65,7 @@ _ReSharper*/
 coverage*.json
 coverage*.xml
 coverage*.info
+!coverage.settings.xml
 
 # OS specific
 .DS_Store

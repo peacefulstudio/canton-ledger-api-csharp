@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/admin/package_management_service.proto
 +++ b/com/daml/ledger/api/v2/admin/package_management_service.proto
-@@ -6,8 +6,10 @@
+@@ -6,8 +6,10 @@ syntax = "proto3";
  package com.daml.ledger.api.v2.admin;
  
  import "com/daml/ledger/api/v2/package_reference.proto";
@@ -11,7 +11,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
  option java_outer_classname = "PackageManagementServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2.admin";
-@@ -27,7 +29,12 @@
+@@ -27,7 +29,12 @@ service PackageManagementService {
    // If vetting is enabled in the request, the DAR is checked for upgrade compatibility
    // with the set of the already vetted packages on the target vetting synchronizer
    // See UploadDarFileRequest for details regarding vetting and the target vetting synchronizer.
@@ -25,7 +25,7 @@
  
    // Validates the DAR and checks the upgrade compatibility of the DAR's packages
    // with the set of the already vetted packages on the target vetting synchronizer.
-@@ -35,10 +42,20 @@
+@@ -35,10 +42,20 @@ service PackageManagementService {
    //
    // The operation has no effect on the state of the participant or the Canton ledger:
    // the DAR payload and its packages are not persisted neither are the packages vetted.
@@ -48,3 +48,22 @@
  }
  
  message ListKnownPackagesRequest {}
+@@ -188,11 +205,16 @@ message VettedPackagesChange {
+   }
+ 
+   // Required
++  VettedPackagesChangeOperation operation = 1 [json_name = "operation"];
++}
++
++// Selects which change a ``VettedPackagesChange`` applies to the set of vetted packages.
++message VettedPackagesChangeOperation {
+   oneof operation {
+     // Add packages to or update packages in the set of vetted packages.
+-    Vet vet = 1;
++    VettedPackagesChange.Vet vet = 1 [json_name = "Vet"];
+     // Remove packages from the set of vetted packages.
+-    Unvet unvet = 2;
++    VettedPackagesChange.Unvet unvet = 2 [json_name = "Unvet"];
+   }
+ }
+ 

@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Kernel.Streams;
 using Com.Daml.Ledger.Api.V2;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -48,10 +49,8 @@ internal static class SubscribeRequestBuilder
     public static TransactionFormat BuildTransactionFormat(RuntimeCommands.SubmitterInfo submitter)
     {
         var eventFormat = new EventFormat { Verbose = true };
-        var wildcard = new Filters();
 
-        AddFilterForEachParty(eventFormat, submitter.ActAs, wildcard);
-        AddFilterForEachParty(eventFormat, submitter.ReadAs, wildcard);
+        AddFilterForEachParty(eventFormat, submitter, static () => new Filters());
 
         return new TransactionFormat
         {
@@ -85,24 +84,22 @@ internal static class SubscribeRequestBuilder
         bool isInterface)
     {
         var eventFormat = new EventFormat { Verbose = true };
-        var filters = isInterface ? BuildInterfaceFilters(filterId) : BuildTemplateFilters(filterId);
+        Func<Filters> createFilters = isInterface
+            ? () => BuildInterfaceFilters(filterId)
+            : () => BuildTemplateFilters(filterId);
 
-        AddFilterForEachParty(eventFormat, submitter.ActAs, filters);
-        AddFilterForEachParty(eventFormat, submitter.ReadAs, filters);
+        AddFilterForEachParty(eventFormat, submitter, createFilters);
         return eventFormat;
     }
 
     private static void AddFilterForEachParty(
         EventFormat eventFormat,
-        IReadOnlySet<Daml.Runtime.Data.Party> parties,
-        Filters filters)
+        RuntimeCommands.SubmitterInfo submitter,
+        Func<Filters> createFilters)
     {
-        foreach (var party in parties)
+        foreach (var partyId in SubscribeFilterPolicy.FilteredPartyIds(submitter))
         {
-            if (!eventFormat.FiltersByParty.ContainsKey(party.Id))
-            {
-                eventFormat.FiltersByParty.Add(party.Id, filters);
-            }
+            eventFormat.FiltersByParty.Add(partyId, createFilters());
         }
     }
 

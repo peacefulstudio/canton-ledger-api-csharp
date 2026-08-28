@@ -17,27 +17,40 @@ namespace Richtypes;
 /// satisfies its <c>where T : ITemplate</c> constraint, but every static
 /// metadata accessor throws — interface placeholders carry no template identity.
 /// </summary>
+/// <remarks>
+/// Interface-instance choices need a concrete template to compile against, but the Daml
+/// interface <c>RichTypes:Holding</c> has none, so every static metadata accessor on this
+/// placeholder throws by design. This does not affect interface choices, which the generated
+/// extension methods exercise directly on <c>ContractId&lt;Holding&gt;</c> — no coercion
+/// needed. There is no supported way to recover a concrete <c>ContractId&lt;TConcrete&gt;</c>
+/// from this placeholder; obtain one independently if concrete metadata is required.
+/// </remarks>
 public sealed record Holding : ITemplate
 {
     /// <summary>Always throws — the <c>RichTypes:Holding</c> interface placeholder carries no template identity.</summary>
+    /// <exception cref="System.InvalidOperationException">Thrown unconditionally — this placeholder carries no template identity to report.</exception>
     public static Identifier TemplateId =>
-        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Coerce ContractId<Holding> to a typed ContractId<TConcrete> before reading template metadata or exercising commands.");
+        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Exercise interface choices directly on ContractId<Holding>; there is no supported coercion to a concrete ContractId<TConcrete>.");
 
     /// <summary>Always throws — the <c>RichTypes:Holding</c> interface placeholder carries no package identity.</summary>
+    /// <exception cref="System.InvalidOperationException">Thrown unconditionally — this placeholder carries no package identity to report.</exception>
     public static string PackageId =>
-        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Coerce ContractId<Holding> to a typed ContractId<TConcrete> before reading template metadata or exercising commands.");
+        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Exercise interface choices directly on ContractId<Holding>; there is no supported coercion to a concrete ContractId<TConcrete>.");
 
     /// <summary>Always throws — the <c>RichTypes:Holding</c> interface placeholder carries no package identity.</summary>
+    /// <exception cref="System.InvalidOperationException">Thrown unconditionally — this placeholder carries no package identity to report.</exception>
     public static string PackageName =>
-        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Coerce ContractId<Holding> to a typed ContractId<TConcrete> before reading template metadata or exercising commands.");
+        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Exercise interface choices directly on ContractId<Holding>; there is no supported coercion to a concrete ContractId<TConcrete>.");
 
     /// <summary>Always throws — the <c>RichTypes:Holding</c> interface placeholder carries no package identity.</summary>
+    /// <exception cref="System.InvalidOperationException">Thrown unconditionally — this placeholder carries no package identity to report.</exception>
     public static Version PackageVersion =>
-        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Coerce ContractId<Holding> to a typed ContractId<TConcrete> before reading template metadata or exercising commands.");
+        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Exercise interface choices directly on ContractId<Holding>; there is no supported coercion to a concrete ContractId<TConcrete>.");
 
     /// <summary>Always throws — the <c>RichTypes:Holding</c> interface placeholder carries no Daml type identity.</summary>
+    /// <exception cref="System.InvalidOperationException">Thrown unconditionally — this placeholder carries no Daml type identity to report.</exception>
     public static DamlTypeDescriptor DamlTypeId =>
-        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Coerce ContractId<Holding> to a typed ContractId<TConcrete> before reading template metadata or exercising commands.");
+        throw new InvalidOperationException("'Holding' is the C# placeholder for the Daml interface 'RichTypes:Holding' and carries no template metadata. Exercise interface choices directly on ContractId<Holding>; there is no supported coercion to a concrete ContractId<TConcrete>.");
 
     /// <summary>Converts this placeholder to an empty DamlRecord.</summary>
     public DamlRecord ToRecord() => DamlRecord.Create();

@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/transaction.proto
 +++ b/com/daml/ledger/api/v2/transaction.proto
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,7 @@ import "com/daml/ledger/api/v2/event.proto";
  import "com/daml/ledger/api/v2/trace_context.proto";
  import "google/protobuf/timestamp.proto";
  

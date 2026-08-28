@@ -1,7 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Collections.Concurrent;
+using Canton.Ledger.Abstractions;
 using System.Diagnostics;
 using AwesomeAssertions;
 using Canton.Ledger.Kernel.Telemetry;
@@ -30,17 +30,6 @@ public class PqsClientQueryExecutionTests
             invariantSeverity: "ERROR",
             sqlState: "P0001");
 
-    private static (ActivityListener Listener, ConcurrentQueue<Activity> Activities) ListenToPqsClient()
-    {
-        var activities = new ConcurrentQueue<Activity>();
-        var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == PqsClient.ActivitySourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
-            ActivityStarted = activities.Enqueue
-        };
-        return (listener, activities);
-    }
 
     [Fact]
     public async Task QueryAsync_returns_empty_when_the_template_is_not_found()
@@ -99,9 +88,7 @@ public class PqsClientQueryExecutionTests
     [Fact]
     public async Task QueryAsync_logs_records_and_rethrows_a_non_cancellation_failure()
     {
-        var (listener, activities) = ListenToPqsClient();
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
 
         var loggerFactory = new CapturingLoggerFactory();
         var failure = new InvalidOperationException("connection blew up");
@@ -113,7 +100,7 @@ public class PqsClientQueryExecutionTests
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Should().BeSameAs(failure);
 
-        var activity = activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
+        var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(InvalidOperationException).FullName);
 
@@ -126,9 +113,7 @@ public class PqsClientQueryExecutionTests
     [Fact]
     public async Task QueryAsync_propagates_cancellation_without_recording_an_error()
     {
-        var (listener, activities) = ListenToPqsClient();
-        using var _ = listener;
-        ActivitySource.AddActivityListener(listener);
+        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
 
         var loggerFactory = new CapturingLoggerFactory();
         var client = ClientThatOpensWith(
@@ -139,7 +124,7 @@ public class PqsClientQueryExecutionTests
 
         await act.Should().ThrowAsync<OperationCanceledException>();
 
-        var activity = activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
+        var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
         activity.Status.Should().NotBe(ActivityStatusCode.Error);
         loggerFactory.Records.Should().NotContain(r =>
             r.Level == LogLevel.Error && r.Message.Contains("PQS query failed"));

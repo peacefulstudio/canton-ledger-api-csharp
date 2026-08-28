@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
@@ -234,7 +235,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeAsync_surfaces_unrelated_template_Created_as_Unclassified()
     {
-        // No-silent-drop (ADR 0003): a Created the client cannot classify to the
+        // No-silent-drop: a Created the client cannot classify to the
         // subscribed template is surfaced as Unclassified between the matching ones,
         // never dropped.
         var transaction = MakeTransaction(
@@ -809,7 +810,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_Created_for_matching_template_and_Unclassified_for_mismatch()
     {
-        // Regression for #179: a snapshot entry whose template doesn't match the
+        // Regression: a snapshot entry whose template doesn't match the
         // subscribed marker T is surfaced as Unclassified, never silently dropped,
         // at parity with the live SubscribeAsync stream.
         StubGetLedgerEnd(offset: 10L);
@@ -894,6 +895,39 @@ public class LedgerClientSubscribeTests
 
         captured.Should().NotBeNull();
         captured!.ActiveAtOffset.Should().Be(42L);
+    }
+
+    private static GetActiveContractsResponse MakeActiveContractWithoutCreatedEvent() =>
+        new() { ActiveContract = new ActiveContract { SynchronizerId = "sync-1" } };
+
+    [Fact]
+    public async Task SubscribeActiveAsync_reports_an_entry_without_a_created_event_at_the_requested_snapshot_offset()
+    {
+        StubGetActiveContracts(MakeActiveContractWithoutCreatedEvent());
+
+        var client = CreateClient();
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, LedgerOffset.At(42L), TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Kind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.ActiveContract.ToString());
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_reports_an_entry_without_a_created_event_at_the_resolved_ledger_end()
+    {
+        StubGetLedgerEnd(offset: 5L);
+        StubGetActiveContracts(MakeActiveContractWithoutCreatedEvent());
+
+        var client = CreateClient();
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync<FooBar>(
+            ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
+        unclassified.Offset.Value.Should().Be(5L);
     }
 
     [Fact]
@@ -1175,7 +1209,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_Unclassified_when_active_contract_synchronizer_id_missing()
     {
-        // Regression for #179: an ActiveContract entry that cannot be paired with a
+        // Regression: an ActiveContract entry that cannot be paired with a
         // synchronizer id is surfaced as Unclassified, never silently dropped.
         StubGetLedgerEnd(offset: 0L);
         var response = new GetActiveContractsResponse
@@ -1206,7 +1240,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_Unclassified_when_IncompleteUnassigned_source_missing()
     {
-        // Regression for #179: same invariant for the IncompleteUnassigned shape,
+        // Regression: same invariant for the IncompleteUnassigned shape,
         // whose synchronizer id is derived from UnassignedEvent.Source.
         StubGetLedgerEnd(offset: 0L);
         var incomplete = new GetActiveContractsResponse
@@ -1243,7 +1277,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_Unclassified_when_IncompleteAssigned_target_missing()
     {
-        // Regression for #179: same invariant for the IncompleteAssigned shape,
+        // Regression: same invariant for the IncompleteAssigned shape,
         // whose synchronizer id is derived from AssignedEvent.Target.
         StubGetLedgerEnd(offset: 0L);
         var incomplete = new GetActiveContractsResponse
@@ -1278,7 +1312,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_CreatedEvent_kind_when_template_mismatched_and_synchronizer_id_missing()
     {
-        // Regression for #179 review: template mismatch takes precedence over a
+        // Regression: template mismatch takes precedence over a
         // missing synchronizer id, mirroring the live SubscribeAsync ordering
         // (marker check before synchronizer-id check).
         StubGetLedgerEnd(offset: 0L);
@@ -1315,7 +1349,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeActiveAsync_surfaces_IncompleteUnassigned_offset_from_reassignment_event_when_created_event_absent()
     {
-        // Regression for #179 review: when the created event is absent, the
+        // Regression: when the created event is absent, the
         // Unclassified offset should come from the entry's own reassignment
         // event rather than defaulting to 0.
         StubGetLedgerEnd(offset: 0L);
@@ -1404,7 +1438,7 @@ public class LedgerClientSubscribeTests
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>();
         events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
-            .Which.Offset.Value.Should().Be(64L);
+            .Which.Resume.Offset.Value.Should().Be(64L);
     }
 
     [Fact]
@@ -1419,7 +1453,7 @@ public class LedgerClientSubscribeTests
 
         events.Should().ContainSingle().Which
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
-            .Which.Offset.Value.Should().Be(55L);
+            .Which.Resume.Offset.Value.Should().Be(55L);
     }
 
     [Fact]
@@ -1436,7 +1470,7 @@ public class LedgerClientSubscribeTests
         captured!.ActiveAtOffset.Should().Be(777L);
         events.Should().ContainSingle().Which
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>()
-            .Which.Offset.Value.Should().Be(777L);
+            .Which.Resume.Offset.Value.Should().Be(777L);
         _ = _stateService.DidNotReceive().GetLedgerEndAsync(
             Arg.Any<GetLedgerEndRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
     }
@@ -1452,12 +1486,12 @@ public class LedgerClientSubscribeTests
             ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var checkpoint = snapshot[^1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Checkpoint>().Subject;
-        checkpoint.Offset.Value.Should().Be(100L);
+        checkpoint.Resume.Offset.Value.Should().Be(100L);
 
         GetUpdatesRequest? resumeRequest = null;
         StubGetUpdates(MakeGetUpdatesResponse(), capture: r => resumeRequest = r);
         _ = await CollectAsync(client.SubscribeAsync<FooBar>(
-            ActAs, fromOffset: checkpoint.Offset, cancellationToken: TestContext.Current.CancellationToken));
+            ActAs, fromOffset: checkpoint.Resume.Offset, cancellationToken: TestContext.Current.CancellationToken));
 
         resumeRequest.Should().NotBeNull();
         resumeRequest!.BeginExclusive.Should().Be(100L,
@@ -1478,7 +1512,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeAsync_for_interface_marker_surfaces_Archived_with_empty_implemented_interfaces_as_Unclassified()
     {
-        // Regression for #142: the participant delivers an ArchivedEvent for a
+        // Regression: the participant delivers an ArchivedEvent for a
         // contract implementing the subscribed interface, but leaves
         // implemented_interfaces empty despite include_interface_view. The client
         // cannot classify it, so it must be surfaced, never silently dropped.
@@ -1503,7 +1537,7 @@ public class LedgerClientSubscribeTests
     [Fact]
     public async Task SubscribeAsync_for_interface_marker_surfaces_Exercised_with_empty_implemented_interfaces_as_Unclassified()
     {
-        // Regression for #142: same participant gap on an ExercisedEvent.
+        // Regression: same participant gap on an ExercisedEvent.
         var exercised = new ProtoExercisedEvent
         {
             ContractId = "00impl",

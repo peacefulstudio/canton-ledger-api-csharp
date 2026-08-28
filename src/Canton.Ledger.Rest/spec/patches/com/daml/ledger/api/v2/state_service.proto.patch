@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/state_service.proto
 +++ b/com/daml/ledger/api/v2/state_service.proto
-@@ -8,7 +8,9 @@
+@@ -8,7 +8,9 @@ package com.daml.ledger.api.v2;
  import "com/daml/ledger/api/v2/event.proto";
  import "com/daml/ledger/api/v2/reassignment.proto";
  import "com/daml/ledger/api/v2/transaction_filter.proto";
@@ -10,7 +10,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "StateServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -20,17 +22,34 @@
+@@ -20,24 +22,46 @@ service StateService {
    // the client SHOULD begin streaming updates from the update service,
    // starting at the GetActiveContractsRequest.active_at_offset specified in this request.
    // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
@@ -18,6 +18,19 @@
 +  rpc GetActiveContracts(GetActiveContractsRequest) returns (stream GetActiveContractsResponse) {
 +    option (google.api.http) = {
 +      post: "/v2/state/active-contracts"
++      body: "*"
++    };
++  }
+ 
+   // Returns a page of the snapshot of the active contracts and incomplete (un)assignments at a ledger offset.
+   // Once all pages are fetched by repeated calls to ``GetActiveContractsPage``,
+   // the client SHOULD begin retrieving updates from the update service,
+   // starting at the ``GetActiveContractsPageResponse``.``active_at_offset`` specified in this request.
+   // Clients SHOULD NOT assume that the set of active contracts they receive reflects the state at the ledger end.
+-  rpc GetActiveContractsPage(GetActiveContractsPageRequest) returns (GetActiveContractsPageResponse);
++  rpc GetActiveContractsPage(GetActiveContractsPageRequest) returns (GetActiveContractsPageResponse) {
++    option (google.api.http) = {
++      post: "/v2/state/active-contracts-page"
 +      body: "*"
 +    };
 +  }
@@ -49,3 +62,58 @@
  }
  
  // If the given offset is different than the ledger end, and there are (un)assignments in-flight at the given offset,
+@@ -134,24 +158,7 @@ message GetActiveContractsResponse {
+   // ``TransactionFilter`` in the query.
+   //
+   // Required
+-  oneof contract_entry {
+-    // The contract is active on the assigned synchronizer, meaning: there was an activation event on the given synchronizer (
+-    // created, assigned), which is not followed by a deactivation event (archived, unassigned) on the same
+-    // synchronizer, until the active_at_offset.
+-    // Since activeness is defined as a per synchronizer concept, it is possible, that a contract is active on one
+-    // synchronizer, but already archived on another.
+-    // There will be one such message for each synchronizer the contract is active on.
+-    ActiveContract active_contract = 2;
+-
+-    // Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
+-    // assigned event before or at the active_at_offset.
+-    IncompleteUnassigned incomplete_unassigned = 3;
+-
+-    // Important: this message is not indicating that the contract is active on the target synchronizer!
+-    // Included iff the assigned event was before or at the active_at_offset, but there was no corresponding
+-    // unassigned event before or at the active_at_offset.
+-    IncompleteAssigned incomplete_assigned = 4;
+-  }
++  ContractEntry contract_entry = 2 [json_name = "contractEntry"];
+ 
+   // Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+   // of the active contracts snapshot.
+@@ -179,6 +186,28 @@ message GetActiveContractsPageResponse {
+   optional bytes next_page_token = 3;
+ }
+ 
++// Selects which view of a contract a ``GetActiveContractsResponse`` carries.
++message ContractEntry {
++  oneof entry {
++    // The contract is active on the assigned synchronizer, meaning: there was an activation event on the given synchronizer (
++    // created, assigned), which is not followed by a deactivation event (archived, unassigned) on the same
++    // synchronizer, until the active_at_offset.
++    // Since activeness is defined as a per synchronizer concept, it is possible, that a contract is active on one
++    // synchronizer, but already archived on another.
++    // There will be one such message for each synchronizer the contract is active on.
++    ActiveContract active_contract = 1 [json_name = "JsActiveContract"];
++
++    // Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
++    // assigned event before or at the active_at_offset.
++    IncompleteUnassigned incomplete_unassigned = 2 [json_name = "JsIncompleteUnassigned"];
++
++    // Important: this message is not indicating that the contract is active on the target synchronizer!
++    // Included iff the assigned event was before or at the active_at_offset, but there was no corresponding
++    // unassigned event before or at the active_at_offset.
++    IncompleteAssigned incomplete_assigned = 3 [json_name = "JsIncompleteAssigned"];
++  }
++}
++
+ message ActiveContract {
+   // The event as it appeared in the context of its last update (i.e. daml transaction or
+   // reassignment). In particular, the last offset, node_id pair is preserved.

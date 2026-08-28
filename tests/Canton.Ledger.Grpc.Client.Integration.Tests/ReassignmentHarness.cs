@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Kernel.Authentication;
-using Com.Daml.Ledger.Api.V2;
+using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -12,9 +12,10 @@ using Daml.Runtime.Streams;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
-using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
+using PeacefulLocalnet = Peaceful.Canton.Localnet.Testing;
+using ProtoV2 = Com.Daml.Ledger.Api.V2;
 using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
@@ -23,11 +24,12 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 /// Arrange harness for reassignment conformance tests on the multi-synchronizer LocalNet lane:
 /// hosts one party on both synchronizers, creates an <see cref="Asset"/> on the source
 /// synchronizer, unassigns it source→target through the typed
-/// <see cref="ICantonLedgerClient.SubmitReassignmentAsync"/> write surface (ADR 0007), and
-/// observes the resulting <see cref="UnassignedEvent"/> on a caller-supplied reassignment
-/// <see cref="EventFormat"/>. Observation still reads the raw <c>UnassignedEvent</c> off the wire
-/// to recover the <c>reassignment_id</c> the typed <c>Unassigned</c> variant cannot yet carry
-/// (upstream-blocked, ADR 0003).
+/// <see cref="ICantonLedgerClient.SubmitReassignmentAsync"/> write surface, and
+/// observes the resulting <see cref="Com.Daml.Ledger.Api.V2.UnassignedEvent"/> on a caller-supplied reassignment
+/// <see cref="Com.Daml.Ledger.Api.V2.EventFormat"/>. Observation reads the raw <c>UnassignedEvent</c> off
+/// the wire because the conformance question is which caller-supplied <c>EventFormat</c> the participant
+/// honours server-side, and the typed subscription surface derives its filter from the marker rather than
+/// accepting one.
 /// </summary>
 internal sealed class ReassignmentHarness : IAsyncDisposable
 {
@@ -39,19 +41,19 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         + "enabled\". The --multi-sync LocalNet connects the validator to two synchronizers but does not "
         + "set the EnableMultiSynchronizer participant topology feature flag on its synchronizer trust "
         + "certificates, so cross-synchronizer reassignment is disabled at submission. Enabling that flag "
-        + "on both synchronizers (LocalNet app-synchronizer.sc bootstrap, #152 finding) is required to run "
+        + "on both synchronizers (LocalNet app-synchronizer.sc bootstrap) is required to run "
         + "this conformance spike.";
 
-    private readonly LocalnetFixture _fixture;
+    private readonly PeacefulLocalnet.LocalnetFixture _fixture;
     private readonly ITokenProvider _tokenProvider;
     private readonly string _userId;
     private readonly LedgerClient _client;
     private readonly AdminClient _admin;
     private readonly GrpcChannel _channel;
-    private readonly UpdateService.UpdateServiceClient _updates;
+    private readonly ProtoV2.UpdateService.UpdateServiceClient _updates;
     private readonly PackageManagementService.PackageManagementServiceClient _packages;
 
-    private ReassignmentHarness(LocalnetFixture fixture, string grpcAddress)
+    private ReassignmentHarness(PeacefulLocalnet.LocalnetFixture fixture, string grpcAddress)
     {
         _fixture = fixture;
         _userId = fixture.ValidatorUserId;
@@ -61,11 +63,11 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         _client = new LedgerClient(options, _tokenProvider);
         _admin = new AdminClient(options, _tokenProvider);
         _channel = GrpcChannel.ForAddress(grpcAddress);
-        _updates = new UpdateService.UpdateServiceClient(_channel);
+        _updates = new ProtoV2.UpdateService.UpdateServiceClient(_channel);
         _packages = new PackageManagementService.PackageManagementServiceClient(_channel);
     }
 
-    public static ReassignmentHarness FromFixture(LocalnetFixture fixture)
+    public static ReassignmentHarness FromFixture(PeacefulLocalnet.LocalnetFixture fixture)
     {
         var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
         return new ReassignmentHarness(fixture, grpcAddress);
@@ -161,7 +163,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var submission = ReassignmentSubmission.Of(
-            new Canton.Ledger.Grpc.Client.UnassignCommand(
+            new UnassignCommand(
                 contractId,
                 new SynchronizerId(sourceSynchronizerId),
                 new SynchronizerId(targetSynchronizerId)),
@@ -185,7 +187,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var submission = ReassignmentSubmission.Of(
-            new Canton.Ledger.Grpc.Client.AssignCommand(
+            new AssignCommand(
                 reassignmentId,
                 new SynchronizerId(sourceSynchronizerId),
                 new SynchronizerId(targetSynchronizerId)),
@@ -206,8 +208,8 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         && ex.Status.Detail.Contains(
             "Multi-synchronizer feature flag is not enabled", StringComparison.Ordinal);
 
-    public async Task<UnassignedEvent?> ObserveUnassignedAsync(
-        EventFormat reassignmentFormat,
+    public async Task<ProtoV2.UnassignedEvent?> ObserveUnassignedAsync(
+        ProtoV2.EventFormat reassignmentFormat,
         long beginExclusiveOffset,
         string contractId,
         TimeSpan timeout,
@@ -215,10 +217,10 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var request = new GetUpdatesRequest
+        var request = new ProtoV2.GetUpdatesRequest
         {
             BeginExclusive = beginExclusiveOffset,
-            UpdateFormat = new UpdateFormat { IncludeReassignments = reassignmentFormat },
+            UpdateFormat = new ProtoV2.UpdateFormat { IncludeReassignments = reassignmentFormat },
         };
         var headers = await HeadersAsync(cancellationToken);
 
@@ -231,11 +233,11 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
             while (await call.ResponseStream.MoveNext(linked.Token))
             {
                 var response = call.ResponseStream.Current;
-                if (response.UpdateCase != GetUpdatesResponse.UpdateOneofCase.Reassignment) continue;
+                if (response.UpdateCase != ProtoV2.GetUpdatesResponse.UpdateOneofCase.Reassignment) continue;
 
                 foreach (var reassignmentEvent in response.Reassignment.Events)
                 {
-                    if (reassignmentEvent.EventCase == ReassignmentEvent.EventOneofCase.Unassigned
+                    if (reassignmentEvent.EventCase == ProtoV2.ReassignmentEvent.EventOneofCase.Unassigned
                         && reassignmentEvent.Unassigned.ContractId == contractId)
                     {
                         return reassignmentEvent.Unassigned;
@@ -255,8 +257,8 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         return null;
     }
 
-    public async Task<AssignedEvent?> ObserveAssignedAsync(
-        EventFormat reassignmentFormat,
+    public async Task<ProtoV2.AssignedEvent?> ObserveAssignedAsync(
+        ProtoV2.EventFormat reassignmentFormat,
         long beginExclusiveOffset,
         string contractId,
         TimeSpan timeout,
@@ -264,10 +266,10 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        var request = new GetUpdatesRequest
+        var request = new ProtoV2.GetUpdatesRequest
         {
             BeginExclusive = beginExclusiveOffset,
-            UpdateFormat = new UpdateFormat { IncludeReassignments = reassignmentFormat },
+            UpdateFormat = new ProtoV2.UpdateFormat { IncludeReassignments = reassignmentFormat },
         };
         var headers = await HeadersAsync(cancellationToken);
 
@@ -280,11 +282,11 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
             while (await call.ResponseStream.MoveNext(linked.Token))
             {
                 var response = call.ResponseStream.Current;
-                if (response.UpdateCase != GetUpdatesResponse.UpdateOneofCase.Reassignment) continue;
+                if (response.UpdateCase != ProtoV2.GetUpdatesResponse.UpdateOneofCase.Reassignment) continue;
 
                 foreach (var reassignmentEvent in response.Reassignment.Events)
                 {
-                    if (reassignmentEvent.EventCase == ReassignmentEvent.EventOneofCase.Assigned
+                    if (reassignmentEvent.EventCase == ProtoV2.ReassignmentEvent.EventOneofCase.Assigned
                         && reassignmentEvent.Assigned.CreatedEvent?.ContractId == contractId)
                     {
                         return reassignmentEvent.Assigned;

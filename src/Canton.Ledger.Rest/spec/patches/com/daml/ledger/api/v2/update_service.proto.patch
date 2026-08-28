@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/update_service.proto
 +++ b/com/daml/ledger/api/v2/update_service.proto
-@@ -10,7 +10,9 @@
+@@ -10,7 +10,9 @@ import "com/daml/ledger/api/v2/reassignment.proto";
  import "com/daml/ledger/api/v2/topology_transaction.proto";
  import "com/daml/ledger/api/v2/transaction.proto";
  import "com/daml/ledger/api/v2/transaction_filter.proto";
@@ -10,10 +10,10 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "UpdateServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -34,15 +36,30 @@
+@@ -34,15 +36,30 @@ service UpdateService {
    //
    // - ACS delta: a requesting party must be a stakeholder of an event for it to be included.
-   // - ledger effects: a requesting party must be a witness of an en event for it to be included.
+   // - ledger effects: a requesting party must be a witness of an event for it to be included.
 -  rpc GetUpdates(GetUpdatesRequest) returns (stream GetUpdatesResponse);
 +  rpc GetUpdates(GetUpdatesRequest) returns (stream GetUpdatesResponse) {
 +    option (google.api.http) = {
@@ -41,6 +41,54 @@
 +      body: "*"
 +    };
 +  }
+ 
+   // Read a page of ledger's filtered updates. It returns the event types in accordance with
+   // the specified contents and filters.
+@@ -50,7 +67,12 @@ service UpdateService {
+   //
+   // - ACS delta: an event is included only if the requesting party is a stakeholder.
+   // - ledger effects: an event is included if the requesting party is a witness.
+-  rpc GetUpdatesPage(GetUpdatesPageRequest) returns (GetUpdatesPageResponse);
++  rpc GetUpdatesPage(GetUpdatesPageRequest) returns (GetUpdatesPageResponse) {
++    option (google.api.http) = {
++      post: "/v2/updates/get-updates-page"
++      body: "*"
++    };
++  }
  }
  
  message GetUpdatesRequest {
+@@ -93,11 +115,16 @@ message GetUpdatesResponse {
+   // The update that matches the filter in the request.
+   //
+   // Required
++  Update update = 1 [json_name = "update"];
++}
++
++// The update that matches the filter in the request.
++message Update {
+   oneof update {
+-    Transaction transaction = 1;
+-    Reassignment reassignment = 2;
+-    OffsetCheckpoint offset_checkpoint = 3;
+-    TopologyTransaction topology_transaction = 4;
++    Transaction transaction = 1 [json_name = "Transaction"];
++    Reassignment reassignment = 2 [json_name = "Reassignment"];
++    OffsetCheckpoint offset_checkpoint = 3 [json_name = "OffsetCheckpoint"];
++    TopologyTransaction topology_transaction = 4 [json_name = "TopologyTransaction"];
+   }
+ }
+ 
+@@ -131,11 +158,7 @@ message GetUpdateResponse {
+   // The update that matches the filter in the request.
+   //
+   // Required
+-  oneof update {
+-    Transaction transaction = 1;
+-    Reassignment reassignment = 2;
+-    TopologyTransaction topology_transaction = 3;
+-  }
++  Update update = 1 [json_name = "update"];
+ }
+ 
+ message GetUpdatesPageRequest {

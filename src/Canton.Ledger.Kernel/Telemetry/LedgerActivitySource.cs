@@ -8,9 +8,9 @@ namespace Canton.Ledger.Kernel.Telemetry;
 
 /// <summary>
 /// The transport-neutral <see cref="ActivitySource"/> naming and span-start convention
-/// shared by every Canton ledger client (ADR 0006). The BCL <see cref="Activity"/> API
+/// shared by every Canton ledger client. The BCL <see cref="Activity"/> API
 /// is used directly — no OpenTelemetry SDK dependency is introduced here; the host wires
-/// its own <c>TracerProvider</c> against the sources this type names (ADR 0010).
+/// its own <c>TracerProvider</c> against the sources this type names.
 /// </summary>
 public static class LedgerActivitySource
 {
@@ -27,7 +27,7 @@ public static class LedgerActivitySource
 
     /// <summary>
     /// Starts an activity named <c>{CallerType}.{CallerMember}</c> on <paramref name="activitySource"/>.
-    /// Defaults to <see cref="ActivityKind.Client"/> (ADR 0010): every call site today is an
+    /// Defaults to <see cref="ActivityKind.Client"/>: every call site today is an
     /// outbound client-call span (gRPC), the shape OpenTelemetry semantic conventions expect.
     /// Pass <paramref name="kind"/> explicitly for a span that is not itself the RPC client call
     /// (e.g. an internal logical span whose child carries the RPC).

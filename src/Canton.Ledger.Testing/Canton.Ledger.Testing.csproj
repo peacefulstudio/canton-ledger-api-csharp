@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Canton.Ledger.Testing</PackageId>
+    <RootNamespace>Canton.Ledger.Testing</RootNamespace>
+    <AssemblyName>Canton.Ledger.Testing</AssemblyName>
+    <Description>In-memory test doubles (FakeLedgerClient, FakeAdminClient, FakePqsClient, FakeTokenProvider) and event/result builders for unit-testing business logic against the Canton Ledger API client surfaces without a live participant. No mocking framework required. Every fake implements a neutral Canton surface from Canton.Ledger.Abstractions — ICantonLedgerClient (and thus Daml.Ledger.Abstractions.ILedgerClient), IAdminClient, ITokenProvider and IPqsClient — so the package references only Canton.Ledger.Abstractions, Daml.Ledger.Abstractions and Daml.Runtime, dragging in neither transport nor PostgreSQL.</Description>
+    <PackageTags>canton;daml;ledger;testing;test-double;fake;unit-testing</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Abstractions\Canton.Ledger.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

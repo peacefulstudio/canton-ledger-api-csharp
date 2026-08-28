@@ -21,7 +21,7 @@ public sealed class RestActivityHandlerTests : IDisposable
     {
         _listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == LedgerActivitySource.NameFor<RestActivityHandler>(),
+            ShouldListenTo = source => source.Name == LedgerActivitySource.NameFor<RestLedgerClient>(),
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity =>
             {

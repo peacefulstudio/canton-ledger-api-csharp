@@ -10,11 +10,17 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Daml.Ledger.Abstractions.Testing.Conformance" />
     <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Canton.Ledger.Testing.Helpers\Canton.Ledger.Testing.Helpers.csproj" />
+    <Using Include="Canton.Ledger.Testing.Helpers" />
   </ItemGroup>
 
 </Project>

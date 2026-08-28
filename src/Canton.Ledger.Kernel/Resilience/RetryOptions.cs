@@ -6,7 +6,7 @@ using System.ComponentModel.DataAnnotations;
 namespace Canton.Ledger.Kernel.Resilience;
 
 /// <summary>
-/// Configuration for the kernel's opt-in retry pipeline (ADR 0006). <see cref="Enabled"/>
+/// Configuration for the kernel's opt-in retry pipeline. <see cref="Enabled"/>
 /// defaults to <see langword="false"/>, so a transport that does not explicitly opt in
 /// sees no retry behavior — <see cref="RetryPipelineFactory.Create"/> hands it a genuine
 /// no-op pipeline.

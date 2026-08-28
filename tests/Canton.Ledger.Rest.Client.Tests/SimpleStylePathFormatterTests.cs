@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using AwesomeAssertions;
+using Canton.Ledger.Rest.Client.Raw;
 using Xunit;
+
+#pragma warning disable CANTONREST001
 
 namespace Canton.Ledger.Rest.Client.Tests;
 
@@ -15,30 +18,30 @@ public class SimpleStylePathFormatterTests
     public async Task GetParties_comma_joins_multiple_parties_in_the_path_segment()
     {
         var (api, transport) = BuildApi();
-        transport.WithResponse(System.Net.HttpStatusCode.OK, """{"party_details":[]}""");
+        transport.WithResponse(System.Net.HttpStatusCode.OK, """{"partyDetails":[]}""");
 
         await api.GetParties(
             ["alice::ns1", "bob::ns2"],
-            identity_provider_id: "",
+            identityProviderId: "",
             TestContext.Current.CancellationToken);
 
         transport.LastRequest!.RequestUri!.ToString()
-            .Should().Be("http://localhost:7575/v2/parties/alice%3A%3Ans1%2Cbob%3A%3Ans2?identity_provider_id=");
+            .Should().Be("http://localhost:7575/v2/parties/alice%3A%3Ans1%2Cbob%3A%3Ans2?identityProviderId=");
     }
 
     [Fact]
     public async Task GetParties_serializes_a_single_party_path_segment_unchanged()
     {
         var (api, transport) = BuildApi();
-        transport.WithResponse(System.Net.HttpStatusCode.OK, """{"party_details":[]}""");
+        transport.WithResponse(System.Net.HttpStatusCode.OK, """{"partyDetails":[]}""");
 
         await api.GetParties(
             ["alice::ns1"],
-            identity_provider_id: "",
+            identityProviderId: "",
             TestContext.Current.CancellationToken);
 
         transport.LastRequest!.RequestUri!.ToString()
-            .Should().Be("http://localhost:7575/v2/parties/alice%3A%3Ans1?identity_provider_id=");
+            .Should().Be("http://localhost:7575/v2/parties/alice%3A%3Ans1?identityProviderId=");
     }
 
     [Fact]
@@ -81,9 +84,9 @@ public class SimpleStylePathFormatterTests
 
         await api.GetPreferredPackageVersion(
             ["alice::ns1", "bob::ns2"],
-            package_name: "my-pkg",
-            synchronizer_id: "",
-            vetting_valid_at: null,
+            packageName: "my-pkg",
+            synchronizerId: "",
+            vettingValidAt: null,
             TestContext.Current.CancellationToken);
 
         transport.LastRequest!.RequestUri!.Query

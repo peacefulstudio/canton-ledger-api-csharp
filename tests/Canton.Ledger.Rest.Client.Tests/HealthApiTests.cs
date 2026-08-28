@@ -3,7 +3,10 @@
 
 using System.Net;
 using AwesomeAssertions;
+using Canton.Ledger.Rest.Client.Raw;
 using Xunit;
+
+#pragma warning disable CANTONREST001
 
 namespace Canton.Ledger.Rest.Client.Tests;
 

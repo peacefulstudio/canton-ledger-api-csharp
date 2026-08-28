@@ -8,6 +8,7 @@
 // building and CI fails.
 
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Pqs.Client;
 using Daml.Runtime.Commands;

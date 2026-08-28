@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/transaction_filter.proto
 +++ b/com/daml/ledger/api/v2/transaction_filter.proto
-@@ -7,6 +7,7 @@
+@@ -7,6 +7,7 @@ package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/value.proto";
  
@@ -8,3 +8,48 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "TransactionFilterOuterClass";
  option java_package = "com.daml.ledger.api.v2";
+@@ -26,21 +27,20 @@ message Filters {
+   repeated CumulativeFilter cumulative = 1;
+ }
+ 
+-// A filter that matches all contracts that are either an instance of one of
+-// the ``template_filters`` or that match one of the ``interface_filters``.
+-message CumulativeFilter {
++// Selects the contracts a ``CumulativeFilter`` matches.
++message IdentifierFilter {
+   // Required
+   oneof identifier_filter {
+     // A wildcard filter that matches all templates
+     //
+     // Optional
+-    WildcardFilter wildcard_filter = 1;
++    WildcardFilter wildcard_filter = 1 [json_name = "WildcardFilter"];
+ 
+     // Include an ``InterfaceView`` for every ``InterfaceFilter`` matching a contract.
+     // The ``InterfaceFilter`` instances MUST each use a unique ``interface_id``.
+     //
+     // Optional
+-    InterfaceFilter interface_filter = 2;
++    InterfaceFilter interface_filter = 2 [json_name = "InterfaceFilter"];
+ 
+     // A template for which the data will be included in the
+     // ``create_arguments`` of a matching ``CreatedEvent``.
+@@ -48,10 +48,17 @@ message CumulativeFilter {
+     // the corresponding ``include_created_event_blob`` are consolidated using an OR operation.
+     //
+     // Optional
+-    TemplateFilter template_filter = 3;
++    TemplateFilter template_filter = 3 [json_name = "TemplateFilter"];
+   }
+ }
+ 
++// A filter that matches all contracts that are either an instance of one of
++// the ``template_filters`` or that match one of the ``interface_filters``.
++message CumulativeFilter {
++  // Required
++  IdentifierFilter identifier_filter = 1 [json_name = "identifierFilter"];
++}
++
+ // This filter matches all templates.
+ message WildcardFilter {
+   // Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.

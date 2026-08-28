@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- snake_case test method names -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Runtime" />
+    <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Canton.Ledger.Testing\Canton.Ledger.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Rest.Client\Canton.Ledger.Rest.Client.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
+    <ProjectReference Include="..\Canton.Ledger.Testing.Localnet\Canton.Ledger.Testing.Localnet.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared with the gRPC/REST integration test projects: the Marker template's generated
+         bindings and DAR, so LedgerWriterParityTests exercises the exact same create/exercise
+         round trip across the Fake, REST, and gRPC providers. -->
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
+             Link="Generated\Richtypes\Marker.cs" />
+    <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
+          Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\LedgerApiVersionSkewGuard.cs"
+             Link="Shared\LedgerApiVersionSkewGuard.cs" />
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\LedgerApiVersionSkewGuard.Live.cs"
+             Link="Shared\LedgerApiVersionSkewGuard.Live.cs" />
+  </ItemGroup>
+
+</Project>

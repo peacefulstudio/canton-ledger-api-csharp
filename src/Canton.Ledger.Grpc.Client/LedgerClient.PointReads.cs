@@ -66,7 +66,40 @@ public sealed partial class LedgerClient
             });
     }
 
-    private static TransactionResult ProjectPointReadTransaction(GetUpdateResponse response, string lookupDescription)
+    internal Task<TransactionTree> GetUpdateTreeByOffsetAsync(
+        long offset,
+        RuntimeCommands.SubmitterInfo submitter,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
+
+        var request = new GetUpdateByOffsetRequest
+        {
+            Offset = offset,
+            UpdateFormat = SubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
+        };
+
+        return _invoker.InvokeTracedAsync<LedgerClient, GetUpdateResponse, TransactionTree>(
+            LedgerCallInvoker.Source,
+            UpdateService.Descriptor,
+            "GetUpdateByOffset",
+            (headers, deadline, token) => _updateService.GetUpdateByOffsetAsync(request, headers, deadline, token),
+            response => ProjectPointRead(response, $"offset {offset}", GrpcTransactionTreeProjector.Project),
+            cancellationToken,
+            configureActivity: activity =>
+            {
+                activity?.SetTag(LedgerClientActivityTags.CantonOffset, offset);
+                activity.SetSubmitterTags(submitter);
+            });
+    }
+
+    private static TransactionResult ProjectPointReadTransaction(GetUpdateResponse response, string lookupDescription) =>
+        ProjectPointRead(response, lookupDescription, GrpcTransactionResultProjector.Project);
+
+    private static TProjection ProjectPointRead<TProjection>(
+        GetUpdateResponse response,
+        string lookupDescription,
+        Func<Transaction, TProjection> project)
     {
         if (response.UpdateCase != GetUpdateResponse.UpdateOneofCase.Transaction)
         {
@@ -77,15 +110,15 @@ public sealed partial class LedgerClient
 
         try
         {
-            return TransactionResultProjector.Project(response.Transaction);
+            return project(response.Transaction);
         }
         catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
         {
-            var detail = decodeFailure.Message.StartsWith(TransactionResultProjector.MalformedResponsePrefix, StringComparison.Ordinal)
-                ? decodeFailure.Message[TransactionResultProjector.MalformedResponsePrefix.Length..]
+            var detail = decodeFailure.Message.StartsWith(GrpcTransactionResultProjector.MalformedResponsePrefix, StringComparison.Ordinal)
+                ? decodeFailure.Message[GrpcTransactionResultProjector.MalformedResponsePrefix.Length..]
                 : decodeFailure.Message;
             throw new InvalidOperationException(
-                $"{TransactionResultProjector.MalformedResponsePrefix}the transaction at {lookupDescription} could not be decoded: {detail}",
+                $"{GrpcTransactionResultProjector.MalformedResponsePrefix}the transaction at {lookupDescription} could not be decoded: {detail}",
                 decodeFailure);
         }
     }

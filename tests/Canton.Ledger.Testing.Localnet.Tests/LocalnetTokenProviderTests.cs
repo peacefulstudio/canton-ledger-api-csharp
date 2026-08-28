@@ -1,0 +1,19 @@
+// Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
+
+using Xunit;
+
+namespace Canton.Ledger.Testing.Localnet.Tests;
+
+public class LocalnetTokenProviderTests
+{
+    [Fact]
+    public async Task GetTokenAsync_returns_the_wrapped_provider_token()
+    {
+        var provider = new LocalnetTokenProvider(_ => new ValueTask<string>("tok-123"));
+
+        var token = await provider.GetTokenAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("tok-123", token);
+    }
+}

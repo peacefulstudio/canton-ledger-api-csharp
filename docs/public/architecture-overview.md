@@ -99,7 +99,7 @@ flowchart TD
     APP["Application + generated bindings"] --> CLIENT["Canton.Ledger.Grpc.Client\nLedgerClient / AdminClient"]
     APP --> PQSC["Canton.Ledger.Pqs.Client\nPqsClient"]
     CLIENT --> BRIDGE["Daml.Runtime.Grpc\nDamlValueConverter"]
-    CLIENT --> KERNEL["Canton.Ledger.Kernel\nITokenProvider · telemetry · retry"]
+    CLIENT --> KERNEL["Canton.Ledger.Kernel\ntoken providers · telemetry · retry"]
     PQSC --> KERNEL
     CLIENT --> STUBS["Canton.Ledger.Grpc\ngenerated gRPC stubs"]
     BRIDGE --> STUBS
@@ -129,19 +129,21 @@ Configuration goes through `LedgerClientOptions` (address, user, limits, timeout
 
 ### `Canton.Ledger.Kernel` — the transport-neutral kernel
 
-The kernel bundles the cross-cutting concerns every transport client consumes as a peer (ADR 0006), in three explicit modules: `Kernel.Authentication`, `Kernel.Telemetry`, and `Kernel.Resilience`. `Authentication` sits at the bottom of the kernel's namespace DAG and depends on neither of the other two, so it can later be extracted into its own package non-breakingly.
+The kernel bundles the cross-cutting concerns every transport client consumes as a peer, in three explicit modules: `Kernel.Authentication`, `Kernel.Telemetry`, and `Kernel.Resilience`. `Authentication` sits at the bottom of the kernel's namespace DAG and depends on neither of the other two, so it can later be extracted into its own package non-breakingly.
 
-Authentication is abstracted behind `ITokenProvider` (`GetTokenAsync` → bearer token). Every gRPC call asks the provider for a token and attaches an `Authorization: Bearer …` header. Implementations:
+Authentication is abstracted behind `ITokenProvider` (`GetTokenAsync` → bearer token), which is declared in `Canton.Ledger.Abstractions` so both transports and the `Canton.Ledger.Testing` fake share one contract; the kernel ships the implementations. Every gRPC call asks the provider for a token and attaches an `Authorization: Bearer …` header. Implementations:
 
 - `ClientCredentialsProvider` — OAuth2 client-credentials flow against a configurable token endpoint (Auth0, Keycloak, or any standard OAuth2 issuer), with thread-safe expiry-aware caching.
 - `StaticTokenProvider` — a pre-provisioned token.
 - `ITokenProvider.None` — unauthenticated participants; no header is sent.
 
-`Kernel.Telemetry.LedgerActivitySource` is the shared `ActivitySource` naming convention every client's spans follow (host-side wiring lives in `Canton.Ledger.OpenTelemetry`, ADR 0010); `Kernel.Resilience` is the opt-in Polly retry pipeline, disabled by default.
+`Kernel.Telemetry.LedgerActivitySource` is the shared `ActivitySource` naming convention every client's spans follow, and `Kernel.Telemetry.LedgerActivitySourceNames` publishes the resulting names so the host-side wiring in `Canton.Ledger.OpenTelemetry` reaches them without referencing a concrete client assembly; `Kernel.Resilience` is the opt-in Polly retry pipeline, disabled by default and wired into both the gRPC and HTTP clients.
 
 ### `Canton.Ledger.Pqs.Client` — the read model
 
 A type-safe query client for the Participant Query Store, the SQL read model Canton ships alongside the participant. `PqsClient` queries PQS's PostgreSQL functions through Npgsql (`SELECT … FROM active(@templateId) …`) and deserializes each contract's JSON payload into the same generated binding types used on the write path.
+
+The read *surface* — `IPqsClient` with `Filter`/`PqsFilter`, `PqsPage` and `InterfaceContract<TInterface, TView>` — is declared in `Canton.Ledger.Abstractions` alongside `ICantonLedgerClient`, `IAdminClient` and `ITokenProvider`, so `Canton.Ledger.Testing` fakes every client surface while depending on nothing but the neutral packages. The filter cases stay `internal` to the declaring assembly, so `Npgsql` never crosses the package boundary: the SQL renderer accumulates parameters into a plain `ICollection<(string Name, string Value)>` and `PqsClient` binds them to a real `NpgsqlCommand` at execution time.
 
 Filters are built from C# expressions — `Filter.Field<Agreement>(a => a.Initiator, party)` composed with `Filter.And` / `Filter.Or` — and translated to parameterized SQL, so field names come from the generated bindings and values are never string-interpolated into SQL.
 
@@ -173,6 +175,6 @@ The read paths mirror it:
 
 ## Versioning and dependencies
 
-- **Canton protos** are pinned by `CantonVersion` in `Directory.Build.props`; bumping it re-targets the whole stub layer at the next build.
+- **Canton protos** are pinned by `CantonVersion` in `Directory.Build.props` — currently `3.5.9`; bumping it re-targets the whole stub layer at the next build. The same pin drives the vendored JSON Ledger API spec behind `Canton.Ledger.Rest`, so both transports track one Canton version, and that version is a Canton 3.5 release: the library supports Canton 3.5 only.
 - **`Daml.Runtime` / `Daml.Ledger.Abstractions`** versions are pinned centrally in `Directory.Packages.props` and updated in lockstep with codegen releases.
 - All package versions in this repository are managed centrally (NuGet central package management); see `Directory.Packages.props` for the authoritative list.

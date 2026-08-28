@@ -1,6 +1,6 @@
 --- a/com/daml/ledger/api/v2/command_submission_service.proto
 +++ b/com/daml/ledger/api/v2/command_submission_service.proto
-@@ -7,7 +7,9 @@
+@@ -7,7 +7,9 @@ package com.daml.ledger.api.v2;
  
  import "com/daml/ledger/api/v2/commands.proto";
  import "com/daml/ledger/api/v2/reassignment_commands.proto";
@@ -10,7 +10,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2";
  option java_outer_classname = "CommandSubmissionServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2";
-@@ -28,10 +30,20 @@
+@@ -28,10 +30,20 @@ option java_package = "com.daml.ledger.api.v2";
  // Clients SHOULD subscribe to the CompletionStream before starting to submit commands to prevent race conditions.
  service CommandSubmissionService {
    // Submit a single composite command.

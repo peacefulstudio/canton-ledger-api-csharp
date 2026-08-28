@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;

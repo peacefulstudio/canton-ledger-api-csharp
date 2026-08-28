@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Xunit;
@@ -14,6 +15,7 @@ public class CommandBuilderTests
 {
     private static readonly Party Alice = new("party::alice");
     private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
+    private static readonly RuntimeIdentifier DisclosedTemplateId = new("disclosed-pkg", "Disclosed", "Contract");
     private static readonly SynchronizerId Source = new("sync::source");
     private static readonly SynchronizerId Target = new("sync::target");
 
@@ -131,6 +133,64 @@ public class CommandBuilderTests
         var commands = Builder().BuildCommands(submission);
 
         commands.SynchronizerId.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildCommands_maps_disclosed_contracts_onto_the_wire()
+    {
+        var blob = new byte[] { 0x01, 0x02, 0x03, 0xFA };
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithDisclosedContracts(new RuntimeCommands.DisclosedContract(
+                "00disclosed", new RuntimeIdentifier("disclosed-pkg", "Disclosed", "Contract"), blob));
+
+        var commands = Builder().BuildCommands(submission);
+
+        var disclosed = commands.DisclosedContracts.Should().ContainSingle().Subject;
+        disclosed.ContractId.Should().Be("00disclosed");
+        disclosed.TemplateId.PackageId.Should().Be("disclosed-pkg");
+        disclosed.TemplateId.ModuleName.Should().Be("Disclosed");
+        disclosed.TemplateId.EntityName.Should().Be("Contract");
+        disclosed.CreatedEventBlob.ToByteArray().Should().Equal(blob);
+    }
+
+    [Fact]
+    public void BuildCommands_maps_every_disclosed_contract_in_submission_order()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithDisclosedContracts(
+                new RuntimeCommands.DisclosedContract("00first", DisclosedTemplateId, new byte[] { 0x01 }),
+                new RuntimeCommands.DisclosedContract("00second", DisclosedTemplateId, new byte[] { 0x02 }));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Select(c => c.ContractId).Should().Equal("00first", "00second");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_disclosed_contracts_empty_when_submission_has_none()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_disclosed_contracts_empty_when_submission_carries_an_empty_collection()
+    {
+        var submission = new RuntimeCommands.CommandsSubmission(
+            [Create()], ActAs: [Alice], CommandId: TestCommandId, DisclosedContracts: []);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Should().BeEmpty();
     }
 
     [Fact]
