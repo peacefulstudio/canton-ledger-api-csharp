@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -22,14 +22,8 @@ namespace Canton.Ledger.Grpc.Client;
 /// Implementation of <see cref="ICantonLedgerClient"/> (and thus <see cref="ILedgerClient"/>)
 /// using the Canton gRPC Ledger API.
 /// </summary>
-public sealed partial class LedgerClient : ICantonLedgerClient
+internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStreamingCapability
 {
-    /// <summary>
-    /// The <see cref="System.Diagnostics.ActivitySource"/> name used for OpenTelemetry tracing.
-    /// Register with <c>tracing.AddSource(LedgerClient.ActivitySourceName)</c>.
-    /// </summary>
-    public static string ActivitySourceName => LedgerActivitySourceNames.GrpcLedgerClient;
-
     private readonly GrpcChannel _channel;
     private readonly LedgerCallInvoker _invoker;
     private readonly SubmissionClient _submissionClient;
@@ -43,25 +37,12 @@ public sealed partial class LedgerClient : ICantonLedgerClient
     private readonly ILogger<LedgerClient> _logger;
     private bool _disposed;
 
-    /// <summary>
-    /// Creates a new LedgerClient with the specified options and token provider.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public LedgerClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider, ILogger<LedgerClient>? logger = null)
-        : this(options.Value, tokenProvider, logger)
-    {
-    }
-
-    /// <summary>
-    /// Creates a new LedgerClient with the specified options and token provider.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public LedgerClient(LedgerClientOptions options, ITokenProvider tokenProvider, ILogger<LedgerClient>? logger = null)
+    internal LedgerClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider, ILogger<LedgerClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(tokenProvider);
 
-        _options = options;
+        _options = options.Value;
         _logger = logger ?? NullLogger<LedgerClient>.Instance;
         _channel = LedgerGrpcChannel.Create(_options);
 
@@ -78,7 +59,8 @@ public sealed partial class LedgerClient : ICantonLedgerClient
         _invoker = new LedgerCallInvoker(_options, tokenProvider);
         _submissionClient = new SubmissionClient(
             _invoker, commandService, commandSubmissionService, _commandBuilder, _options, _logger,
-            GetUpdateByOffsetAsync, GetUpdateTreeByOffsetAsync);
+            (offset, submitter, token) => GetUpdateByOffsetAsync(offset, submitter, cancellationToken: token),
+            (offset, submitter, token) => GetUpdateTreeByOffsetAsync(offset, submitter, cancellationToken: token));
 
         CallContextHelper.LogStartupDiagnostics(
             _logger, tokenProvider, _options.GrpcAddress, nameof(LedgerClient), "AddLedgerClient");
@@ -149,7 +131,8 @@ public sealed partial class LedgerClient : ICantonLedgerClient
         _invoker = new LedgerCallInvoker(_options, tokenProvider);
         _submissionClient = new SubmissionClient(
             _invoker, commandService, commandSubmissionService, _commandBuilder, _options, _logger,
-            GetUpdateByOffsetAsync, GetUpdateTreeByOffsetAsync);
+            (offset, submitter, token) => GetUpdateByOffsetAsync(offset, submitter, cancellationToken: token),
+            (offset, submitter, token) => GetUpdateTreeByOffsetAsync(offset, submitter, cancellationToken: token));
     }
 
     /// <inheritdoc />
@@ -157,80 +140,103 @@ public sealed partial class LedgerClient : ICantonLedgerClient
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.TryExerciseAsync<TResult>(command, submitter, workflowId, timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        return _submissionClient.TryExerciseAsync<TResult>(
+            command, submitter, workflowId, commandId, timeout: timeout, cancellationToken: cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.SubmitAndWaitAsync(submission, timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.SubmitAndWaitAsync(submission, timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.SubmitAndWaitAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.SubmitAndWaitAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<RuntimeCommands.CommandId> SubmitAsync(
         RuntimeCommands.CommandsSubmission submission,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.SubmitAsync(submission, cancellationToken);
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.SubmitAsync(submission, timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
         ReassignmentSubmission submission,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.SubmitReassignmentAsync(submission, cancellationToken);
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.SubmitReassignmentAsync(submission, timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<Daml.Runtime.Streams.ContractStreamEvent<T>>> TrySubmitAndWaitForReassignmentAsync<T>(
         ReassignmentSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType =>
-        _submissionClient.TrySubmitAndWaitForReassignmentAsync<T>(submission, timeout, cancellationToken);
+        where T : ITemplate, IDamlRecord<T>
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.TrySubmitAndWaitForReassignmentAsync<T>(submission, timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.TrySubmitAndWaitForTransactionAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.TrySubmitAndWaitForTransactionAsync(
             submission.WithSubmitter(submitter), timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate =>
-        _submissionClient.TryCreateAsync(payload, submitter, workflowId, timeout, cancellationToken);
-
-    /// <inheritdoc />
-    public Task<ExerciseOutcome<ContractId<TMarker>>> TryExerciseForCreatedAsync<TMarker>(
-        RuntimeCommands.ExerciseCommand command,
-        RuntimeCommands.SubmitterInfo submitter,
-        string? workflowId = null,
-        TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-        where TMarker : IDamlType =>
-        _submissionClient.TryExerciseForCreatedAsync<TMarker>(command, submitter, workflowId, timeout, cancellationToken);
+        where TTemplate : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        return _submissionClient.TryCreateAsync(
+            payload, submitter, workflowId, commandId, timeout: timeout, cancellationToken: cancellationToken);
+    }
 
     /// <summary>
     /// Creates a <see cref="CallInvoker"/> bound to this client's channel for driving raw generated
@@ -260,7 +266,7 @@ public sealed partial class LedgerClient : ICantonLedgerClient
     public CallInvoker CreateCallInvoker()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return new AuthenticatedCallInvoker(_channel.CreateCallInvoker(), _invoker);
+        return new AuthenticatedCallInvoker(_channel.CreateCallInvoker(), _invoker, _logger);
     }
 
     /// <summary>

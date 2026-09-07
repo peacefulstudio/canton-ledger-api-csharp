@@ -6,6 +6,7 @@ using System.Diagnostics;
 using AwesomeAssertions;
 using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime.Contracts;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Canton.Ledger.Pqs.Client.Tests;
@@ -14,13 +15,13 @@ namespace Canton.Ledger.Pqs.Client.Tests;
 public class PqsClientActivityTests
 {
     private static PqsClient CreateClient() =>
-        new(new PqsClientOptions { ConnectionString = "not a valid connection string" });
+        new(Options.Create(new PqsClientOptions { ConnectionString = "not a valid connection string" }));
 
 
     [Fact]
     public async Task QueryAsync_tags_the_PqsQuery_activity_with_daml_template_id_and_records_the_error()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var client = CreateClient();
 
@@ -37,7 +38,7 @@ public class PqsClientActivityTests
     [Fact]
     public async Task QueryAsync_tags_the_PqsQuery_activity_with_the_interface_id_and_records_the_error()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var client = CreateClient();
 
@@ -55,7 +56,7 @@ public class PqsClientActivityTests
     [Fact]
     public async Task QueryOneAsync_tags_the_PqsQueryOne_activity_with_daml_template_id_and_records_the_error()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var client = CreateClient();
         var filter = Filter.Field<FilterTests.SampleTemplate>(t => t.Initiator, $"party::{Guid.NewGuid():N}");
@@ -74,7 +75,7 @@ public class PqsClientActivityTests
     [Fact]
     public async Task ExistsAsync_tags_the_PqsExists_activity_with_daml_template_id_and_records_the_error()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var client = CreateClient();
         var contractId = new ContractId<FilterTests.SampleTemplate>("00contract123");

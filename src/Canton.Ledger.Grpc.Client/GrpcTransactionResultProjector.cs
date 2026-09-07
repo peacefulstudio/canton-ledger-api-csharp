@@ -1,12 +1,15 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Kernel.Results;
+using Canton.Ledger.Kernel.Trees;
+using Canton.Ledger.Kernel.Wire;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
-using Daml.Runtime.Grpc;
 using Daml.Runtime.Outcomes;
+using ChoiceName = Daml.Runtime.Commands.ChoiceName;
 using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using RuntimeExercisedEvent = Daml.Runtime.Contracts.ExercisedEvent;
@@ -48,7 +51,7 @@ internal static class GrpcTransactionResultProjector
 
         return new TransactionResult(
             transaction.UpdateId,
-            LedgerOffset.At(transaction.Offset),
+            LedgerWireConversions.ToLedgerOffset(transaction.Offset),
             createdContracts,
             archivedContractIds,
             LedgerWireConversions.ToCommandId(transaction.CommandId))
@@ -60,57 +63,39 @@ internal static class GrpcTransactionResultProjector
     private static CreatedContract ToCreatedContract(ProtoCreatedEvent created)
     {
         var templateId = created.TemplateId
-            ?? throw MalformedResponse($"CreatedEvent for contract '{created.ContractId}' has no template_id");
+            ?? throw MalformedResponse.MissingRequiredField(
+                $"CreatedEvent for contract '{created.ContractId}' has no template_id");
         var createArguments = created.CreateArguments
-            ?? throw MalformedResponse($"CreatedEvent for contract '{created.ContractId}' has no create_arguments");
+            ?? throw MalformedResponse.MissingRequiredField(
+                $"CreatedEvent for contract '{created.ContractId}' has no create_arguments");
+        var runtimeTemplateId = LedgerWireConversions.ToRuntimeIdentifier(templateId);
         return new CreatedContract(
+            TreeShape.EventIdOf(created.NodeId),
             created.ContractId,
-            LedgerWireConversions.ToRuntimeIdentifier(templateId),
-            createArguments.ToString())
+            runtimeTemplateId,
+            GrpcValueDecoder.ToDamlRecord(createArguments),
+            LedgerWireConversions.ToPartyList(created.WitnessParties),
+            LedgerWireConversions.ToPartyList(created.Signatories),
+            LedgerWireConversions.ToPartyList(created.Observers),
+            ContractKey: LedgerWireConversions.ContractKeyOf(created, runtimeTemplateId),
+            CreatedAt: GrpcValueDecoder.ToCreatedAt(created))
         {
             InterfaceIds = ToInterfaceIds(created),
         };
     }
 
-    internal const string MalformedResponsePrefix = "Malformed response from ledger: ";
-
-    internal static InvalidOperationException MalformedResponse(string detail) =>
-        new($"{MalformedResponsePrefix}{detail}, though the Ledger API marks the field as required.");
-
     public static ExerciseOutcome<ContractId<TMarker>> ProjectToContractId<TMarker>(
         ExerciseOutcome<TransactionResult> outcome)
-        where TMarker : IDamlType
-    {
-        return outcome switch
-        {
-            ExerciseOutcome<TransactionResult>.One success => ProjectSuccess<TMarker>(success.Result),
-            ExerciseOutcome<TransactionResult>.DamlError damlError => new ExerciseOutcome<ContractId<TMarker>>.DamlError(
-                damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata),
-            ExerciseOutcome<TransactionResult>.InfraError infraError => new ExerciseOutcome<ContractId<TMarker>>.InfraError(
-                infraError.StatusCode, infraError.Message),
-            _ => throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}"),
-        };
-    }
+        where TMarker : IDamlType =>
+        TransactionResultFolds.Project(
+            outcome,
+            result => TransactionResultFolds.ToCreatedContractId<TMarker>(result, MarkerMatcher<TMarker>.Matches));
 
-    private static ExerciseOutcome<ContractId<TMarker>> ProjectSuccess<TMarker>(TransactionResult result)
-        where TMarker : IDamlType
-    {
-        var matches = new List<string>();
-        foreach (var c in result.CreatedContracts)
-        {
-            if (MarkerMatcher<TMarker>.Matches(c))
-            {
-                matches.Add(c.ContractId);
-            }
-        }
-
-        return matches.Count switch
-        {
-            0 => new ExerciseOutcome<ContractId<TMarker>>.None(),
-            1 => new ExerciseOutcome<ContractId<TMarker>>.One(new ContractId<TMarker>(matches[0])),
-            _ => new ExerciseOutcome<ContractId<TMarker>>.Many(matches.Count, matches),
-        };
-    }
+    public static ExerciseOutcome<TResult> ProjectChoiceResult<TResult>(
+        ExerciseOutcome<TransactionResult> outcome, ChoiceName choice) =>
+        TransactionResultFolds.Project(
+            outcome,
+            result => TransactionResultFolds.ToChoiceResult<TResult>(result, choice));
 
     private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
     {
@@ -123,7 +108,8 @@ internal static class GrpcTransactionResultProjector
         foreach (var view in created.InterfaceViews)
         {
             var interfaceId = view.InterfaceId
-                ?? throw MalformedResponse($"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
+                ?? throw MalformedResponse.MissingRequiredField(
+                    $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
             interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
         return interfaceIds;
@@ -132,13 +118,14 @@ internal static class GrpcTransactionResultProjector
     private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)
     {
         var templateId = exercised.TemplateId
-            ?? throw MalformedResponse($"ExercisedEvent for contract '{exercised.ContractId}' has no template_id");
+            ?? throw MalformedResponse.MissingRequiredField(
+                $"ExercisedEvent for contract '{exercised.ContractId}' has no template_id");
         var argument = exercised.ChoiceArgument is null
             ? DamlUnit.Instance
-            : DamlValueConverter.FromProtoValue(exercised.ChoiceArgument);
+            : GrpcValueDecoder.ToDamlValue(exercised.ChoiceArgument);
         var result = exercised.ExerciseResult is null
             ? DamlUnit.Instance
-            : DamlValueConverter.FromProtoValue(exercised.ExerciseResult);
+            : GrpcValueDecoder.ToDamlValue(exercised.ExerciseResult);
         var interfaceId = exercised.InterfaceId is null
             ? null
             : LedgerWireConversions.ToRuntimeIdentifier(exercised.InterfaceId);

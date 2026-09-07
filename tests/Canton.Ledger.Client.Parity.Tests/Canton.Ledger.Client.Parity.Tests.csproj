@@ -18,15 +18,23 @@
     <ProjectReference Include="..\..\src\Canton.Ledger.Testing\Canton.Ledger.Testing.csproj" />
     <ProjectReference Include="..\..\src\Canton.Ledger.Rest.Client\Canton.Ledger.Rest.Client.csproj" />
     <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
+    <ProjectReference Include="..\..\src\Canton.Ledger.Pqs.Client\Canton.Ledger.Pqs.Client.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Testing.Localnet\Canton.Ledger.Testing.Localnet.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared with the gRPC/REST integration test projects: the Marker template's generated
-         bindings and DAR, so LedgerWriterParityTests exercises the exact same create/exercise
-         round trip across the Fake, REST, and gRPC providers. -->
+    <!-- Shared with the gRPC/REST integration test projects: the generated bindings and DAR for
+         the Marker template, and for the Asset template with the Holding interface it implements,
+         so the parity bodies exercise the exact same template-family and interface-family round
+         trips across the Fake, REST, and gRPC providers. -->
     <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
              Link="Generated\Richtypes\Marker.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Asset.cs"
+             Link="Generated\Richtypes\Asset.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\IHolding.cs"
+             Link="Generated\Richtypes\IHolding.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\HoldingView.cs"
+             Link="Generated\Richtypes\HoldingView.cs" />
     <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
           Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

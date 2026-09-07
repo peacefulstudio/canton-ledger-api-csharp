@@ -183,8 +183,8 @@ public class RestCompletionProjectorTests
 
         var thrown = Record.Exception(() => RestCompletionProjector.Project(completion));
 
-        RestTransactionResultProjector.IsMalformedResponse(thrown!).Should().BeTrue(
-            "the REST client classifies a malformed wire body by this prefix, and a completion missing a "
+        thrown.Should().BeOfType<MalformedResponseException>(
+            "the REST client classifies a malformed wire body by this type, and a completion missing a "
             + "required field must land in that class rather than as an unrelated InvalidOperationException");
     }
 

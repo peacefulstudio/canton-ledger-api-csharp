@@ -52,7 +52,8 @@ internal static class MarkerMatcher<TMarker>
     /// <c>DamlMarker</c>. Returns <see langword="false"/> when the matched view carries no
     /// <c>viewValue</c> or a <c>viewStatus</c> the participant did not report as <c>OK</c>.
     /// </summary>
-    public static bool TryGetInterfaceViewRecord(WireCreatedEvent created, out DamlRecord record)
+    public static bool TryGetInterfaceViewRecord<TView>(WireCreatedEvent created, out DamlRecord record)
+        where TView : IDamlRecord<TView>
     {
         if (!IsInterface)
         {
@@ -70,7 +71,7 @@ internal static class MarkerMatcher<TMarker>
                 return false;
             }
 
-            record = RestValueDecoder.ToDamlRecord(view.ViewValue);
+            record = RestValueDecoder.ToDamlRecord<TView>(view.ViewValue);
             return true;
         }
 

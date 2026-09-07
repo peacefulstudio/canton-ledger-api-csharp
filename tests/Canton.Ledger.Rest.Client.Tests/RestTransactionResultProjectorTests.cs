@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
@@ -16,7 +17,7 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class RestTransactionResultProjectorTests
 {
-    private sealed record TemplateMarker : ITemplate
+    private sealed record TemplateMarker : ITemplate, IDamlRecord<TemplateMarker>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
         public static string PackageId => "tmpl-pkg";
@@ -24,6 +25,9 @@ public class RestTransactionResultProjectorTests
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static TemplateMarker FromRecord(DamlRecord record) =>
+            new();
     }
 
     private static Raw.Transaction TransactionFrom(string json)
@@ -50,7 +54,7 @@ public class RestTransactionResultProjectorTests
         var result = RestTransactionResultProjector.Project(transaction);
 
         result.UpdateId.Should().Be("upd-1");
-        result.CommandId.Value.Should().Be("cmd-1");
+        result.CommandId.Should().Be(new CommandId("cmd-1"));
         result.CompletionOffset.Value.Should().Be(42L);
     }
 
@@ -68,6 +72,7 @@ public class RestTransactionResultProjectorTests
                     "CreatedEvent": {
                       "offset": "1",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
                       "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
                       "interfaceViews": [
@@ -85,9 +90,75 @@ public class RestTransactionResultProjectorTests
         var created = result.CreatedContracts.Should().ContainSingle().Subject;
         created.ContractId.Should().Be("00holding");
         created.TemplateId.Should().Be(new RuntimeIdentifier("tmpl-pkg", "Sample.Token", "Holding"));
-        created.Payload.Should().Contain("alice::ns1");
+        created.Payload.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice::ns1");
         created.InterfaceIds.Should().ContainSingle()
             .Which.Should().Be(new RuntimeIdentifier("iface-pkg", "Sample.Token", "IHolding"));
+    }
+
+    [Fact]
+    public void Project_leaves_the_projected_key_hash_null_when_the_wire_carries_an_empty_contract_key_hash()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "CreatedEvent": {
+                      "offset": "1",
+                      "contractId": "00keyedWithAnEmptyHash",
+                      "nodeId": 0,
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                      "contractKey": {"party": "alice::ns1"},
+                      "contractKeyHash": ""
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var result = RestTransactionResultProjector.Project(transaction);
+
+        var created = result.CreatedContracts.Should().ContainSingle().Subject;
+        created.ContractKey.Should().NotBeNull();
+        created.ContractKey!.Value.Should().Be(new DamlParty("alice::ns1"));
+        created.ContractKey.KeyHash.Should().BeNull();
+    }
+
+    [Fact]
+    public void Project_leaves_the_projected_key_hash_null_when_the_wire_carries_no_contract_key_hash()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "CreatedEvent": {
+                      "offset": "1",
+                      "contractId": "00keyedWithoutHash",
+                      "nodeId": 0,
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                      "contractKey": {"party": "alice::ns1"}
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var result = RestTransactionResultProjector.Project(transaction);
+
+        var created = result.CreatedContracts.Should().ContainSingle().Subject;
+        created.ContractKey.Should().NotBeNull();
+        created.ContractKey!.KeyHash.Should().BeNull();
     }
 
     [Fact]
@@ -118,7 +189,7 @@ public class RestTransactionResultProjectorTests
               "transaction": {
                 "updateId": "upd-1",
                 "offset": "1",
-                "events": [{"CreatedEvent": {"offset": "1", "contractId": "00noTemplateId"}}]
+                "events": [{"CreatedEvent": {"offset": "1", "contractId": "00noTemplateId", "nodeId": 0}}]
               }
             }
             """);
@@ -128,6 +199,37 @@ public class RestTransactionResultProjectorTests
         act.Should().Throw<InvalidOperationException>()
             .Which.Message.Should().Be(
                 "Malformed response from ledger: CreatedEvent for contract '00noTemplateId' has no templateId, "
+                + "though the Ledger API marks the field as required.");
+    }
+
+    [Fact]
+    public void Project_refuses_a_created_event_that_carries_no_nodeId()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "CreatedEvent": {
+                      "offset": "1",
+                      "contractId": "00noNodeId",
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"fields": []}
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var act = () => RestTransactionResultProjector.Project(transaction);
+
+        act.Should().Throw<MalformedResponseException>()
+            .Which.Message.Should().Be(
+                "Malformed response from ledger: CreatedEvent for contract '00noNodeId' has no nodeId, "
                 + "though the Ledger API marks the field as required.");
     }
 
@@ -174,7 +276,17 @@ public class RestTransactionResultProjectorTests
         var outcome = new ExerciseOutcome<TransactionResult>.One(new TransactionResult(
             "upd-1",
             LedgerOffset.At(1),
-            [new CreatedContract("00holding", new RuntimeIdentifier("tmpl-pkg", "Sample.Token", "Holding"), "{}")],
+            [
+                new CreatedContract(
+                    "0",
+                    "00holding",
+                    new RuntimeIdentifier("tmpl-pkg", "Sample.Token", "Holding"),
+                    DamlRecord.Create(),
+                    [],
+                    [],
+                    [],
+                    ContractKey: null),
+            ],
             [],
             new CommandId("cmd-1")));
 
@@ -264,6 +376,6 @@ public class RestTransactionResultProjectorTests
         act.Should().NotThrow(
                 "Transaction.commandId is optional on the wire and is absent for everyone except the "
                 + "submitting party, so the transaction path must keep tolerating its absence")
-            .Which.CommandId.Should().Be(default(CommandId));
+            .Which.CommandId.Should().BeNull();
     }
 }

@@ -3,6 +3,7 @@
 
 using AwesomeAssertions;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Xunit;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
@@ -189,7 +190,7 @@ public abstract class MarkerMatchingParityTests
 
     private static CreatedContract CreatedContractWith(
         RuntimeIdentifier templateId, RuntimeIdentifier? implementedInterface = null) =>
-        new("00holding", templateId, "{}")
+        new("event-0", "00holding", templateId, DamlRecord.Create(), [], [], [], ContractKey: null)
         {
             InterfaceIds = implementedInterface is null ? [] : [implementedInterface],
         };

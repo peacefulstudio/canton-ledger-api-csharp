@@ -114,6 +114,7 @@ public static class ExerciseOutcomeExtensions
         new LedgerOperationException(
                 $"{operationName}: infrastructure error [{error.StatusCode}]: {error.Message}",
                 error.StatusCode,
+                error.Category,
                 error.SourceException)
             .WithOperation(operationName);
 }

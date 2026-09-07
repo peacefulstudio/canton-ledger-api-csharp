@@ -30,6 +30,78 @@ public class ParsedLedgerErrorTests
         ParsedLedgerError.MapCategory(wireCategoryId).Should().Be(expected);
     }
 
+    [Fact]
+    public void ClassifiedCategory_is_null_for_an_Unstructured_failure_nothing_classified()
+    {
+        new ParsedLedgerError.Unstructured("network down", 503).ClassifiedCategory.Should().BeNull();
+    }
+
+    [Fact]
+    public void ClassifiedCategory_keeps_the_category_an_Unstructured_failure_recovered()
+    {
+        var recovered = new ParsedLedgerError.Unstructured(
+            "a security-sensitive error has been received",
+            401,
+            DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials);
+
+        recovered.ClassifiedCategory.Should()
+            .Be(DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials);
+    }
+
+    [Fact]
+    public void ClassifiedCategory_reduces_a_Structured_error_the_classifier_did_not_recognise_to_null()
+    {
+        var structured = new ParsedLedgerError.Structured(
+            DamlErrorCategory.Unknown, "SOMETHING_NEW", "boom", new Dictionary<string, string>(), 500);
+
+        structured.ClassifiedCategory.Should().BeNull();
+    }
+
+    [Fact]
+    public void ClassifiedCategory_keeps_the_category_a_Structured_error_named()
+    {
+        var structured = new ParsedLedgerError.Structured(
+            DamlErrorCategory.ContentionOnSharedResources,
+            "DUPLICATE_COMMAND",
+            "already submitted",
+            new Dictionary<string, string>(),
+            409);
+
+        structured.ClassifiedCategory.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
+    }
+
+    [Fact]
+    public void ReportedErrorId_is_null_for_an_Unstructured_failure()
+    {
+        new ParsedLedgerError.Unstructured("network down", 503).ReportedErrorId.Should().BeNull();
+    }
+
+    [Fact]
+    public void ReportedErrorId_keeps_the_error_id_a_Structured_error_named()
+    {
+        var structured = new ParsedLedgerError.Structured(
+            DamlErrorCategory.ContentionOnSharedResources,
+            "STALE_STREAM_AUTHORIZATION",
+            "the stream was aborted because the user's rights changed",
+            new Dictionary<string, string>(),
+            409);
+
+        structured.ReportedErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public void ReportedErrorId_reduces_a_Structured_error_that_named_no_id_to_null()
+    {
+        var structured = new ParsedLedgerError.Structured(
+            DamlErrorCategory.ContentionOnSharedResources,
+            string.Empty,
+            "boom",
+            new Dictionary<string, string>(),
+            409);
+
+        structured.ReportedErrorId.Should().BeNull();
+    }
+
     [Theory]
     [InlineData("TransientServerFailure", DamlErrorCategory.TransientServerFailure)]
     [InlineData("transientserverfailure", DamlErrorCategory.TransientServerFailure)]
@@ -79,20 +151,18 @@ public class ParsedLedgerErrorTests
     }
 
     [Fact]
-    public void Untyped_carries_no_error_id_category_or_metadata()
+    public void Unstructured_carries_the_transport_status_and_message_and_nothing_else()
     {
-        var parsed = ParsedLedgerError.Untyped("service unavailable", 503);
+        var parsed = new ParsedLedgerError.Unstructured("service unavailable", 503);
 
-        parsed.Category.Should().Be(DamlErrorCategory.Unknown);
-        parsed.ErrorId.Should().BeEmpty();
+        parsed.Category.Should().BeNull();
         parsed.Message.Should().Be("service unavailable");
-        parsed.Metadata.Should().BeEmpty();
         parsed.StatusCode.Should().Be(503);
     }
 
     [Fact]
-    public void Untyped_substitutes_an_empty_message_for_a_null_one()
+    public void Unstructured_substitutes_an_empty_message_for_a_null_one()
     {
-        ParsedLedgerError.Untyped(null, 500).Message.Should().BeEmpty();
+        new ParsedLedgerError.Unstructured(null, 500).Message.Should().BeEmpty();
     }
 }

@@ -43,7 +43,7 @@ public sealed class RestLedgerReaderParityTests : LedgerReaderParityTests
             await LedgerApiVersionSkewGuard.AssertConformableAsync(
                 services.GetRequiredService<IVersionServiceApi>(), cancellationToken).ConfigureAwait(false);
 
-            var reader = services.GetRequiredService<RestLedgerClient>();
+            var reader = services.GetRequiredService<ILedgerReader>();
             return new CapabilityLane<ILedgerReader>(reader, async () =>
             {
                 try

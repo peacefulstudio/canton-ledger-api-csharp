@@ -61,6 +61,25 @@ public class RestValueEncoderTests
     }
 
     [Fact]
+    public void ToWireValue_encodes_a_present_DamlOptionalChain_level_as_a_nested_Optional()
+    {
+        var wire = RestValueEncoder.ToWireValue(DamlOptionalChain.Some(DamlOptionalChain.None));
+
+        wire.Optional.Should().NotBeNull();
+        wire.Optional!.Value!.Optional.Should().NotBeNull();
+        wire.Optional.Value.Optional!.Value.Should().BeNull();
+    }
+
+    [Fact]
+    public void ToWireValue_encodes_an_absent_DamlOptionalChain_level_with_no_value_set()
+    {
+        var wire = RestValueEncoder.ToWireValue(DamlOptionalChain.None);
+
+        wire.Optional.Should().NotBeNull();
+        wire.Optional!.Value.Should().BeNull();
+    }
+
+    [Fact]
     public void ToWireValue_encodes_an_empty_DamlOptional_with_no_value_set()
     {
         var wire = RestValueEncoder.ToWireValue(new DamlOptional(null));

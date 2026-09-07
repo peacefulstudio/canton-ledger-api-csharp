@@ -13,6 +13,10 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 /// </summary>
 internal sealed partial class ServedOpenApiDocument
 {
+    private const string PropertiesKey = "properties";
+    private const string FormatKey = "format";
+    private const string Int64Format = "int64";
+
     private readonly YamlBlock _schemas;
 
     private ServedOpenApiDocument(string cantonVersion, YamlBlock schemas)
@@ -40,5 +44,23 @@ internal sealed partial class ServedOpenApiDocument
         _schemas.ValueOf(schemaName).ValueOf("required").ScalarSequence();
 
     internal string ReferenceTargetOf(string schemaName, string propertyName) =>
-        _schemas.ValueOf(schemaName).ValueOf("properties").ValueOf(propertyName).ScalarOf("$ref");
+        _schemas.ValueOf(schemaName).ValueOf(PropertiesKey).ValueOf(propertyName).ScalarOf("$ref");
+
+    internal IReadOnlyList<string> Int64PropertySites() =>
+        _schemas.Keys().SelectMany(Int64PropertySitesOf).ToList();
+
+    private IEnumerable<string> Int64PropertySitesOf(string schemaName)
+    {
+        var schema = _schemas.ValueOf(schemaName);
+        if (!schema.Keys().Contains(PropertiesKey)) return [];
+
+        var properties = schema.ValueOf(PropertiesKey);
+        return properties.Keys()
+            .Where(property => DeclaresInt64(properties.ValueOf(property)))
+            .Select(property => $"{schemaName}.{property}")
+            .ToList();
+    }
+
+    private static bool DeclaresInt64(YamlBlock property) =>
+        property.Keys().Contains(FormatKey) && property.ScalarOf(FormatKey) == Int64Format;
 }

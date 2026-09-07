@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
 using AwesomeAssertions;
@@ -17,7 +18,7 @@ using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 [Collection(nameof(AdminClientActivitySourceIsolation))]
-public class AdminClientActivityEnrichmentTests
+public sealed class AdminClientActivityEnrichmentTests : IDisposable
 {
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
@@ -34,6 +35,8 @@ public class AdminClientActivityEnrichmentTests
         _partyService = Substitute.ForPartsOf<PartyManagementService.PartyManagementServiceClient>(callInvoker);
         _packageService = Substitute.ForPartsOf<PackageService.PackageServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private AdminClient CreateClient() => new(
         _options,
@@ -67,7 +70,7 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
 
         var client = CreateClient();
         await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
@@ -101,7 +104,7 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
 
         var client = CreateClient();
         var act = () => client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
@@ -138,7 +141,7 @@ public class AdminClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
 
         var client = CreateClient();
         await client.GetPackageAsync(packageId, TestContext.Current.CancellationToken);

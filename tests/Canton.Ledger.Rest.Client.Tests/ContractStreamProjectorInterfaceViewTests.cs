@@ -6,9 +6,12 @@ using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Rest.Client.Raw;
 using Canton.Ledger.Testing.Helpers;
+using Daml.Runtime;
+using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
 using Xunit;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using WireUpdate = Canton.Ledger.Rest.Client.Raw.GetUpdatesResponse;
 
 #pragma warning disable CANTONREST001
@@ -17,6 +20,23 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class ContractStreamProjectorInterfaceViewTests
 {
+
+    private sealed record TemplateMarker(DamlRecord Record) : ITemplate, IDamlRecord<TemplateMarker>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
+
+        public static string PackageId => "tmpl-pkg";
+
+        public static string PackageName => "token-impl";
+
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+
+        public DamlRecord ToRecord() => Record;
+
+        public static TemplateMarker FromRecord(DamlRecord record) => new(record);
+    }
     private const string ImplementingTemplateIdJson =
         """{"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"}""";
 
@@ -139,17 +159,17 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var response = await ActiveContractsResponseFrom(CreatedEventJson(ComputedViewJson));
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response)
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response)
             .Should().ContainSingle().Subject;
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
+        var created = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
         created.ContractId.Value.Should().Be("00holding");
         created.Offset.Value.Should().Be(42L);
-        created.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("view-value");
+        created.Payload.Amount.Should().Be("view-value");
     }
 
     [Fact]
-    public async Task ProjectActiveContractEntry_decodes_a_circe_shaped_view_value_through_the_daml_json_codec()
+    public async Task ProjectActiveContractEntry_decodes_a_circe_shaped_view_value_against_the_view_type()
     {
         var response = await ActiveContractsResponseFrom(CreatedEventJson(
             """
@@ -160,12 +180,12 @@ public class ContractStreamProjectorInterfaceViewTests
             }
             """));
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response)
-            .Should().ContainSingle().Subject;
+        var created = response.ContractEntry!.JsActiveContract!.CreatedEvent!;
+        MarkerMatcher<InterfaceMarker>.TryGetInterfaceViewRecord<InterfaceMarkerView>(created, out var view)
+            .Should().BeTrue();
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("owner").As<DamlText>().Value.Should().Be("alice::ns1");
-        created.Payload.GetRequiredField("amount").As<DamlNumeric>().Value.Should().Be(10.5m);
+        view.GetRequiredField("amount").As<DamlText>().Value.Should().Be("10.5");
+        view.Fields.Should().ContainSingle();
     }
 
     [Theory]
@@ -175,11 +195,11 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var response = await ActiveContractsResponseFrom(CreatedEventJson(undecodableViewJson));
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response)
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response)
             .Should().ContainSingle().Subject;
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        var unclassified = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -188,12 +208,11 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var response = await ActiveContractsResponseFrom(CreatedEventJson(ComputedViewJson));
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response)
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response)
             .Should().ContainSingle().Subject;
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("amount").As<DamlText>().Value
-            .Should().NotBe("create-argument-value");
+        var created = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
+        created.Payload.Amount.Should().NotBe("create-argument-value");
     }
 
     [Fact]
@@ -201,12 +220,12 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var transaction = TransactionFrom(CreatedEventJson(ComputedViewJson));
 
-        var projected = ContractStreamProjector.ProjectTransactionEvents<InterfaceMarker>(transaction)
+        var projected = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction)
             .Should().ContainSingle().Subject;
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
+        var created = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
         created.ContractId.Value.Should().Be("00holding");
-        created.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("view-value");
+        created.Payload.Amount.Should().Be("view-value");
     }
 
     [Theory]
@@ -216,11 +235,11 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var transaction = TransactionFrom(CreatedEventJson(undecodableViewJson));
 
-        var projected = ContractStreamProjector.ProjectTransactionEvents<InterfaceMarker>(transaction)
+        var projected = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction)
             .Should().ContainSingle().Subject;
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        var unclassified = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -235,7 +254,7 @@ public class ContractStreamProjectorInterfaceViewTests
             .Should().ContainSingle().Subject;
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
+        created.Payload.Record.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
     }
 
     [Fact]
@@ -249,7 +268,7 @@ public class ContractStreamProjectorInterfaceViewTests
             .Should().ContainSingle().Subject;
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
+        created.Payload.Record.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
     }
 
     [Fact]
@@ -264,10 +283,10 @@ public class ContractStreamProjectorInterfaceViewTests
             }
             """));
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response)
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response)
             .Should().ContainSingle().Subject;
 
-        projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>()
+        projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>()
             .Which.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
@@ -276,13 +295,13 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var reassignment = ReassignmentFrom(CreatedEventJson(ComputedViewJson));
 
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment)
+        var projected = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment)
             .Should().ContainSingle().Subject;
 
-        var assigned = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Assigned>().Subject;
+        var assigned = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Assigned>().Subject;
         assigned.ContractId.Value.Should().Be("00holding");
         assigned.Offset.Value.Should().Be(42L);
-        assigned.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("view-value");
+        assigned.Payload.Amount.Should().Be("view-value");
     }
 
     [Fact]
@@ -290,12 +309,11 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var reassignment = ReassignmentFrom(CreatedEventJson(ComputedViewJson));
 
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment)
+        var projected = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment)
             .Should().ContainSingle().Subject;
 
-        var assigned = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Assigned>().Subject;
-        assigned.Payload.GetRequiredField("amount").As<DamlText>().Value
-            .Should().NotBe("create-argument-value");
+        var assigned = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Assigned>().Subject;
+        assigned.Payload.Amount.Should().NotBe("create-argument-value");
     }
 
     [Theory]
@@ -305,11 +323,11 @@ public class ContractStreamProjectorInterfaceViewTests
     {
         var reassignment = ReassignmentFrom(CreatedEventJson(undecodableViewJson));
 
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment)
+        var projected = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment)
             .Should().ContainSingle().Subject;
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        var unclassified = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -322,11 +340,11 @@ public class ContractStreamProjectorInterfaceViewTests
             CreatedEventJson(undecodableViewJson, offset: "0"),
             reassignmentOffset: "77");
 
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment)
+        var projected = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment)
             .Should().ContainSingle().Subject;
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        var unclassified = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -339,11 +357,11 @@ public class ContractStreamProjectorInterfaceViewTests
             CreatedEventJson(undecodableViewJson, offset: "21"),
             reassignmentOffset: "77");
 
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment)
+        var projected = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment)
             .Should().ContainSingle().Subject;
 
-        var unclassified = projected.Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
+        var unclassified = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -359,6 +377,6 @@ public class ContractStreamProjectorInterfaceViewTests
 
         var assigned = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Assigned>().Subject;
         assigned.ReassignmentId.Should().Be("reassign-1");
-        assigned.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
+        assigned.Payload.Record.GetRequiredField("amount").As<DamlText>().Value.Should().Be("create-argument-value");
     }
 }

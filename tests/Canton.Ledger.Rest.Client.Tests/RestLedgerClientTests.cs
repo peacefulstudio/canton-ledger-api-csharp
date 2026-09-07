@@ -37,7 +37,7 @@ public sealed class RestLedgerClientTests : IDisposable
         return factory;
     }
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -45,6 +45,9 @@ public sealed class RestLedgerClientTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport, string? userId = null) =>
@@ -171,6 +174,7 @@ public sealed class RestLedgerClientTests : IDisposable
                     "CreatedEvent": {
                       "offset": "7",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
                       "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
                     }
@@ -283,6 +287,7 @@ public sealed class RestLedgerClientTests : IDisposable
                     "CreatedEvent": {
                       "offset": "1",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "createArgument": {"fields": []}
                     }
                   }
@@ -316,6 +321,7 @@ public sealed class RestLedgerClientTests : IDisposable
                     "CreatedEvent": {
                       "offset": "1",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
                       "createArgument": {"fields": [{"label": "owner"}]}
                     }
@@ -486,6 +492,7 @@ public sealed class RestLedgerClientTests : IDisposable
                     "CreatedEvent": {
                       "offset": "1",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
                       "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
                     }
@@ -640,6 +647,42 @@ public sealed class RestLedgerClientTests : IDisposable
         body.RootElement.TryGetProperty("transactionFormat", out _).Should().BeFalse(
             "the create path carries no shape of its own, so the participant applies its "
             + "stakeholder-scoped ACS-delta default");
+    }
+
+    [Fact]
+    public async Task TryCreateAsync_posts_the_minted_submission_to_the_shared_submit_and_wait_for_transaction_call()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, CreatedTransactionResponse);
+        var client = ClientWith(transport, userId: "test-user");
+
+        await client.TryCreateAsync(
+            new TestTemplate(), Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be(
+            "/v2/commands/submit-and-wait-for-transaction",
+            "the create path mints its own submission and then hands it to the same submit-and-wait-for-transaction "
+            + "call every other transaction submission uses");
+        using var body = JsonDocument.Parse(transport.LastRequestBody!);
+        var commands = body.RootElement.GetProperty("commands");
+        commands.GetProperty("userId").GetString().Should().Be("test-user");
+        commands.GetProperty("actAs")[0].GetString().Should().Be("party::alice");
+        commands.GetProperty("workflowId").GetString().Should().Be("create-testtemplate");
+        commands.GetProperty("commands")[0].GetProperty("CreateCommand").GetProperty("templateId")
+            .GetString().Should().Be("pkg:Module:Template");
+    }
+
+    [Fact]
+    public async Task TryCreateAsync_returns_an_InfraError_outcome_when_the_response_carries_no_transaction()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, "{}");
+        var client = ClientWith(transport);
+
+        var outcome = await client.TryCreateAsync(
+            new TestTemplate(), Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.InfraError>().Subject;
+        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        error.Message.Should().Be("Server returned a successful response but no transaction was present.");
     }
 
     [Fact]

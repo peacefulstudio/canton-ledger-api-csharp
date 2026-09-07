@@ -16,7 +16,7 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class ContractStreamProjectorTransactionEventsTests
 {
-    private sealed record TemplateMarker : ITemplate
+    private sealed record TemplateMarker : ITemplate, IDamlRecord<TemplateMarker>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
         public static string PackageId => "tmpl-pkg";
@@ -24,6 +24,9 @@ public class ContractStreamProjectorTransactionEventsTests
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static TemplateMarker FromRecord(DamlRecord record) =>
+            new();
     }
 
     private static Raw.Transaction TransactionFrom(string json)
@@ -73,6 +76,80 @@ public class ContractStreamProjectorTransactionEventsTests
         created.Offset.Value.Should().Be(7L);
         created.SynchronizerId.Should().Be(new SynchronizerId("sync-1"));
         created.WitnessParties.Should().ContainSingle().Which.Should().Be((Party)"alice::ns1");
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_populates_Created_Key_from_the_wire_contract_key_and_hash()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "update": {
+                "Transaction": {
+                  "value": {
+                    "offset": "7",
+                    "synchronizerId": "sync-1",
+                    "events": [
+                      {
+                        "CreatedEvent": {
+                          "offset": "7",
+                          "contractId": "00keyed",
+                          "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                          "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                          "contractKey": {"party": "alice::ns1"},
+                          "contractKeyHash": "AQID",
+                          "witnessParties": ["alice::ns1"]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        var created = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction)
+            .Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
+
+        created.Key.Should().NotBeNull(
+            "a keyed template's materialization throws when the created event carries no key");
+        created.Key!.Value.Should().Be(new DamlParty("alice::ns1"));
+        created.Key.KeyHash.Should().Be("AQID");
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_leaves_Created_Key_null_when_the_wire_carries_no_key()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "update": {
+                "Transaction": {
+                  "value": {
+                    "offset": "7",
+                    "synchronizerId": "sync-1",
+                    "events": [
+                      {
+                        "CreatedEvent": {
+                          "offset": "7",
+                          "contractId": "00unkeyed",
+                          "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                          "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                          "witnessParties": ["alice::ns1"]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction)
+            .Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject
+            .Key.Should().BeNull();
     }
 
     [Fact]
@@ -291,7 +368,7 @@ public class ContractStreamProjectorTransactionEventsTests
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
-        unclassified.Offset.Value.Should().Be(8L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(8L));
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 
@@ -333,7 +410,7 @@ public class ContractStreamProjectorTransactionEventsTests
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
-        unclassified.Offset.Value.Should().Be(9L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(9L));
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 
@@ -355,7 +432,7 @@ public class ContractStreamProjectorTransactionEventsTests
     }
 
     [Fact]
-    public void ProjectTransactionEvents_warns_that_an_unparseable_transaction_offset_is_reported_at_the_begin_of_the_ledger()
+    public void ProjectTransactionEvents_reports_an_unparseable_transaction_offset_with_no_offset_at_all()
     {
         var transaction = TransactionFrom(
             """{"update": {"Transaction": {"value": {"offset": "not-a-number", "synchronizerId": "sync-1", "events": [{}]}}}}""");
@@ -366,11 +443,12 @@ public class ContractStreamProjectorTransactionEventsTests
             .Should().ContainSingle().Subject;
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Should().Be(LedgerOffset.Begin);
+        unclassified.Offset.Should().BeNull(
+            "fabricating the begin-of-ledger offset would silently rewind a consumer that resumes from it");
         loggerFactory.Records.Should().ContainSingle(
             record => record.Level == LogLevel.Warning
-                && record.Message.Contains("begin-of-ledger offset")
-                && record.Message.Contains("re-read the stream from the start"));
+                && record.Message.Contains("no offset")
+                && record.Message.Contains("resume point"));
     }
 
     [Fact]
@@ -539,7 +617,7 @@ public class ContractStreamProjectorTransactionEventsTests
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
-        unclassified.Offset.Value.Should().Be(20L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(20L));
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 
@@ -586,7 +664,7 @@ public class ContractStreamProjectorTransactionEventsTests
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
-        unclassified.Offset.Value.Should().Be(21L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 

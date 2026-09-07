@@ -7,7 +7,7 @@ using Daml.Runtime.Data;
 
 namespace Canton.Ledger.Testing.Tests;
 
-internal sealed record DemoAsset(Party Issuer, Party Owner, string Name, decimal Amount) : ITemplate
+internal sealed record DemoAsset(Party Issuer, Party Owner, string Name, decimal Amount) : ITemplate, IDamlRecord<DemoAsset>
 {
     public static Identifier TemplateId { get; } = new("test-pkg", "MiniDemo.Asset", "Asset");
     public static string PackageId => "test-pkg";
@@ -31,7 +31,7 @@ internal sealed record DemoAsset(Party Issuer, Party Owner, string Name, decimal
     }
 }
 
-internal sealed record OtherAsset(Party Owner) : ITemplate
+internal sealed record OtherAsset(Party Owner) : ITemplate, IDamlRecord<OtherAsset>
 {
     public static Identifier TemplateId { get; } = new("test-pkg", "MiniDemo.Other", "Other");
     public static string PackageId => "test-pkg";
@@ -40,4 +40,7 @@ internal sealed record OtherAsset(Party Owner) : ITemplate
     public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty((string)Owner)));
+
+    public static OtherAsset FromRecord(DamlRecord record) =>
+        new(new Party(record.GetRequiredField("owner").As<DamlParty>().Value));
 }

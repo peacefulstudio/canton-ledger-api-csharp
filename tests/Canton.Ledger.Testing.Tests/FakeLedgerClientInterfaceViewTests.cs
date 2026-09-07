@@ -16,24 +16,16 @@ public class FakeLedgerClientInterfaceViewTests
 {
     private static readonly Party Owner = new("bob");
 
+    private static readonly SynchronizerId Synchronizer = (SynchronizerId)"sync1";
+
     [Fact]
-    public async Task QueryActiveAsync_decodes_each_staged_interface_view_into_the_view_record()
+    public async Task QueryActiveAsync_returns_every_staged_interface_view()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(
-                LedgerEvents.Created(
-                    new ContractId<IDemoHoldingView>("cid1"),
-                    new DemoHoldingView(42.5m).ToRecord(),
-                    LedgerOffset.At(1),
-                    (SynchronizerId)"sync1",
-                    [Owner]),
-                LedgerEvents.Created(
-                    new ContractId<IDemoHoldingView>("cid2"),
-                    new DemoHoldingView(7m).ToRecord(),
-                    LedgerOffset.At(2),
-                    (SynchronizerId)"sync1",
-                    [Owner]),
-                LedgerEvents.Checkpoint<IDemoHoldingView>(LedgerOffset.At(2)))
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                Created("cid1", 42.5m, 1),
+                Created("cid2", 7m, 2),
+                Checkpoint(2))
             .Build();
 
         var holdings = await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
@@ -50,7 +42,7 @@ public class FakeLedgerClientInterfaceViewTests
     public async Task QueryActiveAsync_returns_an_empty_list_for_a_checkpoint_only_snapshot()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(LedgerEvents.Checkpoint<IDemoHoldingView>(LedgerOffset.At(9)))
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(Checkpoint(9))
             .Build();
 
         var holdings = await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
@@ -63,13 +55,7 @@ public class FakeLedgerClientInterfaceViewTests
     public async Task QueryActiveAsync_throws_LedgerOperationException_when_the_snapshot_has_no_terminal_checkpoint()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(
-                LedgerEvents.Created(
-                    new ContractId<IDemoHoldingView>("cid1"),
-                    new DemoHoldingView(1m).ToRecord(),
-                    LedgerOffset.At(1),
-                    (SynchronizerId)"sync1",
-                    [Owner]))
+            .WithMalformedActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(Created("cid1", 1m, 1))
             .Build();
 
         var querying = async () => await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
@@ -83,7 +69,9 @@ public class FakeLedgerClientInterfaceViewTests
     public async Task QueryActiveAsync_throws_LedgerOperationException_carrying_the_status_code_when_the_snapshot_faults()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(LedgerEvents.StreamError<IDemoHoldingView>(14, "snapshot aborted mid-stream"))
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.StreamError(
+                    14, "snapshot aborted mid-stream"))
             .Build();
 
         var querying = async () => await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
@@ -94,45 +82,59 @@ public class FakeLedgerClientInterfaceViewTests
     }
 
     [Fact]
-    public async Task QueryActiveAsync_throws_LedgerOperationException_when_a_staged_view_does_not_decode()
+    public async Task QueryActiveAsync_throws_LedgerOperationException_when_the_snapshot_carries_an_unclassified_row()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(
-                LedgerEvents.Created(
-                    new ContractId<IDemoHoldingView>("cid1"),
-                    DamlRecord.Create(DamlField.Create("quantity", new DamlNumeric(1m))),
-                    LedgerOffset.At(1),
-                    (SynchronizerId)"sync1",
-                    [Owner]),
-                LedgerEvents.Checkpoint<IDemoHoldingView>(LedgerOffset.At(1)))
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.Unclassified(
+                    LedgerOffset.At(1), UnclassifiedKind.InterfaceViewUnavailable),
+                Checkpoint(1))
             .Build();
 
         var querying = async () => await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
             Owner, cancellationToken: TestContext.Current.CancellationToken);
 
         await querying.Should().ThrowAsync<LedgerOperationException>()
-            .WithMessage($"*did not decode into {nameof(DemoHoldingView)}*");
+            .WithMessage("*unclassified row*");
     }
 
     [Fact]
-    public async Task QueryActiveAsync_wraps_any_decode_failure_a_view_factory_raises_including_KeyNotFoundException()
+    public async Task QueryActiveAsync_keeps_each_interface_marker_on_its_own_staged_snapshot()
     {
         ICantonLedgerClient client = FakeLedgerClient.Create()
-            .WithActiveContracts(
-                LedgerEvents.Created(
-                    new ContractId<IKeyedHoldingView>("cid1"),
-                    DamlRecord.Create(DamlField.Create("quantity", new DamlNumeric(1m))),
-                    LedgerOffset.At(1),
-                    (SynchronizerId)"sync1",
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(Created("cid1", 3m, 1), Checkpoint(1))
+            .WithActiveInterfaceContracts<IKeyedHoldingView, KeyedHoldingView>(
+                new InterfaceAcsSnapshotEntry<IKeyedHoldingView, KeyedHoldingView>.Created(
+                    new ContractId<IKeyedHoldingView>("cid2"),
+                    new KeyedHoldingView(9m),
+                    null,
+                    LedgerOffset.At(2),
+                    Synchronizer,
                     [Owner]),
-                LedgerEvents.Checkpoint<IKeyedHoldingView>(LedgerOffset.At(1)))
+                new InterfaceAcsSnapshotEntry<IKeyedHoldingView, KeyedHoldingView>.Checkpoint(
+                    new StakeholderResume(LedgerOffset.At(2))))
             .Build();
 
-        var querying = async () => await client.QueryActiveAsync<IKeyedHoldingView, KeyedHoldingView>(
+        var demo = await client.QueryActiveAsync<IDemoHoldingView, DemoHoldingView>(
+            Owner, cancellationToken: TestContext.Current.CancellationToken);
+        var keyed = await client.QueryActiveAsync<IKeyedHoldingView, KeyedHoldingView>(
             Owner, cancellationToken: TestContext.Current.CancellationToken);
 
-        await querying.Should().ThrowAsync<LedgerOperationException>()
-            .WithMessage($"*did not decode into {nameof(KeyedHoldingView)}*")
-            .WithInnerException<LedgerOperationException, KeyNotFoundException>();
+        demo.Should().ContainSingle().Which.View.Amount.Should().Be(3m);
+        keyed.Should().ContainSingle().Which.View.Amount.Should().Be(9m);
     }
+
+    private static InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView> Created(
+        string contractId, decimal amount, long offset) =>
+        new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.Created(
+            new ContractId<IDemoHoldingView>(contractId),
+            new DemoHoldingView(amount),
+            null,
+            LedgerOffset.At(offset),
+            Synchronizer,
+            [Owner]);
+
+    private static InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView> Checkpoint(long offset) =>
+        new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.Checkpoint(
+            new StakeholderResume(LedgerOffset.At(offset)));
 }

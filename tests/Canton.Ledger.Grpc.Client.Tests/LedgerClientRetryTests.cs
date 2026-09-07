@@ -6,6 +6,7 @@ using System.Globalization;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -24,7 +25,7 @@ using Status = Grpc.Core.Status;
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 [Collection("LedgerClient global ActivitySource")]
-public class LedgerClientRetryTests
+public sealed class LedgerClientRetryTests : IDisposable
 {
     private const string RetryAttemptActivityName = "LedgerClient.RetryAttempt";
     private const int InitialAttempt = 1;
@@ -70,6 +71,8 @@ public class LedgerClientRetryTests
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
         _submissionService = Substitute.ForPartsOf<CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(
         _options,
@@ -298,7 +301,7 @@ public class LedgerClientRetryTests
             Ok(new SubmitResponse()));
 
         var client = CreateClient();
-        var returnedCommandId = await client.SubmitAsync(Create(commandId: null), TestContext.Current.CancellationToken);
+        var returnedCommandId = await client.SubmitAsync(Create(commandId: null), cancellationToken: TestContext.Current.CancellationToken);
 
         sentCommandIds.Should().HaveCount(3, "each of the three attempts submits once");
         sentCommandIds.Should().OnlyContain(id => id == sentCommandIds[0],
@@ -390,7 +393,7 @@ public class LedgerClientRetryTests
             Faulted<SubmitAndWaitForTransactionResponse>(new RpcException(new Status(StatusCode.Unavailable, uniqueDetail))),
             Ok(new SubmitAndWaitForTransactionResponse { Transaction = new Transaction { UpdateId = "u-1", Offset = 1L } }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClient();
         await client.TrySubmitAndWaitForTransactionAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);

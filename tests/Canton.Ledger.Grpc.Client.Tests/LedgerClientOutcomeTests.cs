@@ -4,6 +4,7 @@
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
+using Daml.Ledger.Abstractions.Extensions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
@@ -23,7 +24,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientOutcomeTests
+public sealed class LedgerClientOutcomeTests : IDisposable
 {
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
@@ -41,6 +42,8 @@ public class LedgerClientOutcomeTests
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
 
@@ -100,6 +103,36 @@ public class LedgerClientOutcomeTests
         var infra = (ExerciseOutcome<TransactionResult>.InfraError)outcome;
         infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
         infra.Message.Should().Be("network down");
+        infra.SourceException.Should().BeSameAs(ex);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unauthenticated, DamlErrorCategory.AuthInterceptorInvalidAuthenticationCredentials)]
+    [InlineData(StatusCode.PermissionDenied, DamlErrorCategory.AuthorizationChecksFailed)]
+    public async Task TrySubmitAndWaitForTransaction_carries_the_recovered_Category_on_a_redacted_InfraError(
+        StatusCode statusCode, DamlErrorCategory expected)
+    {
+        var ex = LedgerClientTestFixtures.MakeRedactedRpcException(statusCode);
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
+        infra.Category.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransaction_leaves_Category_null_on_an_unclassified_InfraError()
+    {
+        var ex = new RpcException(new Status(StatusCode.Unavailable, "network down"));
+        LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
+
+        var client = CreateClient();
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
+
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
+        infra.Category.Should().BeNull();
     }
 
     [Fact]
@@ -118,6 +151,7 @@ public class LedgerClientOutcomeTests
         var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
         infra.StatusCode.Should().Be((int)StatusCode.Internal);
         infra.Message.Should().Contain("template_id");
+        infra.SourceException.Should().BeOfType<MalformedResponseException>();
     }
 
     [Fact]
@@ -142,6 +176,7 @@ public class LedgerClientOutcomeTests
         var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
         infra.StatusCode.Should().Be((int)StatusCode.Internal);
         infra.Message.Should().Contain("Numeric");
+        infra.SourceException.Should().BeOfType<FormatException>();
     }
 
     [Fact]
@@ -168,9 +203,8 @@ public class LedgerClientOutcomeTests
     }
 
     [Fact]
-    public async Task TryCreateAsync_returns_None_when_no_matching_template()
+    public async Task TryCreateAsync_returns_None_when_the_committed_transaction_carries_no_created_event()
     {
-        // Server returns a transaction but no Created event (rare but representable).
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
         StubCommandService(new SubmitAndWaitForTransactionResponse { Transaction = transaction });
 
@@ -199,7 +233,7 @@ public class LedgerClientOutcomeTests
     }
 
     [Fact]
-    public async Task TryExerciseForCreatedAsync_returns_Many_when_multiple_matching_creates()
+    public async Task TryCreateOneByExerciseAsync_returns_Many_when_multiple_matching_creates()
     {
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
         var tid = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" };
@@ -214,7 +248,7 @@ public class LedgerClientOutcomeTests
             DamlUnit.Instance);
 
         var client = CreateClient();
-        var outcome = await client.TryExerciseForCreatedAsync<FooBar>(exercise, new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryCreateOneByExerciseAsync<FooBar>(exercise, new Party("party::alice"), cancellationToken: TestContext.Current.CancellationToken);
 
         outcome.Should().BeOfType<ExerciseOutcome<ContractId<FooBar>>.Many>();
         var many = (ExerciseOutcome<ContractId<FooBar>>.Many)outcome;
@@ -222,20 +256,131 @@ public class LedgerClientOutcomeTests
         many.ContractIds.Should().Equal("00a", "00b");
     }
 
-    private void StubCommandService(SubmitAndWaitForTransactionResponse response)
+    [Fact]
+    public async Task TryCreateOneByExerciseAsync_sends_a_caller_supplied_command_id_verbatim()
     {
+        SubmitAndWaitForTransactionRequest? captured = null;
+        StubCommandService(SingleCreateResponse(), request => captured = request);
+
+        await CreateClient().TryCreateOneByExerciseAsync<FooBar>(
+            MultiplyOnFooBar(),
+            new Party("party::alice"),
+            commandId: new RuntimeCommands.CommandId("caller-supplied-cmd"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured.Commands.CommandId.Should().Be(
+            "caller-supplied-cmd",
+            "a caller that deduplicates its own submissions must be able to name the command id on "
+            + "this path, exactly as TryExerciseAsync and TryCreateAsync already allow");
+    }
+
+    [Fact]
+    public async Task TryCreateOneByExerciseAsync_mints_a_command_id_when_the_caller_supplies_none()
+    {
+        SubmitAndWaitForTransactionRequest? captured = null;
+        StubCommandService(SingleCreateResponse(), request => captured = request);
+
+        await CreateClient().TryCreateOneByExerciseAsync<FooBar>(
+            MultiplyOnFooBar(),
+            new Party("party::alice"),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        Guid.TryParse(captured.Commands.CommandId, out _).Should().BeTrue(
+            "an omitted command id is minted as a GUID rather than left empty");
+    }
+
+    private static SubmitAndWaitForTransactionResponse SingleCreateResponse()
+    {
+        var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
+        transaction.Events.Add(new Event
+        {
+            Created = new ProtoCreatedEvent
+            {
+                ContractId = "00a",
+                TemplateId = new ProtoIdentifier
+                {
+                    PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar",
+                },
+                CreateArguments = new ProtoRecord(),
+            },
+        });
+        return new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+    }
+
+    private static RuntimeCommands.ExerciseCommand MultiplyOnFooBar() =>
+        new(
+            new RuntimeIdentifier("test-pkg", "Sample.Foo", "FooBar"),
+            new ContractId<FooBar>("00contract"),
+            new RuntimeCommands.ChoiceName("Multiply"),
+            DamlUnit.Instance);
+
+    private void StubCommandService(SubmitAndWaitForTransactionResponse response) =>
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
+
+    private void StubCommandService(
+        SubmitAndWaitForTransactionResponse response,
+        Action<SubmitAndWaitForTransactionRequest> onRequest) =>
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response, onRequest);
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_surfaces_caller_cancellation_as_OperationCanceledException_carrying_the_RpcException()
+    {
+        using var cts = new CancellationTokenSource();
+        var cancelled = new RpcException(new Status(StatusCode.Cancelled, "call cancelled"));
         _commandService
             .SubmitAndWaitForTransactionAsync(
                 Arg.Any<SubmitAndWaitForTransactionRequest>(),
                 Arg.Any<Metadata>(),
                 Arg.Any<DateTime?>(),
                 Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+            .Returns(_ =>
+            {
+                cts.Cancel();
+                return new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                    Task.FromException<SubmitAndWaitForTransactionResponse>(cancelled),
+                    Task.FromResult(new Metadata()),
+                    () => cancelled.Status,
+                    () => cancelled.Trailers ?? new Metadata(),
+                    () => { });
+            });
+
+        var act = async () => await CreateClient()
+            .TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: cts.Token);
+
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeSameAs(cancelled);
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_InfraError_when_a_cancelled_token_meets_a_non_cancelled_participant_status()
+    {
+        using var cts = new CancellationTokenSource();
+        var unavailable = new RpcException(new Status(StatusCode.Unavailable, "network down"));
+        _commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                cts.Cancel();
+                return new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
+                    Task.FromException<SubmitAndWaitForTransactionResponse>(unavailable),
+                    Task.FromResult(new Metadata()),
+                    () => unavailable.Status,
+                    () => unavailable.Trailers ?? new Metadata(),
+                    () => { });
+            });
+
+        var outcome = await CreateClient()
+            .TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: cts.Token);
+
+        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
+        infra.StatusCode.Should().Be((int)StatusCode.Unavailable);
+        infra.Message.Should().Be("network down");
     }
 
     private static RuntimeCommands.CommandsSubmission MakeFooBarCreate()

@@ -13,7 +13,7 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class RestSubscribeRequestBuilderTests
 {
-    private sealed record TemplateMarker : ITemplate
+    private sealed record TemplateMarker : ITemplate, IDamlRecord<TemplateMarker>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
         public static string PackageId => "tmpl-pkg";
@@ -21,6 +21,9 @@ public class RestSubscribeRequestBuilderTests
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static TemplateMarker FromRecord(DamlRecord record) =>
+            new();
     }
 
     private sealed record InterfaceMarker : IDamlInterface

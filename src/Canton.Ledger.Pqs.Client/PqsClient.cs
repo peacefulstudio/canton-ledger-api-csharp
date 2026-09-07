@@ -20,14 +20,8 @@ namespace Canton.Ledger.Pqs.Client;
 /// <summary>
 /// Implementation of <see cref="IPqsClient"/> using Npgsql for PostgreSQL queries.
 /// </summary>
-public sealed partial class PqsClient : IPqsClient
+internal sealed partial class PqsClient : IPqsClient
 {
-    /// <summary>
-    /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
-    /// Register with <c>tracing.AddSource(PqsClient.ActivitySourceName)</c>.
-    /// </summary>
-    public static string ActivitySourceName => LedgerActivitySourceNames.PqsClient;
-
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<PqsClient>();
 
     /// <summary>
@@ -62,21 +56,8 @@ public sealed partial class PqsClient : IPqsClient
     private readonly Func<CancellationToken, ValueTask<NpgsqlConnection>> _openConnectionAsync;
     private readonly Func<NpgsqlCommand, CancellationToken, Task<DbDataReader>> _executeReaderAsync;
 
-    /// <summary>
-    /// Creates a new PqsClient from explicit options.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public PqsClient(PqsClientOptions options, ILogger<PqsClient>? logger = null)
-        : this(options, openConnectionAsync: null, logger)
-    {
-    }
-
-    /// <summary>
-    /// Creates a new PqsClient using options from dependency injection.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public PqsClient(IOptions<PqsClientOptions> options, ILogger<PqsClient>? logger = null)
-        : this((options ?? throw new ArgumentNullException(nameof(options))).Value, logger)
+    internal PqsClient(IOptions<PqsClientOptions> options, ILogger<PqsClient>? logger = null)
+        : this((options ?? throw new ArgumentNullException(nameof(options))).Value, openConnectionAsync: null, logger)
     {
     }
 
@@ -148,7 +129,7 @@ public sealed partial class PqsClient : IPqsClient
     public Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord =>
+        where TView : IDamlRecord<TView> =>
         ExecuteProjectingQueryManyAsync(
             SelectActiveSql,
             GetDamlTypeId<TInterface>(),
@@ -162,7 +143,7 @@ public sealed partial class PqsClient : IPqsClient
         PqsPage page,
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -232,6 +213,8 @@ public sealed partial class PqsClient : IPqsClient
         CancellationToken cancellationToken = default)
         where T : ITemplate
     {
+        ArgumentNullException.ThrowIfNull(contractId);
+
         return ExecuteQueryOneAsync<T>(
             "SELECT contract_id, payload FROM active(@typeId) WHERE contract_id = @contractId LIMIT 1",
             cmd => cmd.Parameters.AddWithValue("@contractId", contractId.Value),
@@ -244,6 +227,8 @@ public sealed partial class PqsClient : IPqsClient
         CancellationToken cancellationToken = default)
         where T : ITemplate
     {
+        ArgumentNullException.ThrowIfNull(contractId);
+
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
         return ExecuteWithDiagnosticsAsync(
@@ -431,7 +416,7 @@ public sealed partial class PqsClient : IPqsClient
         string payloadJson,
         JsonSerializerOptions jsonOptions)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         var view = JsonSerializer.Deserialize<TView>(payloadJson, jsonOptions)
             ?? throw new InvalidOperationException(

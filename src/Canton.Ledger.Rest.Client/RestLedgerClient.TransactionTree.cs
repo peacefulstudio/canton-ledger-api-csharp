@@ -9,7 +9,7 @@ using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Rest.Client;
 
-public sealed partial class RestLedgerClient
+internal sealed partial class RestLedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
@@ -36,30 +36,18 @@ public sealed partial class RestLedgerClient
             cancellationToken);
     }
 
-    /// <summary>
-    /// Reads the transaction committed at <paramref name="offset"/> and returns it with its
-    /// parent/child hierarchy intact, as the tree-shaped counterpart to
-    /// <see cref="GetUpdateByOffsetAsync"/>.
-    /// </summary>
+    /// <inheritdoc />
     /// <remarks>
-    /// Always reads the ledger-effects view, because hierarchy is only meaningful over creates and
-    /// exercises. An update at that offset which is not a transaction, or whose node ids cannot
-    /// describe a tree, throws <see cref="InvalidOperationException"/> rather than yielding a
-    /// partial or silently wrong tree.
+    /// The participant reports the hierarchy implicitly, as node ids on the events of the ordinary
+    /// ledger-effects response, so the tree is rebuilt from the same response the flat point read
+    /// decodes rather than from a second request. Node ids that cannot describe a tree surface as a
+    /// <see cref="MalformedTransactionTreeException"/> carried in
+    /// <see cref="Exception.InnerException"/>.
     /// </remarks>
-    /// <param name="offset">The absolute offset to read, which must be positive.</param>
-    /// <param name="submitter">The parties to read the transaction's events as.</param>
-    /// <param name="cancellationToken">Cancels the read.</param>
-    /// <returns>The transaction committed at <paramref name="offset"/>, with its hierarchy intact.</returns>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is zero or negative.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// The update at that offset is not a transaction, or its events could not be decoded. Node ids that
-    /// cannot describe a tree surface here as a <see cref="MalformedTransactionTreeException"/> carried in
-    /// <see cref="Exception.InnerException"/>, so catch this base type rather than the derived one.
-    /// </exception>
     public Task<TransactionTree> GetUpdateTreeByOffsetAsync(
         long offset,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
@@ -71,6 +59,7 @@ public sealed partial class RestLedgerClient
         };
 
         return GetUpdateAsync(
-            UpdateByOffsetPath, request, $"offset {offset}", RestTransactionTreeProjector.Project, cancellationToken);
+            UpdateByOffsetPath, request, $"offset {offset}", RestTransactionTreeProjector.Project,
+            timeout, cancellationToken);
     }
 }

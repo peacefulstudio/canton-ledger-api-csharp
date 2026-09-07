@@ -78,7 +78,7 @@ internal interface ISampleInterface : IDamlInterface, IHasView<SampleView>
         new(new Identifier("ipkg456", "Test.Module", "SampleInterface"), DamlTypeKind.Interface, "test-interface-package");
 }
 
-internal sealed record SampleView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord
+internal sealed record SampleView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord<SampleView>
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
 

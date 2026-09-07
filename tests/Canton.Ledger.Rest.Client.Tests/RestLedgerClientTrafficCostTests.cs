@@ -32,7 +32,7 @@ public sealed class RestLedgerClientTrafficCostTests : IDisposable
         }
     }
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -40,6 +40,9 @@ public sealed class RestLedgerClientTrafficCostTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport, string? userId = "test-user")
@@ -226,7 +229,9 @@ public sealed class RestLedgerClientTrafficCostTests : IDisposable
         var act = () => client.EstimateTrafficCostAsync(
             SingleCreateSubmission(), cancellationToken: TestContext.Current.CancellationToken);
 
-        await act.Should().ThrowAsync<JsonException>();
+        var thrown = await act.Should().ThrowAsync<LedgerOperationException>();
+        thrown.Which.Message.Should().Contain("malformed traffic-cost estimate response body");
+        thrown.Which.InnerException.Should().BeOfType<JsonException>();
     }
 
     [Fact]

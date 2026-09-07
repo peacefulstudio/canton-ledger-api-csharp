@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Commands;
+using Canton.Ledger.Kernel.Wire;
 using ProtoCompletion = Com.Daml.Ledger.Api.V2.Completion;
 using ProtoSynchronizerTime = Com.Daml.Ledger.Api.V2.SynchronizerTime;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -37,7 +38,7 @@ internal static class GrpcCompletionProjector
 
     private static RuntimeCommands.CommandId ToRequiredCommandId(ProtoCompletion completion) =>
         string.IsNullOrEmpty(completion.CommandId)
-            ? throw GrpcTransactionResultProjector.MalformedResponse(
+            ? throw MalformedResponse.MissingRequiredField(
                 $"the completion at offset {completion.Offset} has no command_id")
             : (RuntimeCommands.CommandId)completion.CommandId;
 

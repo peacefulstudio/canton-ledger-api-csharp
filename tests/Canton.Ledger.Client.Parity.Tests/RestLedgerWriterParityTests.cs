@@ -25,29 +25,29 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
         + "(canton-localnet up && canton-localnet wait-ready) to run this parity test.";
 
     private const string ExerciseResultQuarantineMessage =
-        "Quarantined on the exercise response: the create body of this parity suite now decodes "
-        + "against a live participant, but the exercise body cannot. The client now requests the "
-        + "ledger-effects transaction shape on submit-and-wait-for-transaction, so the transaction "
-        + "does surface an ExercisedEvent, whose choiceArgument and exerciseResult then both arrive "
-        + "as {}, an untyped wire Value with no sum case set that the decoder cannot resolve "
-        + "without knowing the Daml type. That cause was measured against a live participant. This lane "
-        + "opens one writer for both parity bodies, so the create body is held here with the "
-        + "exercise body it cannot be separated from. The quarantine lifts when the decode fix "
-        + "lands; the interim participant "
-        + "behavior is pinned by RestExerciseQuarantinePinTests in Canton.Ledger.Rest.Client.Tests.";
+        "Quarantined on the exercise response, not on the submission: the participant accepts the "
+        + "exercise and commits it. The client now requests the ledger-effects transaction shape on "
+        + "submit-and-wait-for-transaction, so the transaction does surface an ExercisedEvent, whose "
+        + "choiceArgument and exerciseResult then both arrive as {}, an untyped wire Value with no "
+        + "sum case set that the decoder cannot resolve without knowing the Daml type. That cause "
+        + "was measured against a live participant. The create and fire-and-forget bodies of this "
+        + "suite decode no choice result and run on this lane. The quarantine lifts when the decode "
+        + "fix lands; the interim participant behavior is pinned by RestExerciseQuarantinePinTests "
+        + "in Canton.Ledger.Rest.Client.Tests.";
+
+    /// <inheritdoc />
+    protected override string? ExerciseResultDecodeQuarantine => ExerciseResultQuarantineMessage;
 
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
-    protected override async Task<CapabilityLane<(ILedgerWriter Writer, Party Owner)>> OpenWriterAsync(
+    protected override async Task<CapabilityLane<(ILedgerWriter Writer, ICantonLedgerClient Client, Party Owner)>> OpenWriterAsync(
         CancellationToken cancellationToken)
     {
         if (!EndpointDiscovery.IsLocalnetAvailable())
         {
             Assert.Skip(SkipMessage);
         }
-
-        Assert.Skip(ExerciseResultQuarantineMessage);
 
         var fixture = LocalnetFixture.FromEnvironment();
         ServiceProvider? services = null;
@@ -69,12 +69,15 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
                 fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            var writer = services.GetRequiredService<RestLedgerClient>();
-            return new CapabilityLane<(ILedgerWriter, Party)>((writer, new Party(party.PartyId)), async () =>
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-                await fixture.DisposeAsync().ConfigureAwait(false);
-            });
+            var writer = services.GetRequiredService<ILedgerWriter>();
+            var client = services.GetRequiredService<ICantonLedgerClient>();
+            return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>(
+                (writer, client, new Party(party.PartyId)),
+                async () =>
+                {
+                    await services.DisposeAsync().ConfigureAwait(false);
+                    await fixture.DisposeAsync().ConfigureAwait(false);
+                });
         }
         catch
         {

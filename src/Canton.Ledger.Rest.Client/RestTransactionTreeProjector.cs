@@ -1,8 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Globalization;
-using Canton.Ledger.Abstractions;
+using Canton.Ledger.Kernel.Trees;
+using Canton.Ledger.Kernel.Wire;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -15,9 +15,11 @@ using WireTransaction = Canton.Ledger.Rest.Client.Raw.Transaction;
 namespace Canton.Ledger.Rest.Client;
 
 /// <summary>
-/// Rebuilds the parent/child hierarchy a participant reports implicitly on a ledger-effects
-/// transaction — each exercise names the highest node id in the subtree it caused — into a
-/// <see cref="TransactionTree"/>. Mirrors the gRPC transport's <c>GrpcTransactionTreeProjector</c>.
+/// Reads a JSON Ledger API transaction into the nodes <see cref="TreeShape"/> assembles, and returns
+/// the assembled <see cref="TransactionTree"/>. The hierarchy a participant reports implicitly —
+/// each exercise names the highest node id in the subtree it caused — is rebuilt in
+/// <see cref="TreeShape"/>, which the gRPC transport's <c>GrpcTransactionTreeProjector</c> feeds the
+/// same way from proto events, so both transports share one assembler and differ only in wire vocabulary.
 /// </summary>
 internal static class RestTransactionTreeProjector
 {
@@ -25,93 +27,41 @@ internal static class RestTransactionTreeProjector
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
-        var roots = new List<TreeEvent>();
-        var openExercises = new Stack<OpenExercise>();
-        var previousNodeId = -1;
-
-        foreach (var evt in transaction.Events ?? [])
-        {
-            var nodeId = NodeIdOf(evt);
-            if (nodeId <= previousNodeId)
-            {
-                throw NotATree(
-                    $"node id {nodeId} follows node id {previousNodeId}, but node ids must strictly ascend");
-            }
-            previousNodeId = nodeId;
-
-            while (openExercises.Count > 0 && nodeId > openExercises.Peek().LastDescendantNodeId)
-            {
-                Emit(Close(openExercises.Pop()), openExercises, roots);
-            }
-
-            if (evt!.ExercisedEvent is { } exercised)
-            {
-                openExercises.Push(OpenSubtree(exercised, nodeId, openExercises));
-            }
-            else
-            {
-                Emit(ToCreatedNode(evt, nodeId), openExercises, roots);
-            }
-        }
-
-        while (openExercises.Count > 0)
-        {
-            Emit(Close(openExercises.Pop()), openExercises, roots);
-        }
-
+        var roots = TreeShape.Assemble((transaction.Events ?? []).Select(ToTreeNode));
         return new TransactionTree(
             transaction.UpdateId,
             LedgerOffset.At(RestWireConversions.ParseOffset(transaction.Offset)),
             roots);
     }
 
-    private static OpenExercise OpenSubtree(WireExercisedEvent exercised, int nodeId, Stack<OpenExercise> openExercises)
+    private static TreeNode ToTreeNode(WireEvent? evt)
     {
-        var lastDescendantNodeId = exercised.LastDescendantNodeId
-            ?? throw NotATree(
-                $"the exercise of '{exercised.Choice}' at node id {nodeId} states no last descendant node id, "
-                + "so the extent of the subtree it caused is unknowable");
-
-        if (lastDescendantNodeId < nodeId)
-        {
-            throw NotATree(
-                $"the exercise of '{exercised.Choice}' at node id {nodeId} claims a last descendant node id of "
-                + $"{lastDescendantNodeId}, which precedes the exercise itself");
-        }
-
-        if (openExercises.Count > 0 && lastDescendantNodeId > openExercises.Peek().LastDescendantNodeId)
-        {
-            var enclosing = openExercises.Peek();
-            throw NotATree(
-                $"the subtree of '{exercised.Choice}' at node id {nodeId} ends at node id {lastDescendantNodeId}, "
-                + $"past the end ({enclosing.LastDescendantNodeId}) of the enclosing subtree rooted at node id "
-                + $"{enclosing.NodeId}, so the two overlap instead of nesting");
-        }
-
-        return new OpenExercise(exercised, nodeId, lastDescendantNodeId);
+        var nodeId = NodeIdOf(evt);
+        return new TreeNode(nodeId, () => Decode(evt!, nodeId));
     }
 
-    private static void Emit(TreeEvent node, Stack<OpenExercise> openExercises, List<TreeEvent> roots)
-    {
-        if (openExercises.Count > 0)
-        {
-            openExercises.Peek().Children.Add(node);
-        }
-        else
-        {
-            roots.Add(node);
-        }
-    }
+    private static TreeNodeContent Decode(WireEvent evt, int nodeId) =>
+        evt.ExercisedEvent is { } exercised
+            ? new TreeNodeContent.Subtree(
+                exercised.Choice,
+                LastDescendantNodeIdOf(exercised, nodeId),
+                children => Close(exercised, nodeId, children))
+            : new TreeNodeContent.Leaf(ToCreatedNode(evt, nodeId));
 
-    private static TreeEvent Close(OpenExercise open)
+    private static int LastDescendantNodeIdOf(WireExercisedEvent exercised, int nodeId) =>
+        exercised.LastDescendantNodeId
+        ?? throw TreeShape.NotATree(
+            $"the exercise of '{exercised.Choice}' at node id {nodeId} states no last descendant node id, "
+            + "so the extent of the subtree it caused is unknowable");
+
+    private static TreeEvent Close(WireExercisedEvent exercised, int nodeId, IReadOnlyList<TreeEvent> children)
     {
-        var exercised = open.Wire;
         var templateId = exercised.TemplateId
-            ?? throw RestTransactionResultProjector.MalformedResponse(
+            ?? throw MalformedResponse.MissingRequiredField(
                 $"ExercisedEvent for contract '{exercised.ContractId}' has no templateId");
 
         return new TreeEvent.Exercised(
-            EventIdOf(open.NodeId),
+            TreeShape.EventIdOf(nodeId),
             exercised.ContractId,
             RestWireConversions.ToRuntimeIdentifier(templateId),
             exercised.InterfaceId is null ? null : RestWireConversions.ToRuntimeIdentifier(exercised.InterfaceId),
@@ -121,37 +71,35 @@ internal static class RestTransactionTreeProjector
             exercised.Consuming ?? false,
             RestWireConversions.ToPartyList(exercised.ActingParties),
             RestWireConversions.ToPartyList(exercised.WitnessParties),
-            open.Children);
+            children);
     }
 
     private static TreeEvent ToCreatedNode(WireEvent evt, int nodeId)
     {
         if (evt.CreatedEvent is not { } created)
         {
-            throw NotATree(
+            throw TreeShape.NotATree(
                 $"the event at node id {nodeId} is {DescribeVariant(evt)}, which has no place in a transaction tree; "
                 + "trees are read from ledger-effects transactions, whose events are creates and exercises only");
         }
 
         var templateId = created.TemplateId
-            ?? throw RestTransactionResultProjector.MalformedResponse(
+            ?? throw MalformedResponse.MissingRequiredField(
                 $"CreatedEvent for contract '{created.ContractId}' has no templateId");
         var createArgument = created.CreateArgument
-            ?? throw RestTransactionResultProjector.MalformedResponse(
+            ?? throw MalformedResponse.MissingRequiredField(
                 $"CreatedEvent for contract '{created.ContractId}' has no createArgument");
         var runtimeTemplateId = RestWireConversions.ToRuntimeIdentifier(templateId);
 
         return new TreeEvent.Created(
-            EventIdOf(nodeId),
+            TreeShape.EventIdOf(nodeId),
             created.ContractId,
             runtimeTemplateId,
             RestValueDecoder.ToDamlRecord(createArgument),
             RestWireConversions.ToPartyList(created.WitnessParties),
             RestWireConversions.ToPartyList(created.Signatories),
             RestWireConversions.ToPartyList(created.Observers),
-            created.ContractKey is null
-                ? null
-                : new ContractKey(RestValueDecoder.ToDamlValue(created.ContractKey), runtimeTemplateId),
+            RestWireConversions.ContractKeyOf(created, runtimeTemplateId),
             created.CreatedAt)
         {
             InterfaceIds = ToInterfaceIds(created),
@@ -169,7 +117,7 @@ internal static class RestTransactionTreeProjector
         foreach (var view in views)
         {
             var interfaceId = view?.InterfaceId
-                ?? throw RestTransactionResultProjector.MalformedResponse(
+                ?? throw MalformedResponse.MissingRequiredField(
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interfaceId");
             interfaceIds.Add(RestWireConversions.ToRuntimeIdentifier(interfaceId));
         }
@@ -180,7 +128,7 @@ internal static class RestTransactionTreeProjector
         evt?.CreatedEvent?.NodeId
         ?? evt?.ExercisedEvent?.NodeId
         ?? evt?.ArchivedEvent?.NodeId
-        ?? throw NotATree($"{DescribeVariant(evt)} carries no node id, so its place in the tree is unknowable");
+        ?? throw TreeShape.NotATree($"{DescribeVariant(evt)} carries no node id, so its place in the tree is unknowable");
 
     private static string DescribeVariant(WireEvent? evt) => evt switch
     {
@@ -189,20 +137,4 @@ internal static class RestTransactionTreeProjector
         { ArchivedEvent: not null } => "an ArchivedEvent",
         _ => "an event of no recognised kind",
     };
-
-    private static string EventIdOf(int nodeId) => nodeId.ToString(CultureInfo.InvariantCulture);
-
-    private static MalformedTransactionTreeException NotATree(string detail) =>
-        new($"Cannot reconstruct the transaction tree: {detail}.");
-
-    private sealed class OpenExercise(WireExercisedEvent wire, int nodeId, int lastDescendantNodeId)
-    {
-        public WireExercisedEvent Wire { get; } = wire;
-
-        public int NodeId { get; } = nodeId;
-
-        public int LastDescendantNodeId { get; } = lastDescendantNodeId;
-
-        public List<TreeEvent> Children { get; } = [];
-    }
 }

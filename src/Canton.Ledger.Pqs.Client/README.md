@@ -18,16 +18,21 @@ dotnet add package Canton.Ledger.Pqs.Client
 
 ### Basic Setup
 
+The client is entered through dependency injection: register it on an `IServiceCollection`, then
+resolve `IPqsClient`. The container binds and validates `PqsClientOptions` at startup and picks up a
+registered `NpgsqlDataSource` when one is present.
+
 ```csharp
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Pqs.Client;
+using Microsoft.Extensions.DependencyInjection;
 
-var options = new PqsClientOptions
-{
-    ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs"
-};
+var services = new ServiceCollection();
+services.AddPqsClient(options =>
+    options.ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs");
 
-var pqsClient = new PqsClient(options);
+await using var provider = services.BuildServiceProvider();
+var pqsClient = provider.GetRequiredService<IPqsClient>();
 ```
 
 ### Querying All Active Contracts
@@ -93,8 +98,16 @@ services.AddHealthChecks().AddPqsClient(tags: ["database", "ready"]);
 
 ### OpenTelemetry Tracing
 
+`Canton.Ledger.OpenTelemetry` registers every Canton client source at once:
+
 ```csharp
-tracing.AddSource(PqsClient.ActivitySourceName);
+tracing.AddCantonLedgerInstrumentation();
+```
+
+To register this source by hand, take the name from `Canton.Ledger.Kernel` — no reference to this package required:
+
+```csharp
+tracing.AddSource(LedgerActivitySourceNames.PqsClient);
 ```
 
 ### Custom JSON Serialization

@@ -404,7 +404,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/interactive-submission/preferred-package-version")]
-        Task<GetPreferredPackageVersionResponse> GetPreferredPackageVersion([Query(CollectionFormat.Multi)] IEnumerable<string> parties, [Query] string packageName, [Query] string synchronizerId, [Query] System.DateTimeOffset? vettingValidAt, CancellationToken cancellationToken = default);
+        Task<GetPreferredPackageVersionResponse> GetPreferredPackageVersion([Query(CollectionFormat.Multi)] IEnumerable<string>? parties = default, [Query] string? packageName = default, [Query] string? synchronizerId = default, [Query] System.DateTimeOffset? vettingValidAt = default, CancellationToken cancellationToken = default);
 
         /// <remarks>
         /// Compute the preferred packages for the vetting requirements in the request.
@@ -563,7 +563,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/parties")]
-        Task<ListKnownPartiesResponse> ListKnownParties([Query] string pageToken, [Query] int? pageSize, [Query] string identityProviderId, [Query] string filterParty, CancellationToken cancellationToken = default);
+        Task<ListKnownPartiesResponse> ListKnownParties([Query] string? pageToken = default, [Query] int? pageSize = default, [Query] string? identityProviderId = default, [Query] string? filterParty = default, CancellationToken cancellationToken = default);
 
         /// <remarks>
         /// Allocates a new party on a ledger and adds it to the set managed by the participant.
@@ -641,12 +641,26 @@ namespace Canton.Ledger.Rest.Client.Raw
         Task<GetParticipantIdResponse> GetParticipantId(CancellationToken cancellationToken = default);
 
         /// <remarks>
-        /// Get the party details of the given parties. Only known parties will be
-        /// returned in the list.
+        /// Update selected modifiable participant-local attributes of a party details resource.
+        /// Can update the participant's local information for local parties.
         /// </remarks>
-        /// <param name="parties">
-        /// The stable, unique identifier of the Daml parties.
-        /// Must be valid PartyIdStrings (as described in ``value.proto``).
+        /// <param name="party_details_party">party_details_party parameter</param>
+        /// <param name="body">body parameter</param>
+        /// <param name="cancellationToken">The cancellation token to cancel the request.</param>
+        /// <returns>OK</returns>
+        /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
+        [Headers("Accept: application/json", "Content-Type: application/json")]
+        [Patch("/v2/parties/{party_details.party}")]
+        Task<UpdatePartyDetailsResponse> UpdatePartyDetails([AliasAs("party_details.party")] string party_details_party, [Body] UpdatePartyDetailsRequest body, CancellationToken cancellationToken = default);
+
+        /// <remarks>
+        /// Get the party details of the given party. The party is returned only when
+        /// the participant knows it, so an unknown party answers with an empty list
+        /// rather than an error.
+        /// </remarks>
+        /// <param name="party">
+        /// The stable, unique identifier of the Daml party.
+        /// Must be a valid PartyIdString (as described in ``value.proto``).
         /// 
         /// Required: must be non-empty
         /// </param>
@@ -660,21 +674,8 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <returns>OK</returns>
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
-        [Get("/v2/parties/{parties}")]
-        Task<GetPartiesResponse> GetParties(System.Collections.Generic.IEnumerable<string> parties, [Query] string identityProviderId, CancellationToken cancellationToken = default);
-
-        /// <remarks>
-        /// Update selected modifiable participant-local attributes of a party details resource.
-        /// Can update the participant's local information for local parties.
-        /// </remarks>
-        /// <param name="party_details_party">party_details_party parameter</param>
-        /// <param name="body">body parameter</param>
-        /// <param name="cancellationToken">The cancellation token to cancel the request.</param>
-        /// <returns>OK</returns>
-        /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
-        [Headers("Accept: application/json", "Content-Type: application/json")]
-        [Patch("/v2/parties/{party_details.party}")]
-        Task<UpdatePartyDetailsResponse> UpdatePartyDetails([AliasAs("party_details.party")] string party_details_party, [Body] UpdatePartyDetailsRequest body, CancellationToken cancellationToken = default);
+        [Get("/v2/parties/{party}")]
+        Task<GetPartiesResponse> GetParties(string party, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
     }
 
@@ -738,7 +739,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/state/connected-synchronizers")]
-        Task<GetConnectedSynchronizersResponse> GetConnectedSynchronizers([Query] string party, [Query] string participantId, [Query] string identityProviderId, CancellationToken cancellationToken = default);
+        Task<GetConnectedSynchronizersResponse> GetConnectedSynchronizers([Query] string? party = default, [Query] string? participantId = default, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
         /// <remarks>Get the latest successfully pruned ledger offsets</remarks>
         /// <param name="cancellationToken">The cancellation token to cancel the request.</param>
@@ -893,7 +894,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/users")]
-        Task<ListUsersResponse> ListUsers([Query] string pageToken, [Query] int? pageSize, [Query] string identityProviderId, CancellationToken cancellationToken = default);
+        Task<ListUsersResponse> ListUsers([Query] string? pageToken = default, [Query] int? pageSize = default, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
         /// <remarks>Create a new user.</remarks>
         /// <param name="body">body parameter</param>
@@ -932,7 +933,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/users/{userId}")]
-        Task<GetUserResponse> GetUser(string userId, [Query] string identityProviderId, CancellationToken cancellationToken = default);
+        Task<GetUserResponse> GetUser(string userId, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
         /// <remarks>Delete an existing user and all its rights.</remarks>
         /// <param name="userId">
@@ -951,7 +952,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Delete("/v2/users/{userId}")]
-        Task<DeleteUserResponse> DeleteUser(string userId, [Query] string identityProviderId, CancellationToken cancellationToken = default);
+        Task<DeleteUserResponse> DeleteUser(string userId, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
         /// <remarks>Update the assignment of a user from one IDP to another.</remarks>
         /// <param name="userId">
@@ -985,7 +986,7 @@ namespace Canton.Ledger.Rest.Client.Raw
         /// <exception cref="ApiException">Thrown when the request returns a non-success status code.</exception>
         [Headers("Accept: application/json")]
         [Get("/v2/users/{userId}/rights")]
-        Task<ListUserRightsResponse> ListUserRights(string userId, [Query] string identityProviderId, CancellationToken cancellationToken = default);
+        Task<ListUserRightsResponse> ListUserRights(string userId, [Query] string? identityProviderId = default, CancellationToken cancellationToken = default);
 
         /// <remarks>
         /// Grant rights to a user.

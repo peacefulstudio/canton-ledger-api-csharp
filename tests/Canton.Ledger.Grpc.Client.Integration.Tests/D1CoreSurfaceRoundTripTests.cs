@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -17,9 +16,6 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class D1CoreSurfaceRoundTripTests
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
-
     private const string SkipMessage =
         "Skipping: set CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL, _CLIENT_ID, _CLIENT_SECRET "
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
@@ -27,15 +23,6 @@ public class D1CoreSurfaceRoundTripTests
 
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
-
-    private static LedgerClient NewClient(LocalnetFixture fixture, string userId)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        return new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
-    }
 
     [Fact]
     public async Task GetLedgerApiVersionAsync_returns_a_nonempty_version()
@@ -46,9 +33,10 @@ public class D1CoreSurfaceRoundTripTests
         }
 
         await using var fixture = LocalnetFixture.FromEnvironment();
-        using var client = NewClient(fixture, fixture.ValidatorUserId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, fixture.ValidatorUserId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
-        var version = await client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
+        var version = await client.GetLedgerApiVersionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(string.IsNullOrWhiteSpace(version), "Ledger API version must not be empty");
     }
@@ -64,7 +52,8 @@ public class D1CoreSurfaceRoundTripTests
         await using var fixture = LocalnetFixture.FromEnvironment();
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
-        using var client = NewClient(fixture, fixture.ValidatorUserId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, fixture.ValidatorUserId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var synchronizers = await client.GetConnectedSynchronizersAsync(
             owner, cancellationToken: TestContext.Current.CancellationToken);
@@ -98,24 +87,26 @@ public class D1CoreSurfaceRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var client = NewClient(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var submission = RuntimeCommands.CommandsSubmission
             .Single(RuntimeCommands.CreateCommand.For(new Marker(owner)))
             .WithActAs(owner)
             .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()));
 
-        var submitOutcome = await client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
+        var submitOutcome = await client.TrySubmitAndWaitForTransactionAsync(
+            submission, owner, cancellationToken: TestContext.Current.CancellationToken);
         var submitted = Assert.IsType<ExerciseOutcome<TransactionResult>.One>(submitOutcome).Result;
         var createdContractId = Assert.Single(submitted.CreatedContracts).ContractId;
 
         var byOffset = await client.GetUpdateByOffsetAsync(
-            submitted.CompletionOffset.Value, owner, TestContext.Current.CancellationToken);
+            submitted.CompletionOffset.Value, owner, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(submitted.UpdateId, byOffset.UpdateId);
         Assert.Contains(byOffset.CreatedContracts, c => c.ContractId == createdContractId);
 
         var byId = await client.GetUpdateByIdAsync(
-            submitted.UpdateId, owner, TestContext.Current.CancellationToken);
+            submitted.UpdateId, owner, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(submitted.UpdateId, byId.UpdateId);
         Assert.Contains(byId.CreatedContracts, c => c.ContractId == createdContractId);
     }

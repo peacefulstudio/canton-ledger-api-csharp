@@ -153,22 +153,34 @@ public class StreamEventClassifierTests
     [Theory]
     [InlineData(typeof(OperationCanceledException))]
     [InlineData(typeof(TaskCanceledException))]
-    public void IsDecodeFailure_never_swallows_a_cancellation(Type cancellation)
+    public void IsNotCancellation_never_swallows_a_cancellation(Type cancellation)
     {
-        StreamEventClassifier.IsDecodeFailure((Exception)Activator.CreateInstance(cancellation)!)
+        StreamEventClassifier.IsNotCancellation((Exception)Activator.CreateInstance(cancellation)!)
             .Should().BeFalse();
     }
 
     [Fact]
-    public void IsDecodeFailure_covers_any_other_exception_so_no_event_is_dropped()
+    public void IsNotCancellation_covers_any_other_exception_so_no_event_is_dropped()
     {
-        StreamEventClassifier.IsDecodeFailure(new FormatException()).Should().BeTrue();
+        StreamEventClassifier.IsNotCancellation(new FormatException()).Should().BeTrue();
     }
 
-    private sealed record SubscribedMarker : IDamlType
+    private sealed record SubscribedMarker : ITemplate, IDamlRecord<SubscribedMarker>
     {
         public static DamlTypeDescriptor DamlTypeId =>
             throw new NotSupportedException(
                 "SubscribedMarker is a degenerate test double: the classifier is told whether the marker matched, never asked.");
+
+        public static Identifier TemplateId => DamlTypeId.Identifier;
+
+        public static string PackageId => DamlTypeId.Identifier.PackageId;
+
+        public static string PackageName => DamlTypeId.PackageName;
+
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public DamlRecord ToRecord() => DamlRecord.Create();
+
+        public static SubscribedMarker FromRecord(DamlRecord record) => new();
     }
 }

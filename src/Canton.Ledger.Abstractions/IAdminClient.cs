@@ -7,6 +7,13 @@ namespace Canton.Ledger.Abstractions;
 /// Client interface for Canton participant administration.
 /// Provides methods for managing parties, users, and packages.
 /// </summary>
+/// <remarks>
+/// Every member rejects a <see langword="null"/> reference argument with an
+/// <see cref="ArgumentNullException"/> naming the parameter, thrown synchronously. An identifier is
+/// additionally rejected for being empty or whitespace only when its underlying request field is
+/// Required and the Ledger API gives the empty string no meaning; where the field is Optional and the
+/// empty string carries a documented meaning, it is accepted and that meaning applies.
+/// </remarks>
 public interface IAdminClient : IDisposable
 {
     /// <summary>
@@ -17,7 +24,10 @@ public interface IAdminClient : IDisposable
     /// <summary>
     /// Allocates a new party on the ledger.
     /// </summary>
-    /// <param name="partyIdHint">A hint for the party ID (may be modified by the ledger).</param>
+    /// <param name="partyIdHint">
+    /// A hint for the party ID, which the participant may modify or ignore entirely. An empty string
+    /// gives no hint and lets the participant choose the party ID.
+    /// </param>
     /// <param name="synchronizerId">
     /// Optional id of the synchronizer to allocate the party on. Required when the participant
     /// is connected to more than one synchronizer — otherwise Canton rejects the request with
@@ -32,8 +42,16 @@ public interface IAdminClient : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets details for the specified parties.
+    /// Gets details for the specified parties. Only parties the participant knows come back, so a
+    /// read of several parties can answer with fewer details than it asked for, and an unknown
+    /// party is an absence rather than an error.
     /// </summary>
+    /// <remarks>
+    /// The two transports charge differently for this read. The gRPC Ledger API takes the parties as
+    /// a repeated request field and serves them in one round trip; the JSON Ledger API serves
+    /// <c>GET /v2/parties/{party}</c> one party at a time, so an implementation over it costs one
+    /// round trip per party. The result is the same either way — only the traffic differs.
+    /// </remarks>
     Task<IReadOnlyList<PartyDetails>> GetPartiesAsync(
         IEnumerable<string> partyIds,
         CancellationToken cancellationToken = default);
@@ -60,6 +78,13 @@ public interface IAdminClient : IDisposable
     /// <summary>
     /// Gets details for a user.
     /// </summary>
+    /// <param name="userId">
+    /// The user whose details to retrieve. An empty string retrieves the authenticated user.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The user's details, or <see langword="null"/> when the user does not exist.
+    /// </returns>
     Task<UserDetails?> GetUserAsync(
         string userId,
         CancellationToken cancellationToken = default);

@@ -43,6 +43,10 @@ public static class LedgerOutcomes
     /// <summary>Builds a transport-level <see cref="ExerciseOutcome{T}.InfraError"/> outcome.</summary>
     /// <typeparam name="T">The result type the failed outcome is for.</typeparam>
     /// <returns>The infrastructure-error outcome.</returns>
-    public static ExerciseOutcome<T> InfraError<T>(int statusCode, string message, Exception? sourceException = null) =>
-        new ExerciseOutcome<T>.InfraError(statusCode, message, sourceException);
+    public static ExerciseOutcome<T> InfraError<T>(
+        int statusCode,
+        string message,
+        DamlErrorCategory? category = null,
+        Exception? sourceException = null) =>
+        new ExerciseOutcome<T>.InfraError(statusCode, message, category, sourceException);
 }

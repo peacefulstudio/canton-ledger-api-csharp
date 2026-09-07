@@ -32,6 +32,48 @@ public class CommandBuilderTests
             new RuntimeCommands.ChoiceName(choice),
             DamlUnit.Instance);
 
+    private static readonly DateTimeOffset LedgerTimeBound =
+        new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void BuildCommands_maps_a_relative_min_ledger_time_to_min_ledger_time_rel()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromSeconds(5)));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.MinLedgerTimeRel.Should().NotBeNull(
+            "a caller's do-not-commit-before bound is dropped on the floor while the field stays unset");
+        commands.MinLedgerTimeRel.ToTimeSpan().Should().Be(TimeSpan.FromSeconds(5));
+        commands.MinLedgerTimeAbs.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_maps_an_absolute_min_ledger_time_to_min_ledger_time_abs()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Absolute(LedgerTimeBound));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.MinLedgerTimeAbs.Should().NotBeNull();
+        commands.MinLedgerTimeAbs.ToDateTimeOffset().Should().Be(LedgerTimeBound);
+        commands.MinLedgerTimeRel.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_both_min_ledger_time_bounds_unset_when_the_submission_imposes_none()
+    {
+        var commands = Builder().BuildCommands(
+            RuntimeCommands.CommandsSubmission.Single(Create()).WithActAs(Alice));
+
+        commands.MinLedgerTimeAbs.Should().BeNull();
+        commands.MinLedgerTimeRel.Should().BeNull();
+    }
+
     [Fact]
     public void BuildCommands_sets_command_id_and_workflow_id()
     {

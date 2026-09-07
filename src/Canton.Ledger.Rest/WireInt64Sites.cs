@@ -33,6 +33,7 @@ internal static class WireInt64Sites
                 "totalTrafficCostEstimation",
             ],
             [typeof(CreatedEvent)] = ["offset"],
+            [typeof(ExecuteSubmissionAndWaitResponse)] = ["completionOffset"],
             [typeof(ExercisedEvent)] = ["offset"],
             [typeof(GetActiveContractsPageResponse)] = ["activeAtOffset"],
             [typeof(GetLatestPrunedOffsetsResponse)] =

@@ -6,6 +6,7 @@
 #nullable enable
 
 using Daml.Ledger.Abstractions;
+using Daml.Ledger.Abstractions.Extensions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -19,6 +20,13 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml interface RichTypes:Holding
 /// </summary>
+/// <remarks>
+/// Instance properties mirror the fields of the interface view <see cref="HoldingView"/>,
+/// which implements this marker, so a view can be read through a marker-typed variable.
+/// <c>==</c> between marker-typed variables compares by reference equality; view payloads
+/// materialize as concrete <see cref="HoldingView"/> values, whose record value equality
+/// applies once concretely typed.
+/// </remarks>
 public interface IHolding : IDamlInterface, IHasView<HoldingView>
 {
     /// <summary>Gets the interface identifier.</summary>
@@ -39,8 +47,12 @@ public interface IHolding : IDamlInterface, IHasView<HoldingView>
     /// <summary>Gets the compile-time Daml type descriptor.</summary>
     static DamlTypeDescriptor global::Daml.Runtime.IDamlType.DamlTypeId => new(new Identifier("3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc", "RichTypes", "Holding"), DamlTypeKind.Interface, "richtypes");
 
-    // Interface method Archive.
-    // Choice Archive() -> DamlUnit
+    /// <summary>Gets the pure type witness pairing this marker with its view record <see cref="HoldingView"/>; passing it to a generic method infers both type parameters from one argument.</summary>
+    public static ViewDescriptor<IHolding, HoldingView> View { get; } = new();
+
+    /// <summary>Gets the amount field of the interface view.</summary>
+    decimal Amount { get; }
+
 }
 
 /// <summary>
@@ -48,7 +60,7 @@ public interface IHolding : IDamlInterface, IHasView<HoldingView>
 /// One method per choice; each submits an interface-typed
 /// <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> built via
 /// <see cref="global::Daml.Runtime.Commands.ExerciseCommand.ForInterface{TInterface}(global::Daml.Runtime.Contracts.ContractId{TInterface},global::Daml.Runtime.Commands.ChoiceName,global::Daml.Runtime.Data.DamlValue)"/>
-/// through <see cref="global::Daml.Ledger.Abstractions.ILedgerWriter.TrySubmitAndWaitForTransactionAsync"/>
+/// through <see cref="global::Daml.Ledger.Abstractions.Extensions.SingleCommandExtensions.TrySubmitSingleAsync"/>
 /// and surfaces the raw <see cref="global::Daml.Runtime.Outcomes.ExerciseOutcome{TransactionResult}"/> —
 /// interface choices have no typed <c>&lt;Choice&gt;Result</c> projection because the
 /// implementing template (and therefore the produced contracts' shapes) is unknown
@@ -72,34 +84,28 @@ public static class IHoldingExtensions
     /// <summary>
     /// Exercises the <c>Archive</c> interface choice on this contract id, submitting the
     /// resulting <see cref="global::Daml.Runtime.Commands.ExerciseCommand"/> through
-    /// <see cref="global::Daml.Ledger.Abstractions.ILedgerWriter.TrySubmitAndWaitForTransactionAsync"/> and awaiting the outcome.
+    /// <see cref="global::Daml.Ledger.Abstractions.Extensions.SingleCommandExtensions.TrySubmitSingleAsync"/>.
     /// </summary>
     /// <param name="contractId">The interface-typed contract id to exercise on.</param>
     /// <param name="client">The ledger client.</param>
-    /// <param name="actAs">The party submitting the command.</param>
+    /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>), so a submitter that must read contracts it does not act as stays expressible.</param>
     /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
-    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
-    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public static async Task<ExerciseOutcome<TransactionResult>> ArchiveAsync(
+    public static Task<ExerciseOutcome<TransactionResult>> ArchiveAsync(
         this ContractId<IHolding> contractId,
         ILedgerWriter client,
-        Party actAs,
+        SubmitterInfo submitter,
         string? workflowId = null,
         CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+
         var command = contractId.ArchiveCommand();
 
-        var submission = CommandsSubmission.Single(command)
-            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
-        if (!string.IsNullOrEmpty(workflowId))
-        {
-            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
-        }
-
-        return await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+        return client.TrySubmitSingleAsync(command, submitter, workflowId, commandId, timeout, cancellationToken);
     }
 }

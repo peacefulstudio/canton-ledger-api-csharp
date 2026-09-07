@@ -51,7 +51,7 @@ public class RestLedgerCantonReadsConformanceTests
         var submitter = new SubmitterInfo(owner, new HashSet<Party>());
 
         var update = await lane.LedgerClient.GetUpdateByOffsetAsync(
-            submitted.CompletionOffset.Value, submitter, TestContext.Current.CancellationToken);
+            submitted.CompletionOffset.Value, submitter, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(submitted.UpdateId, update.UpdateId);
         Assert.Equal(submitted.CompletionOffset.Value, update.CompletionOffset.Value);
@@ -67,7 +67,7 @@ public class RestLedgerCantonReadsConformanceTests
         var submitter = new SubmitterInfo(owner, new HashSet<Party>());
 
         var update = await lane.LedgerClient.GetUpdateByIdAsync(
-            submitted.UpdateId, submitter, TestContext.Current.CancellationToken);
+            submitted.UpdateId, submitter, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(submitted.UpdateId, update.UpdateId);
         Assert.Equal(submitted.CompletionOffset.Value, update.CompletionOffset.Value);

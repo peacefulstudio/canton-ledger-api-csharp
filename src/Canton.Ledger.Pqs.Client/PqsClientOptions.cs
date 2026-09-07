@@ -19,7 +19,9 @@ public class PqsClientOptions
 
     /// <summary>
     /// Optional <see cref="JsonSerializerOptions"/> for deserializing PQS contract payloads.
-    /// When <c>null</c>, the client uses <see cref="PqsClient.DefaultJsonSerializerOptions"/>.
+    /// When <c>null</c>, the client uses its own defaults: case-insensitive property matching for
+    /// PQS's camelCase keys, Daml <c>Numeric</c> read from a JSON string, and Daml enums read as
+    /// plain strings.
     /// </summary>
     public JsonSerializerOptions? JsonSerializerOptions { get; set; }
 }

@@ -73,9 +73,8 @@ public sealed class FakeAdminClient : IAdminClient
 
     /// <inheritdoc />
     public Task<string> GetParticipantIdAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(_participantId ?? throw new NotSupportedException(
-            "FakeAdminClient has no participant id staged. Stage one with " +
-            "FakeAdminClient.Create().WithParticipantId(...).Build() before exercising this path."));
+        Task.FromResult(_participantId ?? throw StagingMissing(
+            "participant id", "one", "WithParticipantId(...)"));
 
     /// <inheritdoc />
     public Task<PartyDetails> AllocatePartyAsync(
@@ -83,14 +82,16 @@ public sealed class FakeAdminClient : IAdminClient
         string? synchronizerId = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(partyIdHint);
+
         if (_allocatedParties.TryGetValue(partyIdHint, out var details))
         {
             return Task.FromResult(details);
         }
 
-        throw new NotSupportedException(
-            $"FakeAdminClient has no allocated party staged for party id hint '{partyIdHint}'. Stage one with " +
-            $"FakeAdminClient.Create().WithAllocatedParty(\"{partyIdHint}\", ...).Build() before exercising this path.");
+        throw StagingMissing(
+            "allocated party", "one", $"WithAllocatedParty(\"{partyIdHint}\", ...)",
+            $" for party id hint '{partyIdHint}'");
     }
 
     /// <inheritdoc />
@@ -117,65 +118,80 @@ public sealed class FakeAdminClient : IAdminClient
         IEnumerable<UserRight>? rights = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(primaryParty);
+
         if (_users.TryGetValue(userId, out var details))
         {
             return Task.FromResult(details);
         }
 
-        throw new NotSupportedException(
-            $"FakeAdminClient has no user staged for user id '{userId}'. Stage one with " +
-            $"FakeAdminClient.Create().WithUser(new UserDetails(\"{userId}\", ...)).Build() before exercising this path.");
+        throw StagingMissing(
+            "user", "one", $"WithUser(new UserDetails(\"{userId}\", ...))", $" for user id '{userId}'");
     }
 
     /// <inheritdoc />
-    public Task<UserDetails?> GetUserAsync(string userId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(_users.TryGetValue(userId, out var details) ? details : null);
+    public Task<UserDetails?> GetUserAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userId);
+        return Task.FromResult(_users.TryGetValue(userId, out var details) ? details : null);
+    }
 
     /// <inheritdoc />
     public Task GrantUserRightsAsync(
         string userId,
         IEnumerable<UserRight> rights,
-        CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(rights);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
     public Task RevokeUserRightsAsync(
         string userId,
         IEnumerable<UserRight> rights,
-        CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(rights);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<UserRight>?> ListUserRightsAsync(
         string userId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(_userRights.TryGetValue(userId, out var rights) ? rights : null);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userId);
+        return Task.FromResult(_userRights.TryGetValue(userId, out var rights) ? rights : null);
+    }
 
     /// <inheritdoc />
     public Task<IReadOnlyList<UserDetails>> ListUsersAsync(
         int pageSize = 100,
         CancellationToken cancellationToken = default) =>
-        Task.FromResult(_knownUsers as IReadOnlyList<UserDetails> ?? throw new NotSupportedException(
-            "FakeAdminClient has no known users staged. Stage them with " +
-            "FakeAdminClient.Create().WithUsers(...).Build() before exercising this path."));
+        Task.FromResult(_knownUsers as IReadOnlyList<UserDetails> ?? throw StagingMissing(
+            "known users", "them", "WithUsers(...)"));
 
     /// <inheritdoc />
     public Task<IReadOnlyList<PackageDetails>> ListKnownPackagesAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult(_knownPackages as IReadOnlyList<PackageDetails> ?? throw new NotSupportedException(
-            "FakeAdminClient has no known packages staged. Stage them with " +
-            "FakeAdminClient.Create().WithKnownPackages(...).Build() before exercising this path."));
+        Task.FromResult(_knownPackages as IReadOnlyList<PackageDetails> ?? throw StagingMissing(
+            "known packages", "them", "WithKnownPackages(...)"));
 
     /// <inheritdoc />
     public Task<PackageArchive> GetPackageAsync(string packageId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+
         if (_packages.TryGetValue(packageId, out var archive))
         {
             return Task.FromResult(archive);
         }
 
-        throw new NotSupportedException(
-            $"FakeAdminClient has no package archive staged for package id '{packageId}'. Stage one with " +
-            $"FakeAdminClient.Create().WithPackage(\"{packageId}\", ...).Build() before exercising this path.");
+        throw StagingMissing(
+            "package archive", "one", $"WithPackage(\"{packageId}\", ...)", $" for package id '{packageId}'");
     }
 
     /// <inheritdoc />
@@ -185,9 +201,7 @@ public sealed class FakeAdminClient : IAdminClient
     {
         if (_vettedPackages is null)
         {
-            throw new NotSupportedException(
-                "FakeAdminClient has no vetted packages staged. Stage them with " +
-                "FakeAdminClient.Create().WithVettedPackages(...).Build() before exercising this path.");
+            throw StagingMissing("vetted packages", "them", "WithVettedPackages(...)");
         }
 
         var prefixes = packageNamePrefixes?.ToList();
@@ -204,12 +218,25 @@ public sealed class FakeAdminClient : IAdminClient
     public Task UploadDarAsync(
         byte[] darFile,
         string? submissionId = null,
-        CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfNullOrEmpty(darFile);
+        return Task.CompletedTask;
+    }
 
     /// <inheritdoc />
-    public Task ValidateDarAsync(byte[] darFile, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    public Task ValidateDarAsync(byte[] darFile, CancellationToken cancellationToken = default)
+    {
+        ThrowIfNullOrEmpty(darFile);
+        return Task.CompletedTask;
+    }
+
+    private static void ThrowIfNullOrEmpty(byte[] darFile)
+    {
+        ArgumentNullException.ThrowIfNull(darFile);
+        if (darFile.Length == 0)
+            throw new ArgumentException("DAR file must not be empty.", nameof(darFile));
+    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -217,7 +244,10 @@ public sealed class FakeAdminClient : IAdminClient
     }
 
     private IReadOnlyList<PartyDetails> KnownParties() =>
-        _knownParties ?? throw new NotSupportedException(
-            "FakeAdminClient has no known parties staged. Stage them with " +
-            "FakeAdminClient.Create().WithParties(...).Build() before exercising this path.");
+        _knownParties ?? throw StagingMissing("known parties", "them", "WithParties(...)");
+
+    private static NotSupportedException StagingMissing(
+        string what, string stageVerb, string builderCall, string context = "") =>
+        new($"FakeAdminClient has no {what} staged{context}. Stage {stageVerb} with " +
+            $"FakeAdminClient.Create().{builderCall}.Build() before exercising this path.");
 }

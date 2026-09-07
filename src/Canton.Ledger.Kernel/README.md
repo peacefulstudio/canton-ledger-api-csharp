@@ -1,6 +1,6 @@
 # Canton.Ledger.Kernel
 
-The transport-neutral client kernel for Canton participant nodes: the `Authentication`, `Telemetry`, `Resilience`, and `Streams` modules — the token providers that implement `Canton.Ledger.Abstractions.ITokenProvider`, the OpenTelemetry `ActivitySource` naming convention, and an opt-in Polly retry pipeline. Both the gRPC client and the future JSON client consume this package as peers — neither depends on the other. `Authentication` sits at the bottom of the kernel's namespace DAG (it depends on neither of the other modules), so it can later be extracted into its own package without a breaking change.
+The transport-neutral client kernel for Canton participant nodes: the `Authentication`, `Telemetry`, `Resilience`, `Streams`, `Trees`, `Results`, and `Wire` modules — the token providers that implement `Canton.Ledger.Abstractions.ITokenProvider`, the OpenTelemetry `ActivitySource` naming convention, an opt-in Polly retry pipeline, and the decisions both transports must make identically once their own wire vocabulary is decoded: rebuilding a transaction's hierarchy from its node ids, folding an exercise outcome, and naming a participant body that could not be read. Both the gRPC client and the future JSON client consume this package as peers — neither depends on the other. `Authentication` sits at the bottom of the kernel's namespace DAG (it depends on neither of the other modules), so it can later be extracted into its own package without a breaking change.
 
 ## Key Types
 

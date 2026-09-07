@@ -4,6 +4,7 @@
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
+using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using AwesomeAssertions;
 using Grpc.Core;
@@ -21,7 +22,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientD1SurfaceTests
+public sealed class LedgerClientD1SurfaceTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -55,6 +56,8 @@ public class LedgerClientD1SurfaceTests
         _interactiveSubmissionService = Substitute
             .ForPartsOf<Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(
         _options,
@@ -96,7 +99,7 @@ public class LedgerClientD1SurfaceTests
         StubGetConnectedSynchronizers(new GetConnectedSynchronizersResponse(), r => captured = r);
 
         var client = CreateClient();
-        await client.GetConnectedSynchronizersAsync(ActAs, "participant-1", TestContext.Current.CancellationToken);
+        await client.GetConnectedSynchronizersAsync(ActAs, "participant-1", cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         captured!.Party.Should().Be("party::alice");
@@ -134,7 +137,7 @@ public class LedgerClientD1SurfaceTests
                 () => { }));
 
         var client = CreateClient();
-        var version = await client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
+        var version = await client.GetLedgerApiVersionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         version.Should().Be("3.5.9");
     }
@@ -155,7 +158,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var result = await client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         result.UpdateId.Should().Be("update-1");
         result.CreatedContracts.Should().ContainSingle().Which.ContractId.Should().Be("00contract1");
@@ -168,23 +171,23 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var result = await client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         result.CommandId.Should().Be(new RuntimeCommands.CommandId("cmd-read"));
     }
 
     [Fact]
-    public async Task GetUpdateByOffsetAsync_yields_default_command_id_when_transaction_carries_none()
+    public async Task GetUpdateByOffsetAsync_yields_a_null_command_id_when_transaction_carries_none()
     {
         var transaction = new Transaction { UpdateId = "update-1", Offset = 42L };
         StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var result = await act.Should().NotThrowAsync(
             "a transaction the reader did not submit carries an empty command_id, which must not throw");
-        result.Subject.CommandId.Should().Be(default(RuntimeCommands.CommandId));
+        result.Subject.CommandId.Should().BeNull();
     }
 
     [Fact]
@@ -198,7 +201,7 @@ public class LedgerClientD1SurfaceTests
             new HashSet<Party> { (Party)"bob" });
 
         var client = CreateClient();
-        await client.GetUpdateByOffsetAsync(99L, submitter, TestContext.Current.CancellationToken);
+        await client.GetUpdateByOffsetAsync(99L, submitter, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         captured!.Offset.Should().Be(99L);
@@ -217,7 +220,7 @@ public class LedgerClientD1SurfaceTests
             new HashSet<Party> { (Party)"bob" });
 
         var client = CreateClient();
-        await client.GetUpdateByOffsetAsync(99L, submitter, TestContext.Current.CancellationToken);
+        await client.GetUpdateByOffsetAsync(99L, submitter, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         var filtersByParty = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
@@ -231,7 +234,7 @@ public class LedgerClientD1SurfaceTests
     public async Task GetUpdateByOffsetAsync_rejects_non_positive_offset(long offset)
     {
         var client = CreateClient();
-        var act = () => client.GetUpdateByOffsetAsync(offset, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(offset, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
@@ -247,7 +250,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Malformed response from ledger*offset 42*template_id*");
@@ -270,7 +273,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateByOffset(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Malformed response from ledger*offset 42*");
@@ -282,11 +285,125 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateByOffset(new GetUpdateResponse { Reassignment = new Reassignment() });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByOffsetAsync(1L, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(1L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Reassignment*");
     }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_nests_the_events_the_root_exercise_caused_underneath_it()
+    {
+        StubGetUpdateByOffset(new GetUpdateResponse
+        {
+            Transaction = TreeTransaction(
+                ExercisedNode(nodeId: 0, lastDescendantNodeId: 1, "00target", "ExecuteSwap"),
+                CreatedNode(nodeId: 1, "00child")),
+        });
+
+        var client = CreateClient();
+        var tree = await client.GetUpdateTreeByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        tree.UpdateId.Should().Be("update-1");
+        tree.CompletionOffset.Value.Should().Be(42L);
+        var root = tree.RootEvents.Should().ContainSingle().Subject
+            .Should().BeOfType<TreeEvent.Exercised>().Subject;
+        root.ChoiceName.Should().Be("ExecuteSwap");
+        root.ChildEvents.Should().ContainSingle().Which
+            .Should().BeOfType<TreeEvent.Created>().Subject.ContractId.Should().Be("00child");
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_asks_for_the_ledger_effects_view_at_the_requested_offset()
+    {
+        GetUpdateByOffsetRequest? captured = null;
+        StubGetUpdateByOffset(new GetUpdateResponse { Transaction = new Transaction() }, r => captured = r);
+
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"bob" });
+
+        var client = CreateClient();
+        await client.GetUpdateTreeByOffsetAsync(99L, submitter, cancellationToken: TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Offset.Should().Be(99L);
+        captured.UpdateFormat.IncludeTransactions.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
+        captured.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty.Keys.Should().BeEquivalentTo(["alice", "bob"]);
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public async Task GetUpdateTreeByOffsetAsync_rejects_non_positive_offset(long offset)
+    {
+        var client = CreateClient();
+        var act = () => client.GetUpdateTreeByOffsetAsync(offset, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_throws_when_update_is_not_a_transaction()
+    {
+        StubGetUpdateByOffset(new GetUpdateResponse { TopologyTransaction = new TopologyTransaction() });
+
+        var client = CreateClient();
+        var act = () => client.GetUpdateTreeByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*TopologyTransaction*");
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_names_the_lookup_offset_when_the_node_ids_cannot_form_a_tree()
+    {
+        StubGetUpdateByOffset(new GetUpdateResponse
+        {
+            Transaction = TreeTransaction(
+                ExercisedNode(nodeId: 0, lastDescendantNodeId: 2, "00outer", "Outer"),
+                ExercisedNode(nodeId: 1, lastDescendantNodeId: 5, "00straddles", "Straddles")),
+        });
+
+        var client = CreateClient();
+        var act = () => client.GetUpdateTreeByOffsetAsync(42L, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Match("Malformed response from ledger*offset 42*");
+        thrown.Which.InnerException.Should().BeOfType<MalformedTransactionTreeException>();
+    }
+
+    private static Transaction TreeTransaction(params Event[] events)
+    {
+        var transaction = new Transaction { UpdateId = "update-1", Offset = 42L, CommandId = "cmd-1" };
+        transaction.Events.AddRange(events);
+        return transaction;
+    }
+
+    private static Event CreatedNode(int nodeId, string contractId) => new()
+    {
+        Created = new ProtoCreatedEvent
+        {
+            NodeId = nodeId,
+            ContractId = contractId,
+            TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+            CreateArguments = new ProtoRecord(),
+        },
+    };
+
+    private static Event ExercisedNode(int nodeId, int lastDescendantNodeId, string contractId, string choice) => new()
+    {
+        Exercised = new ProtoExercisedEvent
+        {
+            NodeId = nodeId,
+            LastDescendantNodeId = lastDescendantNodeId,
+            ContractId = contractId,
+            TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
+            Choice = choice,
+            ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+        },
+    };
 
     [Fact]
     public async Task GetUpdateByIdAsync_projects_transaction()
@@ -295,7 +412,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateById(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var result = await client.GetUpdateByIdAsync("update-2", ActAs, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByIdAsync("update-2", ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         result.UpdateId.Should().Be("update-2");
     }
@@ -307,7 +424,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateById(new GetUpdateResponse { Transaction = new Transaction() }, r => captured = r);
 
         var client = CreateClient();
-        await client.GetUpdateByIdAsync("update-xyz", ActAs, TestContext.Current.CancellationToken);
+        await client.GetUpdateByIdAsync("update-xyz", ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         captured!.UpdateId.Should().Be("update-xyz");
@@ -324,7 +441,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateById(new GetUpdateResponse { Transaction = transaction });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByIdAsync("update-2", ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByIdAsync("update-2", ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Malformed response from ledger*update-2*template_id*");
@@ -336,7 +453,7 @@ public class LedgerClientD1SurfaceTests
         StubGetUpdateById(new GetUpdateResponse { TopologyTransaction = new TopologyTransaction() });
 
         var client = CreateClient();
-        var act = () => client.GetUpdateByIdAsync("update-3", ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByIdAsync("update-3", ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*TopologyTransaction*");
@@ -349,7 +466,7 @@ public class LedgerClientD1SurfaceTests
     public async Task GetUpdateByIdAsync_rejects_null_or_whitespace_updateId(string? updateId)
     {
         var client = CreateClient();
-        var act = () => client.GetUpdateByIdAsync(updateId!, ActAs, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByIdAsync(updateId!, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }

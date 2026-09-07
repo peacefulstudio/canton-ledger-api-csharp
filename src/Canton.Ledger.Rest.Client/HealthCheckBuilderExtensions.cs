@@ -15,12 +15,12 @@ public static class HealthCheckBuilderExtensions
 {
     /// <summary>
     /// Adds a health check that verifies connectivity to the Canton participant node over HTTP by
-    /// querying the ledger end via <see cref="ILedgerReader.GetLedgerEndAsync"/>. Requires
-    /// <see cref="RestLedgerClient"/> to be registered in the service collection (e.g. via
+    /// querying the ledger end via <see cref="ILedgerReader.GetLedgerEndAsync"/>. Requires the JSON
+    /// Ledger API adapter to be registered in the service collection (e.g. via
     /// <see cref="ServiceCollectionExtensions.AddRestLedgerClient(IServiceCollection, IConfiguration)"/>).
     /// </summary>
     /// <remarks>
-    /// The check resolves the concrete <see cref="RestLedgerClient"/> rather than
+    /// The check resolves that adapter's own registration rather than
     /// <see cref="ILedgerClient"/>, so a host wiring both transports gets a check that probes the
     /// HTTP endpoint specifically instead of whichever transport won the interface registration.
     /// <see cref="ILedgerReader.GetLedgerEndAsync"/> is not gated behind <c>participant_admin</c>,

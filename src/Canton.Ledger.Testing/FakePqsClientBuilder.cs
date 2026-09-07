@@ -46,7 +46,7 @@ public sealed class FakePqsClientBuilder
     public FakePqsClientBuilder WithInterfaceQueryResults<TInterface, TView>(
         params InterfaceContract<TInterface, TView>[] contracts)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         ArgumentNullException.ThrowIfNull(contracts);
         _interfaceResults[typeof(TInterface)] = contracts.ToArray();

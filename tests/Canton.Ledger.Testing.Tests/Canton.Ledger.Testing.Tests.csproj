@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.Testing\Canton.Ledger.Testing.csproj" />
+    <ProjectReference Include="..\Canton.Ledger.Testing.Helpers\Canton.Ledger.Testing.Helpers.csproj" />
   </ItemGroup>
 
 </Project>

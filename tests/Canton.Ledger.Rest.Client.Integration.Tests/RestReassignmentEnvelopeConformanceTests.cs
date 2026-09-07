@@ -52,7 +52,7 @@ public class RestReassignmentEnvelopeConformanceTests(ITestOutputHelper output)
 
         var act = () => lane.LedgerClient.SubmitReassignmentAsync(
             ReassignmentSubmission.Of(new UnassignCommand(contractId, synchronizer, synchronizer), owner),
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<LedgerOperationException>();
         output.WriteLine($"Participant answered: {thrown.Which.Message}");

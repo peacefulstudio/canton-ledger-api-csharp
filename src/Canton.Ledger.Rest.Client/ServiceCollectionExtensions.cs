@@ -19,9 +19,12 @@ namespace Canton.Ledger.Rest.Client;
 /// <summary>
 /// Extension methods for registering the Canton JSON Ledger API client with the dependency
 /// injection container. <see cref="AddRestLedgerClient(IServiceCollection, IConfiguration)"/>
-/// registers the supported <see cref="RestLedgerClient"/> adapter behind the full Canton participant
-/// surface <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient"/> (and the base
-/// <see cref="ILedgerClient"/>, backed by the same instance); <see cref="AddRestLedgerRawApis(IServiceCollection, IConfiguration)"/>
+/// registers the supported JSON Ledger API adapter behind the full Canton participant
+/// surface <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient"/> and the four narrower service
+/// types it serves — <see cref="ILedgerClient"/>, <see cref="ILedgerReader"/>,
+/// <see cref="ILedgerWriter"/> and <see cref="ILedgerStreamer"/> — every one of them
+/// <see cref="ServiceLifetime.Transient"/>, so each injection point receives its own adapter over the
+/// shared <see cref="HttpClient"/> rather than a shared instance; <see cref="AddRestLedgerRawApis(IServiceCollection, IConfiguration)"/>
 /// opts into the low-level Refitter-generated per-service interfaces from
 /// <c>Canton.Ledger.Rest.Client.Raw</c>. Both build over one named <see cref="HttpClient"/> carrying
 /// the bearer-auth and activity handlers.
@@ -35,7 +38,11 @@ public static class ServiceCollectionExtensions
     public const string HttpClientName = "Canton.Ledger.Rest";
 
     /// <summary>
-    /// Registers the supported <see cref="RestLedgerClient"/> adapter as <see cref="ILedgerClient"/> (<see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/>, <see cref="ILedgerStreamer"/>)
+    /// Registers the supported JSON Ledger API adapter as
+    /// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient"/>, <see cref="ILedgerClient"/>,
+    /// <see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/> and <see cref="ILedgerStreamer"/>
+    /// (all <see cref="ServiceLifetime.Transient"/>, because the adapter is a thin per-resolution wrapper
+    /// over the shared <see cref="HttpClient"/>)
     /// and binds <see cref="RestLedgerClientOptions"/> from the provided configuration section.
     /// Options are validated at startup.
     /// </summary>
@@ -56,7 +63,11 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the supported <see cref="RestLedgerClient"/> adapter as <see cref="ILedgerClient"/> (<see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/>, <see cref="ILedgerStreamer"/>),
+    /// Registers the supported JSON Ledger API adapter as
+    /// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient"/>, <see cref="ILedgerClient"/>,
+    /// <see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/> and <see cref="ILedgerStreamer"/>
+    /// (all <see cref="ServiceLifetime.Transient"/>, because the adapter is a thin per-resolution wrapper
+    /// over the shared <see cref="HttpClient"/>),
     /// binds <see cref="RestLedgerClientOptions"/> from the provided configuration section, and
     /// auto-registers <see cref="ITokenProvider"/> as a
     /// <see cref="Canton.Ledger.Kernel.Authentication.TokenGeneration.ClientCredentialsProvider"/>
@@ -88,7 +99,11 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the supported <see cref="RestLedgerClient"/> adapter as <see cref="ILedgerClient"/> (<see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/>, <see cref="ILedgerStreamer"/>)
+    /// Registers the supported JSON Ledger API adapter as
+    /// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient"/>, <see cref="ILedgerClient"/>,
+    /// <see cref="ILedgerReader"/>, <see cref="ILedgerWriter"/> and <see cref="ILedgerStreamer"/>
+    /// (all <see cref="ServiceLifetime.Transient"/>, because the adapter is a thin per-resolution wrapper
+    /// over the shared <see cref="HttpClient"/>)
     /// and configures <see cref="RestLedgerClientOptions"/> using the provided action delegate.
     /// Options are validated at startup.
     /// </summary>
@@ -190,15 +205,12 @@ public static class ServiceCollectionExtensions
     {
         AddRestLedgerCore(services);
 
-        services.TryAddTransient(static sp => new RestLedgerClient(
-            sp.GetRequiredService<IHttpClientFactory>(),
-            sp.GetRequiredService<IOptions<RestLedgerClientOptions>>(),
-            sp.GetService<ILogger<RestLedgerClient>>()));
-        services.TryAddTransient<ILedgerReader>(static sp => sp.GetRequiredService<RestLedgerClient>());
-        services.TryAddTransient<ILedgerWriter>(static sp => sp.GetRequiredService<RestLedgerClient>());
-        services.TryAddTransient<ILedgerStreamer>(static sp => sp.GetRequiredService<RestLedgerClient>());
-        services.TryAddTransient<ILedgerClient>(static sp => sp.GetRequiredService<RestLedgerClient>());
-        services.TryAddTransient<Canton.Ledger.Abstractions.ICantonLedgerClient>(static sp => sp.GetRequiredService<RestLedgerClient>());
+        services.AddLedgerAdapter(
+            static sp => new RestLedgerClient(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                sp.GetRequiredService<IOptions<RestLedgerClientOptions>>(),
+                sp.GetService<ILogger<RestLedgerClient>>()),
+            ServiceLifetime.Transient);
 
         return services;
     }

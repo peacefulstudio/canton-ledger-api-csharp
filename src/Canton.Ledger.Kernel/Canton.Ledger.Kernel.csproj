@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>Canton.Ledger.Kernel</PackageId>
-    <Description>Transport-neutral client kernel for Canton participant nodes: OAuth2 client-credentials and static token providers implementing Canton.Ledger.Abstractions.ITokenProvider, the OpenTelemetry ActivitySource naming convention, and an opt-in Polly retry pipeline, consumed as peers by both the gRPC and HTTP clients.</Description>
+    <Description>Transport-neutral client kernel for Canton participant nodes: OAuth2 client-credentials and static token providers implementing Canton.Ledger.Abstractions.ITokenProvider, the OpenTelemetry ActivitySource naming convention, an opt-in Polly retry pipeline, and the shared transaction-tree assembler, exercise-outcome folds and malformed-response vocabulary, consumed as peers by both the gRPC and HTTP clients.</Description>
     <PackageTags>canton;daml;auth;oauth2;token;client-credentials;opentelemetry;resilience;polly</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -14,6 +14,7 @@
     <InternalsVisibleTo Include="Canton.Ledger.Rest.Client" />
     <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client" />
     <InternalsVisibleTo Include="Canton.Ledger.Pqs.Client.Tests" />
+    <InternalsVisibleTo Include="Canton.Ledger.Client.Parity.Tests" />
   </ItemGroup>
 
   <ItemGroup>

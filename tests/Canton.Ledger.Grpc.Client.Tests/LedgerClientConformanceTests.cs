@@ -50,6 +50,83 @@ public class LedgerClientConformanceTests : LedgerClientConformanceTests<GrpcCon
 
     protected override ILedgerClient CreateFaultingSnapshotClient() => BuildClient(snapshotFaultsMidStream: true);
 
+    protected override CommandIdConformanceFixture? CreateCommandIdFixture()
+    {
+        string? recorded = null;
+        var client = BuildSubmittingClient(commandId => recorded = commandId);
+
+        return new CommandIdConformanceFixture(
+            client,
+            (writer, commandId) => writer.TryExerciseAsync<DamlUnit>(ArchiveProbe, Reader, commandId: commandId),
+            (writer, commandId) => writer.TryCreateAsync(new GrpcConformanceProbe("party::alice"), Reader, commandId: commandId),
+            () => ValueTask.FromResult(recorded));
+    }
+
+    private static LedgerClient BuildSubmittingClient(Action<string> onCommandId)
+    {
+        var options = new LedgerClientOptions
+        {
+            GrpcAddress = "https://localhost:5001",
+            UserId = "conformance-user",
+        };
+        var callInvoker = Substitute.For<CallInvoker>();
+        var commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
+        var updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
+        var stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
+
+        commandService
+            .SubmitAndWaitForTransactionAsync(
+                Arg.Any<SubmitAndWaitForTransactionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                onCommandId(call.Arg<SubmitAndWaitForTransactionRequest>()!.Commands.CommandId);
+                return UnaryCall(new SubmitAndWaitForTransactionResponse { Transaction = SubmittedTransaction() });
+            });
+
+        var channel = GrpcChannel.ForAddress(options.GrpcAddress);
+        return new LedgerClient(
+            options,
+            channel,
+            commandService,
+            updateService,
+            stateService,
+            new StaticTokenProvider("conformance-token"));
+    }
+
+    private static Transaction SubmittedTransaction()
+    {
+        var transaction = new Transaction
+        {
+            UpdateId = "u-submitted",
+            Offset = LedgerEndOffset,
+            SynchronizerId = Synchronizer,
+        };
+        transaction.Events.Add(Creation());
+        transaction.Events.Add(new Event
+        {
+            Exercised = new ProtoExercisedEvent
+            {
+                ContractId = "00probe",
+                TemplateId = ProbeTemplate,
+                Choice = "Archive",
+                ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                Consuming = true,
+                Offset = ConsumedOffset,
+            },
+        });
+        return transaction;
+    }
+
+    private static readonly Daml.Runtime.Commands.ExerciseCommand ArchiveProbe = new(
+        GrpcConformanceProbe.TemplateId,
+        new ContractId<GrpcConformanceProbe>("00probe"),
+        new ChoiceName("Archive"),
+        DamlUnit.Instance);
+
     private static LedgerClient BuildClient(bool snapshotFaultsMidStream)
     {
         var options = new LedgerClientOptions
@@ -81,9 +158,10 @@ public class LedgerClientConformanceTests : LedgerClientConformanceTests<GrpcCon
                 Arg.Any<GetUpdatesRequest>(), Arg.Any<Metadata>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
             .Returns(call => ServerStream(UpdatesFor(call.Arg<GetUpdatesRequest>()!), afterItemsException: null));
 
+        var channel = GrpcChannel.ForAddress(options.GrpcAddress);
         return new LedgerClient(
             options,
-            GrpcChannel.ForAddress(options.GrpcAddress),
+            channel,
             commandService,
             updateService,
             stateService,
@@ -120,7 +198,7 @@ public class LedgerClientConformanceTests : LedgerClientConformanceTests<GrpcCon
         {
             ContractId = "00probe",
             TemplateId = ProbeTemplate,
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = CreatedOffset,
         },
     };
@@ -169,7 +247,7 @@ public class LedgerClientConformanceTests : LedgerClientConformanceTests<GrpcCon
             {
                 ContractId = contractId,
                 TemplateId = templateId,
-                CreateArguments = new ProtoRecord(),
+                CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                 Offset = offset,
             },
             SynchronizerId = Synchronizer,
@@ -197,7 +275,7 @@ public class LedgerClientConformanceTests : LedgerClientConformanceTests<GrpcCon
 
 /// <summary>The Daml marker the conformance scenario's snapshot and streams are filtered to.</summary>
 /// <param name="Owner">The party the probe contract is issued to.</param>
-public sealed record GrpcConformanceProbe(string Owner) : ITemplate
+public sealed record GrpcConformanceProbe(string Owner) : ITemplate, IDamlRecord<GrpcConformanceProbe>
 {
     /// <inheritdoc cref="ITemplate" />
     public static RuntimeIdentifier TemplateId { get; } = new("conformance-pkg", "Conformance.Probe", "Probe");
@@ -216,4 +294,9 @@ public sealed record GrpcConformanceProbe(string Owner) : ITemplate
 
     /// <inheritdoc cref="ITemplate" />
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty(Owner)));
+
+    /// <summary>Creates a probe from the wire record a created event carries.</summary>
+    /// <returns>The probe the record decodes to.</returns>
+    public static GrpcConformanceProbe FromRecord(DamlRecord record) =>
+        new(record.GetRequiredField("owner").As<DamlParty>().Value);
 }

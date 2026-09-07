@@ -67,4 +67,37 @@ public abstract class LedgerTransactionTreeParityTests
         flattened.CreatedContracts.Should().ContainSingle().Which.ContractId
             .Should().Be(tree.RootEvents.OfType<TreeEvent.Created>().Single().ContractId);
     }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_reads_the_committed_transaction_back_at_its_own_offset()
+    {
+        await using var lane = await OpenTransactionTreeAsync(TestContext.Current.CancellationToken);
+        var (client, owner) = lane.Capability;
+        var outcome = await client.TrySubmitAndWaitForTransactionTreeAsync(
+            CommandsSubmission.Single(CreateCommand.For(new Marker(owner))),
+            owner,
+            cancellationToken: TestContext.Current.CancellationToken);
+        var committed = outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.One>().Subject.Result;
+
+        var read = await client.GetUpdateTreeByOffsetAsync(
+            committed.CompletionOffset.Value, owner, cancellationToken: TestContext.Current.CancellationToken);
+
+        read.UpdateId.Should().Be(committed.UpdateId);
+        read.RootEvents.Should().ContainSingle().Which
+            .Should().BeOfType<TreeEvent.Created>().Subject.ContractId
+            .Should().Be(committed.RootEvents.OfType<TreeEvent.Created>().Single().ContractId);
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public async Task GetUpdateTreeByOffsetAsync_rejects_a_non_positive_offset(long offset)
+    {
+        await using var lane = await OpenTransactionTreeAsync(TestContext.Current.CancellationToken);
+        var (client, owner) = lane.Capability;
+
+        var act = () => client.GetUpdateTreeByOffsetAsync(offset, owner, cancellationToken: TestContext.Current.CancellationToken);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
 }

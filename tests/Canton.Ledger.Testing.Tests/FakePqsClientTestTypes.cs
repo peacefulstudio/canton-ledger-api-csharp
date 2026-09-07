@@ -26,7 +26,7 @@ internal sealed record DemoHolding(
         ((DamlNumeric)record.GetRequiredField("amount")).Value);
 }
 
-internal sealed record OtherHolding(Party Owner) : ITemplate
+internal sealed record OtherHolding(Party Owner) : ITemplate, IDamlRecord<OtherHolding>
 {
     public static Identifier TemplateId { get; } = new("test-pkg", "MiniDemo.OtherHolding", "OtherHolding");
     public static string PackageId => "test-pkg";
@@ -52,7 +52,7 @@ internal interface IDemoHoldingView : IDamlInterface, IHasView<DemoHoldingView>
         new(new Identifier("test-ipkg", "MiniDemo.IHolding", "IHolding"), DamlTypeKind.Interface, "test-interface-package");
 }
 
-internal sealed record DemoHoldingView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord
+internal sealed record DemoHoldingView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord, IDamlRecord<DemoHoldingView>
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
 
@@ -72,7 +72,7 @@ internal interface IKeyedHoldingView : IDamlInterface, IHasView<KeyedHoldingView
         new(new Identifier("test-kpkg", "MiniDemo.IKeyed", "IKeyed"), DamlTypeKind.Interface, "test-keyed-package");
 }
 
-internal sealed record KeyedHoldingView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord
+internal sealed record KeyedHoldingView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord, IDamlRecord<KeyedHoldingView>
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
 

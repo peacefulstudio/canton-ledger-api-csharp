@@ -1,10 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -33,6 +35,7 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        ServiceProvider? services = null;
         try
         {
             var darOutcome = await fixture.UploadDarAsync(DarPath(), cancellationToken);
@@ -47,23 +50,30 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
                 userId, actAs: new[] { party.PartyId }, cancellationToken: cancellationToken);
 
             var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-            var client = new LedgerClient(
-                new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-                new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync));
+            services = new ServiceCollection()
+                .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+                .AddLedgerClient(options =>
+                {
+                    options.GrpcAddress = grpcAddress;
+                    options.UserId = userId;
+                })
+                .BuildServiceProvider();
+
+            var client = services.GetRequiredService<ICantonLedgerClient>();
 
             var preSubmitOffset = (await client.GetLedgerEndAsync(cancellationToken: cancellationToken)).Value;
             var submission = CommandsSubmission
                 .Single(CreateCommand.For(new Marker(owner)))
                 .WithActAs(owner)
                 .WithCommandId(new CommandId(Guid.NewGuid().ToString()));
-            var returnedCommandId = await client.SubmitAsync(submission, cancellationToken);
+            var returnedCommandId = await client.SubmitAsync(submission, cancellationToken: cancellationToken);
 
             var probe = new CompletionProbe(client, owner, preSubmitOffset, returnedCommandId);
             return new CapabilityLane<CompletionProbe>(probe, async () =>
             {
                 try
                 {
-                    await client.DisposeAsync().ConfigureAwait(false);
+                    await services.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
@@ -73,6 +83,11 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
         }
         catch
         {
+            if (services is not null)
+            {
+                await services.DisposeAsync().ConfigureAwait(false);
+            }
+
             await fixture.DisposeAsync().ConfigureAwait(false);
             throw;
         }

@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Canton.Ledger.Grpc.Client.Tests" />
+    <InternalsVisibleTo Include="Canton.Ledger.Client.Parity.Tests" />
   </ItemGroup>
 
   <ItemGroup>

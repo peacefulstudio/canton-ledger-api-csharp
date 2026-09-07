@@ -4,6 +4,7 @@
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Com.Daml.Ledger.Api.V2.Admin;
 using AwesomeAssertions;
@@ -12,6 +13,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 using HashFunction = Canton.Ledger.Abstractions.HashFunction;
@@ -21,7 +23,7 @@ using WireHashFunction = Com.Daml.Ledger.Api.V2.HashFunction;
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 [Collection(nameof(AdminClientActivitySourceIsolation))]
-public class AdminClientTests
+public sealed class AdminClientTests : IDisposable
 {
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
@@ -38,16 +40,16 @@ public class AdminClientTests
             GrpcAddress = "https://localhost:5001"
         };
 
-        // Create a real channel (won't be used since we mock service clients)
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress);
 
-        // Create a mock CallInvoker and use ForPartsOf to create partial mocks of the service clients
         var callInvoker = Substitute.For<CallInvoker>();
         _partyService = Substitute.ForPartsOf<PartyManagementService.PartyManagementServiceClient>(callInvoker);
         _userService = Substitute.ForPartsOf<UserManagementService.UserManagementServiceClient>(callInvoker);
         _packageManagementService = Substitute.ForPartsOf<PackageManagementService.PackageManagementServiceClient>(callInvoker);
         _packageService = Substitute.ForPartsOf<PackageService.PackageServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private AdminClient CreateClient() =>
         new(_options, _channel, _partyService, _userService, _tokenProvider, _packageManagementService, _packageService);
@@ -823,7 +825,7 @@ public class AdminClientTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(AdminClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
 
         using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
         var firstClient = new AdminClient(_options, firstChannel, _partyService, _userService, _tokenProvider);
@@ -840,13 +842,13 @@ public class AdminClientTests
     [Fact]
     public void AdminClient_constructor_does_not_throw_when_ITokenProvider_None()
     {
-        using var _ = new AdminClient(_options, ITokenProvider.None);
+        using var _ = new AdminClient(Options.Create(_options), ITokenProvider.None);
     }
 
     [Fact]
     public void AdminClient_constructor_does_not_throw_when_real_provider_registered()
     {
-        using var _ = new AdminClient(_options, _tokenProvider);
+        using var _ = new AdminClient(Options.Create(_options), _tokenProvider);
     }
 
     [Fact]
@@ -1372,7 +1374,7 @@ public class AdminClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
 
-        using var client = new AdminClient(options, _tokenProvider, new Logger<AdminClient>(loggerFactory));
+        using var client = new AdminClient(Options.Create(options), _tokenProvider, new Logger<AdminClient>(loggerFactory));
 
         loggerFactory.Records.Should().Contain(r =>
             r.Level == LogLevel.Warning
@@ -1386,7 +1388,7 @@ public class AdminClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
 
-        using var client = new AdminClient(options, ITokenProvider.None, new Logger<AdminClient>(loggerFactory));
+        using var client = new AdminClient(Options.Create(options), ITokenProvider.None, new Logger<AdminClient>(loggerFactory));
 
         loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
@@ -1397,22 +1399,19 @@ public class AdminClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "https://participant.internal:5001" };
 
-        using var client = new AdminClient(options, _tokenProvider, new Logger<AdminClient>(loggerFactory));
+        using var client = new AdminClient(Options.Create(options), _tokenProvider, new Logger<AdminClient>(loggerFactory));
 
         loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task AllocateParty_throws_ArgumentException_when_partyIdHint_null_or_whitespace(string? partyIdHint)
+    [Fact]
+    public async Task AllocateParty_throws_ArgumentNullException_when_partyIdHint_null()
     {
         var client = CreateClient();
 
-        var act = () => client.AllocatePartyAsync(partyIdHint!, cancellationToken: TestContext.Current.CancellationToken);
+        var act = () => client.AllocatePartyAsync(null!, cancellationToken: TestContext.Current.CancellationToken);
 
-        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(partyIdHint));
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("partyIdHint");
     }
 
     [Fact]
@@ -1465,17 +1464,14 @@ public class AdminClientTests
         await act.Should().NotThrowAsync();
     }
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public async Task GetUser_throws_ArgumentException_when_userId_null_or_whitespace(string? userId)
+    [Fact]
+    public async Task GetUser_throws_ArgumentNullException_when_userId_null()
     {
         var client = CreateClient();
 
-        var act = () => client.GetUserAsync(userId!, TestContext.Current.CancellationToken);
+        var act = () => client.GetUserAsync(null!, TestContext.Current.CancellationToken);
 
-        (await act.Should().ThrowAsync<ArgumentException>()).WithParameterName(nameof(userId));
+        (await act.Should().ThrowAsync<ArgumentNullException>()).WithParameterName("userId");
     }
 
     [Theory]

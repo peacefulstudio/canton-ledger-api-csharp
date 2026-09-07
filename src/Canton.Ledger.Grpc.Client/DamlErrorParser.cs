@@ -31,7 +31,7 @@ internal static class DamlErrorParser
         var status = TryReadStatus(exception.Trailers);
         if (status is null)
         {
-            return ParsedLedgerError.Untyped(exception.Status.Detail, statusCode);
+            return new ParsedLedgerError.Unstructured(exception.Status.Detail, statusCode);
         }
 
         var errorInfo = ExtractErrorInfo(status);
@@ -46,7 +46,7 @@ internal static class DamlErrorParser
             metadata[kvp.Key] = kvp.Value;
         }
 
-        return new ParsedLedgerError(
+        return new ParsedLedgerError.Structured(
             ParsedLedgerError.MapCategory(metadata.TryGetValue(CategoryMetadataKey, out var raw) ? raw : null),
             ErrorId: errorInfo.Reason ?? string.Empty,
             Message: status.Message ?? string.Empty,
@@ -55,14 +55,11 @@ internal static class DamlErrorParser
     }
 
     private static ParsedLedgerError WithoutErrorInfo(
-        StatusCode transportStatus, string? message, int statusCode)
-    {
-        var untyped = ParsedLedgerError.Untyped(message, statusCode);
-
-        return RedactedSecurityCategories.TryGetValue(transportStatus, out var category)
-            ? untyped with { Category = category }
-            : untyped;
-    }
+        StatusCode transportStatus, string? message, int statusCode) =>
+        new ParsedLedgerError.Unstructured(
+            message,
+            statusCode,
+            RedactedSecurityCategories.TryGetValue(transportStatus, out var category) ? category : null);
 
     private static GrpcStatus? TryReadStatus(Metadata? trailers)
     {

@@ -54,7 +54,7 @@ public sealed class RestLedgerTransactionTreeParityTests : LedgerTransactionTree
                 fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            var client = services.GetRequiredService<RestLedgerClient>();
+            var client = services.GetRequiredService<ICantonLedgerClient>();
             return new CapabilityLane<(ICantonLedgerClient, Party)>((client, new Party(party.PartyId)), async () =>
             {
                 await services.DisposeAsync().ConfigureAwait(false);

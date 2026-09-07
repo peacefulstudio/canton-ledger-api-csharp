@@ -8,6 +8,7 @@ using Canton.Ledger.Testing.Helpers;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Data;
+using Daml.Runtime.Streams;
 using Grpc.Core;
 using Grpc.Net.Client;
 using NSubstitute;
@@ -21,7 +22,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientQueryActiveInterfaceTests
+public sealed class LedgerClientQueryActiveInterfaceTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -60,6 +61,8 @@ public class LedgerClientQueryActiveInterfaceTests
         _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private ICantonLedgerClient CreateClient() => new LedgerClient(
         _options,
@@ -183,7 +186,7 @@ public class LedgerClientQueryActiveInterfaceTests
             ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         await querying.Should().ThrowAsync<LedgerOperationException>()
-            .WithMessage($"*did not decode into {nameof(ViewedInterfaceView)}*");
+            .WithMessage($"*unclassified row ({nameof(UnclassifiedKind.DecodeFailure)})*");
     }
 
     [Fact]

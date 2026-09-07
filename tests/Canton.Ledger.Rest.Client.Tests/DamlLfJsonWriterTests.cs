@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using Canton.Ledger.Rest.Client.Raw;
 using Daml.Runtime.Data;
+using Daml.Runtime.Serialization;
 using Xunit;
 using Enum = Canton.Ledger.Rest.Client.Raw.Enum;
 using Identifier = Canton.Ledger.Rest.Client.Raw.Identifier;
@@ -45,6 +46,25 @@ public class DamlLfJsonWriterTests
 
     [Fact]
     public void WriteValue_writes_Numeric_as_a_string() => Write(new Value { Numeric = "1.5" }).Should().Be("\"1.5\"");
+
+    [Fact]
+    public void An_Int64_round_trips_as_a_JSON_string_through_DamlJsonSerializer_and_RestValueDecoder()
+    {
+        var written = DamlJsonSerializer.Serialize(
+            new DamlRecord(null, [new DamlField("count", new DamlInt64(42))]));
+
+        using var document = JsonDocument.Parse(written);
+        var field = document.RootElement.GetProperty("count");
+        field.ValueKind.Should().Be(
+            JsonValueKind.String, "an Int64 outside the double-safe range loses precision as a JSON number");
+        field.GetString().Should().Be("42");
+
+        var wireRecord = new Record();
+        wireRecord.AdditionalProperties["count"] = field;
+
+        RestValueDecoder.ToDamlRecord(wireRecord).Fields.Should().ContainSingle()
+            .Which.Value.Should().Be(new DamlInt64(42));
+    }
 
     [Fact]
     public void WriteValue_writes_the_epoch_Date_as_ISO_8601() => Write(new Value { Date = 0 }).Should().Be("\"1970-01-01\"");

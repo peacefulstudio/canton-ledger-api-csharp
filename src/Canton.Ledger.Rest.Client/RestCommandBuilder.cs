@@ -55,6 +55,20 @@ internal static class RestCommandBuilder
             commands.DisclosedContracts = [.. disclosedContracts.Select(ToWireDisclosedContract)];
         }
 
+        if (submission.MinLedgerTime is { } minLedgerTime)
+        {
+            var (absolute, relative) = ToWireMinLedgerTime(minLedgerTime);
+            if (absolute is { } instant)
+            {
+                commands.MinLedgerTimeAbs = instant;
+            }
+
+            if (relative is { } delay)
+            {
+                commands.MinLedgerTimeRel = delay;
+            }
+        }
+
         return commands;
     }
 
@@ -79,6 +93,12 @@ internal static class RestCommandBuilder
 
         return commands;
     }
+
+    private static (DateTimeOffset? Absolute, string? Relative) ToWireMinLedgerTime(
+        RuntimeCommands.MinLedgerTime bound) =>
+        bound.Match<(DateTimeOffset?, string?)>(
+            absolute: instant => (instant, null),
+            relative: delay => (null, RestWireConversions.ToWireDuration(delay)));
 
     private static WireReassignmentCommand ToWireReassignmentCommand(IReassignmentCommand command) =>
         command switch

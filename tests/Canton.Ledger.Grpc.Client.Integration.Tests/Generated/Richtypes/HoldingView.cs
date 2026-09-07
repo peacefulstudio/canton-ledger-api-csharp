@@ -12,7 +12,9 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml record HoldingView
 /// </summary>
-public sealed record HoldingView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord
+public sealed record HoldingView(
+    [property: DamlFieldAttribute("amount")] decimal Amount
+) : IHolding, IDamlRecord<HoldingView>
 {
     /// <summary>Converts this value to a DamlRecord.</summary>
     public DamlRecord ToRecord() => DamlRecord.Create(

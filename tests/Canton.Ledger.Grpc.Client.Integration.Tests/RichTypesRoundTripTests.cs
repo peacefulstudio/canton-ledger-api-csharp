@@ -1,14 +1,14 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Testing.Localnet;
+using Canton.Ledger.Abstractions;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -18,9 +18,6 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class RichTypesRoundTripTests
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
-
     private const string SkipMessage =
         "Skipping: set CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL, _CLIENT_ID, _CLIENT_SECRET "
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
@@ -30,15 +27,6 @@ public class RichTypesRoundTripTests
 
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
-
-    private static LedgerClient NewClient(LocalnetFixture fixture, string userId)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        return new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
-    }
 
     [Fact]
     public async Task rich_record_round_trips_every_typed_field_through_the_ledger()
@@ -63,15 +51,16 @@ public class RichTypesRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var client = NewClient(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
-        var markerOutcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
+        var markerOutcome = await client.CreateAsync(new Marker(owner), TestContext.Current.CancellationToken);
         var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
         Assert.False(string.IsNullOrWhiteSpace(markerCid.Value), "created Marker ContractId is empty");
 
-        var firstAssetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var firstAssetOutcome = await client.CreateAsync(new Asset(owner, 100m), TestContext.Current.CancellationToken);
         var firstAssetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(firstAssetOutcome).Result;
-        var secondAssetOutcome = await client.CreateAsync(new Asset(owner, 250m), owner, TestContext.Current.CancellationToken);
+        var secondAssetOutcome = await client.CreateAsync(new Asset(owner, 250m), TestContext.Current.CancellationToken);
         var secondAssetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(secondAssetOutcome).Result;
         var holdingCid = new ContractId<IHolding>(firstAssetCid.Value);
         var holdingCids = new[] { holdingCid, new ContractId<IHolding>(secondAssetCid.Value) };
@@ -96,13 +85,13 @@ public class RichTypesRoundTripTests
             Outcome: new Outcome.Win(new Outcome_Win(Prize: 250.50m, Tier: "gold")),
             Fee: 0.05m);
 
-        var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
+        var createOutcome = await client.CreateAsync(payload, TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
         Assert.False(string.IsNullOrWhiteSpace(createdCid.Value), "created RichRecord ContractId is empty");
 
         var seen = await ReadBackAsync(client, owner, createdCid.Value);
         Assert.NotNull(seen);
-        var readBack = RichRecord.FromRecord(seen!.Payload);
+        var readBack = seen!.Payload;
 
         Assert.Equal(party.PartyId, readBack.Owner.Id);
         Assert.Equal(42L, readBack.Count);
@@ -152,12 +141,13 @@ public class RichTypesRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var client = NewClient(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
-        var markerOutcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
+        var markerOutcome = await client.CreateAsync(new Marker(owner), TestContext.Current.CancellationToken);
         var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
 
-        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), TestContext.Current.CancellationToken);
         var assetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(assetOutcome).Result;
         var holdingCid = new ContractId<IHolding>(assetCid.Value);
 
@@ -179,7 +169,7 @@ public class RichTypesRoundTripTests
             Outcome: new Outcome.Pending(),
             Fee: 1.00m);
 
-        var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
+        var createOutcome = await client.CreateAsync(payload, TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
 
         var relabelOutcome = await createdCid.RelabelAsync(
@@ -194,7 +184,7 @@ public class RichTypesRoundTripTests
 
         var seen = await ReadBackAsync(client, owner, relabelledCid.Value);
         Assert.NotNull(seen);
-        var readBack = RichRecord.FromRecord(seen!.Payload);
+        var readBack = seen!.Payload;
         Assert.Equal("renamed", readBack.Label);
         Assert.IsType<Outcome.Pending>(readBack.Outcome);
         Assert.Equal(1.00m, readBack.Fee);
@@ -223,12 +213,13 @@ public class RichTypesRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var client = NewClient(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
-        var markerOutcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
+        var markerOutcome = await client.CreateAsync(new Marker(owner), TestContext.Current.CancellationToken);
         var markerCid = Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(markerOutcome).Result;
 
-        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), owner, TestContext.Current.CancellationToken);
+        var assetOutcome = await client.CreateAsync(new Asset(owner, 100m), TestContext.Current.CancellationToken);
         var assetCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(assetOutcome).Result;
         var holdingCid = new ContractId<IHolding>(assetCid.Value);
 
@@ -250,7 +241,7 @@ public class RichTypesRoundTripTests
             Outcome: new Outcome.Pending(),
             Fee: 1.00m);
 
-        var createOutcome = await client.CreateAsync(payload, owner, TestContext.Current.CancellationToken);
+        var createOutcome = await client.CreateAsync(payload, TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<RichRecord>>.One>(createOutcome).Result;
 
         var command = new ExerciseCommand(
@@ -268,12 +259,12 @@ public class RichTypesRoundTripTests
 
         var seen = await ReadBackAsync(client, owner, relabelledCid.Value);
         Assert.NotNull(seen);
-        var readBack = RichRecord.FromRecord(seen!.Payload);
+        var readBack = seen!.Payload;
         Assert.Equal("renamed-direct", readBack.Label);
     }
 
     private static async Task<AcsSnapshotEntry<RichRecord>.Created?> ReadBackAsync(
-        LedgerClient client, Party owner, string contractIdValue)
+        ICantonLedgerClient client, Party owner, string contractIdValue)
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await foreach (var evt in client.SubscribeActiveAsync<RichRecord>(owner, cancellationToken: cts.Token))

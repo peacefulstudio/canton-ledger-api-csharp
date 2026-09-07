@@ -6,6 +6,7 @@
 #nullable enable
 
 using Daml.Ledger.Abstractions;
+using Daml.Ledger.Abstractions.Extensions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -22,7 +23,24 @@ namespace Richtypes;
 /// <summary>
 /// Generated from Daml template RichTypes:RichRecord
 /// </summary>
-public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] Party Owner, [property: DamlFieldAttribute("count")] long Count, [property: DamlFieldAttribute("amount")] decimal Amount, [property: DamlFieldAttribute("label")] string Label, [property: DamlFieldAttribute("active")] bool Active, [property: DamlFieldAttribute("asOf")] DateOnly AsOf, [property: DamlFieldAttribute("observedAt")] DateTimeOffset ObservedAt, [property: DamlFieldAttribute("note")] string? Note, [property: DamlFieldAttribute("tags")] IReadOnlyList<string> Tags, [property: DamlFieldAttribute("attributes")] IReadOnlyDictionary<string, string> Attributes, [property: DamlFieldAttribute("marker")] ContractId<Marker> Marker, [property: DamlFieldAttribute("holdingCid")] ContractId<IHolding> HoldingCid, [property: DamlFieldAttribute("holdingCids")] IReadOnlyList<ContractId<IHolding>> HoldingCids, [property: DamlFieldAttribute("profile")] Profile Profile, [property: DamlFieldAttribute("outcome")] Outcome Outcome, [property: DamlFieldAttribute("fee")] decimal Fee) : ITemplate
+public sealed partial record RichRecord(
+    [property: DamlFieldAttribute("owner")] Party Owner,
+    [property: DamlFieldAttribute("count")] long Count,
+    [property: DamlFieldAttribute("amount")] decimal Amount,
+    [property: DamlFieldAttribute("label")] string Label,
+    [property: DamlFieldAttribute("active")] bool Active,
+    [property: DamlFieldAttribute("asOf")] DateOnly AsOf,
+    [property: DamlFieldAttribute("observedAt")] DateTimeOffset ObservedAt,
+    [property: DamlFieldAttribute("note")] string? Note,
+    [property: DamlFieldAttribute("tags")] IReadOnlyList<string> Tags,
+    [property: DamlFieldAttribute("attributes")] IReadOnlyDictionary<string, string> Attributes,
+    [property: DamlFieldAttribute("marker")] ContractId<Marker> Marker,
+    [property: DamlFieldAttribute("holdingCid")] ContractId<IHolding> HoldingCid,
+    [property: DamlFieldAttribute("holdingCids")] IReadOnlyList<ContractId<IHolding>> HoldingCids,
+    [property: DamlFieldAttribute("profile")] Profile Profile,
+    [property: DamlFieldAttribute("outcome")] Outcome Outcome,
+    [property: DamlFieldAttribute("fee")] decimal Fee
+) : ITemplate, IDamlRecord<RichRecord>
 {
     /// <summary>Gets the template identifier.</summary>
     public static Identifier TemplateId { get; } = new("3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc", "RichTypes", "RichRecord");
@@ -103,6 +121,7 @@ public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] 
     };
 
     /// <summary>Contract ID for RichRecord.</summary>
+    [global::System.Text.Json.Serialization.JsonConverter(typeof(global::Daml.Runtime.Serialization.ContractIdJsonConverterFactory))]
     public sealed record ContractId(string Value) : ContractId<RichRecord>(Value), IExercises<RichRecord>
     {
         ContractId<RichRecord> IExercises<RichRecord>.ContractId => this;
@@ -113,7 +132,7 @@ public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] 
     {
         /// <summary>Creates a Contract from a CreatedEvent.</summary>
         public static Contract FromCreatedEvent(CreatedEvent @event) =>
-            new(new ContractId(@event.ContractId), RichRecord.FromRecord(@event.CreateArguments));
+            new(new ContractId(@event.ContractId), global::Richtypes.RichRecord.FromRecord(@event.CreateArguments));
     }
 }
 
@@ -122,7 +141,9 @@ public sealed partial record RichRecord([property: DamlFieldAttribute("owner")] 
 /// One field per template the choice creates; cardinality follows the choice's
 /// return type (single, optional, list).
 /// </summary>
-public sealed record RelabelResult(ContractId<RichRecord> RichRecord)
+public sealed record RelabelResult(
+    ContractId<RichRecord> RichRecord
+)
 {
     /// <summary>
     /// Projects an upstream transaction's created contracts to a typed <see cref="RelabelResult"/>.
@@ -179,7 +200,7 @@ public sealed record RelabelResult(ContractId<RichRecord> RichRecord)
 /// <summary>
 /// Static <c>&lt;Choice&gt;Async</c> extension methods for <see cref="RichRecord"/>.
 /// One method per create-bearing choice; each delegates to
-/// <see cref="global::Daml.Ledger.Abstractions.ILedgerWriter.TrySubmitAndWaitForTransactionAsync"/>
+/// <see cref="global::Daml.Ledger.Abstractions.Extensions.SingleCommandExtensions.TrySubmitSingleAsync"/>
 /// and projects success via <c>&lt;Choice&gt;Result.FromCreatedContracts</c>.
 /// </summary>
 public static class RichRecordExtensions
@@ -213,10 +234,10 @@ public static class RichRecordExtensions
     /// <param name="argument">The choice argument.</param>
     /// <param name="owner">Controller party from the Daml <c>controller</c> clause, routed into the submission's <c>actAs</c> set.</param>
     /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
-    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
-    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public static async Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
+    public static Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
         this ContractId<RichRecord> contractId,
         ILedgerWriter client,
         RichRecord.Relabel argument,
@@ -230,18 +251,14 @@ public static class RichRecordExtensions
 
         SubmitterInfo submitter = owner;
 
-        var command = contractId.RelabelCommand(argument);
-
-        var submission = CommandsSubmission.Single(command)
-            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
-        if (!string.IsNullOrEmpty(workflowId))
-        {
-            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
-        }
-
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, submitter, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return outcome.ProjectCommitted(tx => RelabelResult.FromCreatedContracts(tx.CreatedContracts));
+        return contractId.RelabelAsync(
+            client,
+            argument,
+            submitter,
+            workflowId,
+            commandId,
+            timeout,
+            cancellationToken);
     }
 
     /// <summary>
@@ -255,8 +272,8 @@ public static class RichRecordExtensions
     /// <param name="argument">The choice argument.</param>
     /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
     /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
-    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
-    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
         this ContractId<RichRecord> contractId,
@@ -272,14 +289,7 @@ public static class RichRecordExtensions
 
         var command = contractId.RelabelCommand(argument);
 
-        var submission = CommandsSubmission.Single(command)
-            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
-        if (!string.IsNullOrEmpty(workflowId))
-        {
-            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
-        }
-
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, submitter, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var outcome = await client.TrySubmitSingleAsync(command, submitter, workflowId, commandId, timeout, cancellationToken).ConfigureAwait(false);
 
         return outcome.ProjectCommitted(tx => RelabelResult.FromCreatedContracts(tx.CreatedContracts));
     }
@@ -294,8 +304,8 @@ public static class RichRecordExtensions
     /// <param name="client">The ledger client.</param>
     /// <param name="argument">The choice argument.</param>
     /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
-    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
-    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
         this RichRecord.Contract contract,
@@ -319,6 +329,45 @@ public static class RichRecordExtensions
             timeout,
             cancellationToken);
     }
+
+    /// <summary>
+    /// Exercises the Relabel choice on a fetched <see cref="RichRecord"/> contract with an
+    /// explicit <see cref="SubmitterInfo"/>. Companion to the payload-derived overload for
+    /// multi-party submissions and for callers who must supply <c>readAs</c> parties the
+    /// payload cannot name. Delegates to the
+    /// <c>ContractId&lt;RichRecord&gt;</c> overload.
+    /// </summary>
+    /// <param name="contract">The fetched contract on which to exercise the choice.</param>
+    /// <param name="client">The ledger client.</param>
+    /// <param name="argument">The choice argument.</param>
+    /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
+    /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static Task<ExerciseOutcome<RelabelResult>> RelabelAsync(
+        this RichRecord.Contract contract,
+        ILedgerWriter client,
+        RichRecord.Relabel argument,
+        SubmitterInfo submitter,
+        string? workflowId = null,
+        CommandId? commandId = null,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contract);
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentNullException.ThrowIfNull(argument);
+
+        return contract.Id.RelabelAsync(
+            client,
+            argument,
+            submitter,
+            workflowId,
+            commandId,
+            timeout,
+            cancellationToken);
+    }
 }
 
 /// <summary>
@@ -334,24 +383,22 @@ public static class RichRecordSubmissionExtensions
 {
     /// <summary>
     /// Creates a new <see cref="RichRecord"/> contract on the ledger.
-    /// The submitter is passed explicitly via <paramref name="submitter"/>. The static
-    /// analyzer could not resolve the Daml <c>signatory</c> clause to payload-field
-    /// references — typically because the expression involves the template key, a
-    /// constant, or a function call. <see cref="SubmitterInfo"/> implicitly converts
-    /// from a single <c>Party</c>, so single-party callers still pass one literal.
+    /// The submitting parties are derived from the payload — each Daml signatory is
+    /// a reference to a payload field, so the caller never restates a party that's
+    /// already in the record.
     /// </summary>
     /// <param name="client">The ledger client.</param>
     /// <param name="payload">The contract payload.</param>
-    /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static Task<ExerciseOutcome<ContractId<RichRecord>>> CreateAsync(
         this ILedgerWriter client,
         RichRecord payload,
-        SubmitterInfo submitter,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(payload);
+
+        SubmitterInfo submitter = payload.Owner;
 
         return client.TryCreateAsync<RichRecord>(payload, submitter, cancellationToken: cancellationToken);
     }
@@ -361,7 +408,7 @@ public static class RichRecordSubmissionExtensions
 /// Async exerciser extensions for <see cref="RichRecord"/> contract IDs whose choices
 /// return a non-contract-id payload (Decimal, records, lists, Unit, etc.).
 /// Each method submits the choice via
-/// <c>ILedgerWriter.TrySubmitAndWaitForTransactionAsync</c> and lifts the typed result
+/// <c>SingleCommandExtensions.TrySubmitSingleAsync</c> and lifts the typed result
 /// into <c>ExerciseOutcome&lt;TReturn&gt;</c>.
 /// </summary>
 public static class RichRecordNonContractExtensions
@@ -388,15 +435,15 @@ public static class RichRecordNonContractExtensions
     /// </summary>
     /// <param name="contractId">The contract on which to exercise the choice.</param>
     /// <param name="client">The ledger client.</param>
-    /// <param name="actAs">The party submitting the command.</param>
+    /// <param name="submitter">The submitter party set (<c>actAs</c> + optional <c>readAs</c>), so a submitter that must read contracts it does not act as stays expressible.</param>
     /// <param name="workflowId">Optional workflow id; passed through to the ledger when supplied. No default — workflow IDs are correlation keys, and a per-choice default would bucket every submission of the same choice under one ID.</param>
-    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted. Pass the same id across a retry of a lost-but-accepted submission so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
-    /// <param name="timeout">Optional per-call deadline, enforced server-side; the default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
+    /// <param name="commandId">Optional command id for deduplication; a fresh id is minted only when omitted, and a minted id is not reported back on a failed submission. Supply and retain your own id to make a retry of a lost-but-accepted submission deduplicable, so the ledger deduplicates the resubmission instead of re-executing the choice.</param>
+    /// <param name="timeout">Optional per-call deadline, applied best-effort by the transport; transports without a server-side deadline apply a client-side bound only. The default <c>null</c> applies no deadline. An overrun surfaces as an <c>InfraError</c> outcome.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async Task<ExerciseOutcome<Unit>> ArchiveAsync(
         this ContractId<RichRecord> contractId,
         ILedgerWriter client,
-        Party actAs,
+        SubmitterInfo submitter,
         string? workflowId = null,
         CommandId? commandId = null,
         TimeSpan? timeout = null,
@@ -406,14 +453,7 @@ public static class RichRecordNonContractExtensions
 
         var command = contractId.ArchiveCommand();
 
-        var submission = CommandsSubmission.Single(command)
-            .WithCommandId(commandId ?? new CommandId(Guid.NewGuid().ToString()));
-        if (!string.IsNullOrEmpty(workflowId))
-        {
-            submission = submission.WithWorkflowId(new WorkflowId(workflowId));
-        }
-
-        var outcome = await client.TrySubmitAndWaitForTransactionAsync(submission, actAs, timeout: timeout, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var outcome = await client.TrySubmitSingleAsync(command, submitter, workflowId, commandId, timeout, cancellationToken).ConfigureAwait(false);
 
         return outcome.ProjectCommitted(tx => ProjectArchiveResult(tx, contractId.Value));
     }

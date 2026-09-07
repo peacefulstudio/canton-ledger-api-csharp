@@ -6,6 +6,7 @@ using System.Net;
 using System.Text;
 using AwesomeAssertions;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Telemetry;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -170,7 +171,7 @@ public class RestRetryHandlerTests
     [Fact]
     public async Task SendAsync_records_a_RetryAttempt_activity_on_the_RestLedgerClient_source()
     {
-        using var capture = ActivityCapture.Of(RestLedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.RestLedgerClient);
 
         var transport = new CountingHandler(new HttpRequestException("connection refused"));
         using var client = ClientOver(transport, Fast(1));

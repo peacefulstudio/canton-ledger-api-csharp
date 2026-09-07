@@ -7,6 +7,7 @@ using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
 using AwesomeAssertions;
 using Grpc.Core;
@@ -24,7 +25,7 @@ using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientSubscribeTests
+public sealed class LedgerClientSubscribeTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -49,6 +50,8 @@ public class LedgerClientSubscribeTests
         _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(
         _options,
@@ -256,7 +259,7 @@ public class LedgerClientSubscribeTests
         events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo");
         events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>()
-            .Which.Offset.Value.Should().Be(2L);
+            .Which.Offset.Should().Be(LedgerOffset.At(2L));
         events[2].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo2");
     }
@@ -273,7 +276,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -326,7 +329,7 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(), capture: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        _ = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty[ActAs.Id];
@@ -351,7 +354,7 @@ public class LedgerClientSubscribeTests
                 ModuleName = "Sample.Impl",
                 EntityName = "FooImpl",
             },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 5L,
         };
         created.InterfaceViews.Add(new InterfaceView
@@ -368,10 +371,10 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Created = created })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var createdEvent = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Created>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Created>().Subject;
         createdEvent.ContractId.Value.Should().Be("00impl");
         createdEvent.Offset.Value.Should().Be(5L);
     }
@@ -383,7 +386,7 @@ public class LedgerClientSubscribeTests
         {
             ContractId = "00impl",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Impl", EntityName = "FooImpl" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 1L,
         };
         matching.InterfaceViews.Add(new InterfaceView
@@ -396,7 +399,7 @@ public class LedgerClientSubscribeTests
         {
             ContractId = "00other",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Sample.Other", EntityName = "Other" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 2L,
         };
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(
@@ -404,9 +407,9 @@ public class LedgerClientSubscribeTests
             new Event { Created = unrelated })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Created>()
+        events.OfType<InterfaceStreamEvent<IFoo, FooView>.Created>()
             .Select(c => c.ContractId.Value)
             .Should().Equal("00impl");
     }
@@ -429,10 +432,10 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = archived })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var archivedEvent = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Archived>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Archived>().Subject;
         archivedEvent.ContractId.Value.Should().Be("00impl");
         archivedEvent.Offset.Value.Should().Be(7L);
     }
@@ -455,9 +458,9 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = unrelated })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Archived>().Should().BeEmpty();
+        events.OfType<InterfaceStreamEvent<IFoo, FooView>.Archived>().Should().BeEmpty();
     }
 
     [Fact]
@@ -482,10 +485,10 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = exercised })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var exercisedEvent = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Exercised>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Exercised>().Subject;
         exercisedEvent.ContractId.Value.Should().Be("00impl");
         exercisedEvent.ChoiceName.Should().Be("Accept");
         exercisedEvent.Consuming.Should().BeTrue();
@@ -513,9 +516,9 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = unrelated })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Exercised>().Should().BeEmpty();
+        events.OfType<InterfaceStreamEvent<IFoo, FooView>.Exercised>().Should().BeEmpty();
     }
 
     [Fact]
@@ -603,6 +606,38 @@ public class LedgerClientSubscribeTests
             .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
         error.StatusCode.Should().Be((int)StatusCode.Unavailable);
         error.Message.Should().Contain("transient");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_populates_StreamError_Category_and_SourceException_from_the_transport_fault()
+    {
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "PARTICIPANT_BACKPRESSURE", "the participant is overloaded", "2");
+        StubGetUpdatesFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
+        error.Category.Should().Be(
+            DamlErrorCategory.ContentionOnSharedResources,
+            "a caller's retry policy switches on the parsed category, which is inert while the slot stays null");
+        error.SourceException.Should().BeSameAs(rpcException);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_leaves_StreamError_Category_null_when_the_fault_carries_no_category()
+    {
+        StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>()
+            .Subject.Category.Should().BeNull(
+                "an unclassifiable fault carries no category rather than the Unknown sentinel");
     }
 
     [Fact]
@@ -764,6 +799,23 @@ public class LedgerClientSubscribeTests
     }
 
     [Fact]
+    public async Task SubscribeActiveAsync_populates_StreamError_Category_and_SourceException_from_the_transport_fault()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "PARTICIPANT_BACKPRESSURE", "the participant is overloaded", "2");
+        StubGetActiveContractsFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>().Subject;
+        error.Category.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
+        error.SourceException.Should().BeSameAs(rpcException);
+    }
+
+    [Fact]
     public async Task SubscribeActiveAsync_StreamError_message_falls_back_to_status_string_when_detail_empty()
     {
         // gRPC surfaces a server status with no message as Status.Detail == "" (empty,
@@ -830,8 +882,8 @@ public class LedgerClientSubscribeTests
         events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00foo");
         var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
-        unclassified.Offset.Value.Should().Be(99L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
+        unclassified.Offset.Should().Be(LedgerOffset.At(99L));
     }
 
     [Fact]
@@ -851,14 +903,14 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(matching, unrelated);
 
         var client = CreateClient();
-        var events = await CollectActiveAsync(client.SubscribeActiveAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectActiveAsync(client.SubscribeActiveAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().HaveCount(2);
-        events[0].Should().BeOfType<AcsSnapshotEntry<IFoo>.Created>()
+        events[0].Should().BeOfType<InterfaceAcsSnapshotEntry<IFoo, FooView>.Created>()
             .Which.ContractId.Value.Should().Be("00impl");
-        var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<IFoo>.Unclassified>().Subject;
-        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
-        unclassified.Offset.Value.Should().Be(88L);
+        var unclassified = events[1].Should().BeOfType<InterfaceAcsSnapshotEntry<IFoo, FooView>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
+        unclassified.Offset.Should().Be(LedgerOffset.At(88L));
     }
 
     [Fact]
@@ -866,10 +918,8 @@ public class LedgerClientSubscribeTests
     {
         StubGetLedgerEnd(offset: 10L);
         var poison = MakeActiveContract("00poison", FooBarTemplate, offset: 5L);
-        poison.ActiveContract.CreatedEvent.CreateArguments = new ProtoRecord
-        {
-            Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
-        };
+        poison.ActiveContract.CreatedEvent.CreateArguments = LedgerClientTestFixtures.OwnerArgumentsWith(
+            "amount", LedgerClientTestFixtures.OutOfDecimalRangeNumeric());
         StubGetActiveContracts(poison, MakeActiveContract("00good", FooBarTemplate, offset: 6L));
 
         var client = CreateClient();
@@ -877,8 +927,8 @@ public class LedgerClientSubscribeTests
 
         events.Should().HaveCount(2);
         var unclassified = events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(5L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(5L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00good");
     }
@@ -911,8 +961,9 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
-        unclassified.Kind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.ActiveContract.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
+        unclassified.RawKind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.ActiveContract.ToString());
     }
 
     [Fact]
@@ -927,7 +978,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(5L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(5L));
     }
 
     [Fact]
@@ -957,7 +1008,7 @@ public class LedgerClientSubscribeTests
         StubGetActiveContracts(captureRequest: r => captured = r);
 
         var client = CreateClient();
-        _ = await CollectActiveAsync(client.SubscribeActiveAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        _ = await CollectActiveAsync(client.SubscribeActiveAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         captured.Should().NotBeNull();
         var filter = captured!.EventFormat.FiltersByParty[ActAs.Id];
@@ -1014,7 +1065,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00abc",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 200L,
                 },
             },
@@ -1102,7 +1153,7 @@ public class LedgerClientSubscribeTests
             .Which.ContractId.Value.Should().Be("00foo");
         events.OfType<ContractStreamEvent<FooBar>.Unclassified>()
             .Should().ContainSingle()
-            .Which.Offset.Value.Should().Be(300L);
+            .Which.Offset.Should().Be(LedgerOffset.At(300L));
     }
 
     [Fact]
@@ -1129,10 +1180,10 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(new GetUpdatesResponse { Reassignment = reassignment });
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
         var unassigned = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Unassigned>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Unassigned>().Subject;
         unassigned.ContractId.Value.Should().Be("00iface");
         unassigned.Source.Id.Should().Be("sync-a");
         unassigned.Target.Id.Should().Be("sync-b");
@@ -1150,7 +1201,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00mid",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                 },
                 UnassignedEvent = new UnassignedEvent
                 {
@@ -1171,8 +1222,8 @@ public class LedgerClientSubscribeTests
         events[0].Should().BeOfType<AcsSnapshotEntry<FooBar>.Created>()
             .Which.SynchronizerId.Id.Should().Be("sync-a");
         var unclassified = events[1].Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Kind.Should().Be(UnclassifiedKind.UnassignedEvent.ToString());
-        unclassified.Offset.Value.Should().Be(500L);
+        unclassified.Kind.Should().Be(UnclassifiedKind.UnassignedEvent);
+        unclassified.Offset.Should().Be(LedgerOffset.At(500L));
     }
 
     [Fact]
@@ -1191,7 +1242,7 @@ public class LedgerClientSubscribeTests
                     {
                         ContractId = "00mid2",
                         TemplateId = FooBarTemplate,
-                        CreateArguments = new ProtoRecord(),
+                        CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     },
                 },
             },
@@ -1220,7 +1271,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00nosync",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 15L,
                 },
                 SynchronizerId = string.Empty,
@@ -1233,8 +1284,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(15L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(15L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -1251,7 +1302,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00midnosync",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 16L,
                 },
                 UnassignedEvent = new UnassignedEvent
@@ -1270,8 +1321,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(16L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(16L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -1292,7 +1343,7 @@ public class LedgerClientSubscribeTests
                     {
                         ContractId = "00mid2nosync",
                         TemplateId = FooBarTemplate,
-                        CreateArguments = new ProtoRecord(),
+                        CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                         Offset = 17L,
                     },
                 },
@@ -1305,8 +1356,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(17L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(17L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
     [Fact]
@@ -1329,7 +1380,7 @@ public class LedgerClientSubscribeTests
                         ModuleName = "Sample.Other",
                         EntityName = "Other",
                     },
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 21L,
                 },
                 SynchronizerId = string.Empty,
@@ -1342,8 +1393,8 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
     [Fact]
@@ -1374,8 +1425,9 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(33L);
-        unclassified.Kind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(33L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
+        unclassified.RawKind.Should().Be(GetActiveContractsResponse.ContractEntryOneofCase.IncompleteUnassigned.ToString());
     }
 
     [Fact]
@@ -1525,12 +1577,12 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Archived = archived })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Archived>().Should().BeEmpty();
+        events.OfType<InterfaceStreamEvent<IFoo, FooView>.Archived>().Should().BeEmpty();
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(71L);
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(71L));
         unclassified.Kind.Should().Be(UnclassifiedKind.ArchivedEvent);
     }
 
@@ -1551,12 +1603,12 @@ public class LedgerClientSubscribeTests
         StubGetUpdates(MakeGetUpdatesResponse(MakeTransaction(new Event { Exercised = exercised })));
 
         var client = CreateClient();
-        var events = await CollectAsync(client.SubscribeAsync<IFoo>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
 
-        events.OfType<ContractStreamEvent<IFoo>.Exercised>().Should().BeEmpty();
+        events.OfType<InterfaceStreamEvent<IFoo, FooView>.Exercised>().Should().BeEmpty();
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<IFoo>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(93L);
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(93L));
         unclassified.Kind.Should().Be(UnclassifiedKind.ExercisedEvent);
     }
 
@@ -1575,7 +1627,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(250L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(250L));
         unclassified.Kind.Should().Be(UnclassifiedKind.AssignedEvent);
     }
 
@@ -1594,7 +1646,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00nosync",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 260L,
                 },
             },
@@ -1606,7 +1658,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(260L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(260L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -1632,7 +1684,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(261L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(261L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -1645,10 +1697,8 @@ public class LedgerClientSubscribeTests
             {
                 ContractId = "00poison",
                 TemplateId = FooBarTemplate,
-                CreateArguments = new ProtoRecord
-                {
-                    Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
-                },
+                CreateArguments = LedgerClientTestFixtures.OwnerArgumentsWith(
+                    "amount", LedgerClientTestFixtures.OutOfDecimalRangeNumeric()),
                 Offset = 5L,
             },
         };
@@ -1661,7 +1711,7 @@ public class LedgerClientSubscribeTests
 
         events.Should().HaveCount(2);
         var unclassified = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(5L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(1L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00good");
@@ -1681,10 +1731,8 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = "00poison",
                     TemplateId = FooBarTemplate,
-                    CreateArguments = new ProtoRecord
-                    {
-                        Fields = { new RecordField { Label = "amount", Value = LedgerClientTestFixtures.OutOfDecimalRangeNumeric() } },
-                    },
+                    CreateArguments = LedgerClientTestFixtures.OwnerArgumentsWith(
+                        "amount", LedgerClientTestFixtures.OutOfDecimalRangeNumeric()),
                     Offset = 300L,
                 },
             },
@@ -1698,7 +1746,7 @@ public class LedgerClientSubscribeTests
 
         events.Should().HaveCount(2);
         var unclassified = events[0].Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(300L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(300L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         events[1].Should().BeOfType<ContractStreamEvent<FooBar>.Created>()
             .Which.ContractId.Value.Should().Be("00good");
@@ -1716,7 +1764,7 @@ public class LedgerClientSubscribeTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<FooBar>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(1L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(1L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
@@ -1735,7 +1783,7 @@ public class LedgerClientSubscribeTests
             {
                 ContractId = contractId,
                 TemplateId = templateId,
-                CreateArguments = new ProtoRecord(),
+                CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                 Offset = offset,
             },
         };
@@ -1772,7 +1820,7 @@ public class LedgerClientSubscribeTests
                 {
                     ContractId = contractId,
                     TemplateId = templateId,
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = offset,
                 },
                 SynchronizerId = "sync-1",
@@ -1954,9 +2002,22 @@ public class LedgerClientSubscribeTests
         return list;
     }
 
+    private static async Task<List<InterfaceAcsSnapshotEntry<TInterface, TView>>> CollectActiveAsync<TInterface, TView>(
+        IAsyncEnumerable<InterfaceAcsSnapshotEntry<TInterface, TView>> snapshot)
+        where TInterface : IDamlInterface, IHasView<TView>
+        where TView : IDamlRecord<TView>
+    {
+        var events = await CollectAsync(snapshot);
+        events.Should().NotBeEmpty("a success-path ACS snapshot always terminates with a Checkpoint, even when empty");
+        events[^1].Should().BeOfType<InterfaceAcsSnapshotEntry<TInterface, TView>.Checkpoint>(
+            "the snapshot's terminal event carries its effective active-at offset");
+        events.RemoveAt(events.Count - 1);
+        return events;
+    }
+
     private static async Task<List<AcsSnapshotEntry<T>>> CollectActiveAsync<T>(
         IAsyncEnumerable<AcsSnapshotEntry<T>> snapshot)
-        where T : Daml.Runtime.IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var events = await CollectAsync(snapshot);
         events.Should().NotBeEmpty("a success-path ACS snapshot always terminates with a Checkpoint, even when empty");
@@ -1966,7 +2027,7 @@ public class LedgerClientSubscribeTests
         return events;
     }
 
-    internal sealed record IFoo : IDamlInterface
+    internal sealed record IFoo : IDamlInterface, IHasView<FooView>
     {
         public static RuntimeIdentifier InterfaceId { get; } = new("iface-pkg", "Sample.Foo", "IFoo");
         public static string PackageId => "iface-pkg";
@@ -1977,7 +2038,16 @@ public class LedgerClientSubscribeTests
         public DamlRecord ToRecord() => DamlRecord.Create();
     }
 
-    internal sealed record NoPackageNameTemplate(string Owner) : ITemplate
+    private static ViewDescriptor<IFoo, FooView> FooViewDescriptor { get; } = new();
+
+    internal sealed record FooView : IDamlRecord<FooView>
+    {
+        public DamlRecord ToRecord() => DamlRecord.Create();
+
+        public static FooView FromRecord(DamlRecord record) => new();
+    }
+
+    internal sealed record NoPackageNameTemplate(string Owner) : ITemplate, IDamlRecord<NoPackageNameTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("test-pkg", "Sample.Foo", "FooBar");
         public static string PackageId => "test-pkg";
@@ -1987,5 +2057,8 @@ public class LedgerClientSubscribeTests
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
+
+        public static NoPackageNameTemplate FromRecord(DamlRecord record) =>
+            new(record.GetRequiredField("owner").As<DamlParty>().Value);
     }
 }

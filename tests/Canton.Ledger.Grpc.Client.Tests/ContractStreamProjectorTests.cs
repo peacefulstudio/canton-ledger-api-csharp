@@ -51,12 +51,12 @@ public class ContractStreamProjectorTests
         var transaction = new Transaction { SynchronizerId = "sync-1" };
         transaction.Events.Add(new Event { Created = created });
 
-        var events = ContractStreamProjector.ProjectTransactionEvents<InterfaceMarker>(transaction).ToList();
+        var events = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction).ToList();
 
         var typed = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
         typed.ContractId.Value.Should().Be("00holding");
-        typed.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("view-value");
+        typed.Payload.Amount.Should().Be("view-value");
     }
 
     [Theory]
@@ -67,18 +67,18 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 11L,
         };
         created.InterfaceViews.Add(undecodableView);
         var transaction = new Transaction { SynchronizerId = "sync-1" };
         transaction.Events.Add(new Event { Created = created });
 
-        var events = ContractStreamProjector.ProjectTransactionEvents<InterfaceMarker>(transaction).ToList();
+        var events = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(11L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(11L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -109,7 +109,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 20L,
         };
         created.InterfaceViews.Add(new InterfaceView
@@ -130,11 +130,11 @@ public class ContractStreamProjectorTests
             },
         };
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response).ToList();
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
 
         var typed = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Created>().Subject;
-        typed.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("acs-view-value");
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
+        typed.Payload.Amount.Should().Be("acs-view-value");
     }
 
     [Theory]
@@ -145,7 +145,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 21L,
         };
         created.InterfaceViews.Add(undecodableView);
@@ -158,11 +158,11 @@ public class ContractStreamProjectorTests
             },
         };
 
-        var projected = ContractStreamProjector.ProjectActiveContractEntry<InterfaceMarker>(response).ToList();
+        var projected = InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
 
         var unclassified = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -173,7 +173,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 30L,
         };
         created.InterfaceViews.Add(new InterfaceView
@@ -196,11 +196,11 @@ public class ContractStreamProjectorTests
             },
         });
 
-        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
 
         var typed = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Assigned>().Subject;
-        typed.Payload.GetRequiredField("amount").As<DamlText>().Value.Should().Be("assigned-view-value");
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Assigned>().Subject;
+        typed.Payload.Amount.Should().Be("assigned-view-value");
     }
 
     private static Reassignment AssignedReassignmentWithUndecodableInterfaceView(
@@ -212,7 +212,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = createdOffset,
         };
         created.InterfaceViews.Add(undecodableView);
@@ -236,11 +236,11 @@ public class ContractStreamProjectorTests
         var reassignment = AssignedReassignmentWithUndecodableInterfaceView(
             undecodableView, createdOffset: 31L, reassignmentOffset: 31L);
 
-        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(31L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(31L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -251,11 +251,11 @@ public class ContractStreamProjectorTests
         var reassignment = AssignedReassignmentWithUndecodableInterfaceView(
             undecodableView, createdOffset: 0L, reassignmentOffset: 77L);
 
-        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -266,11 +266,11 @@ public class ContractStreamProjectorTests
         var reassignment = AssignedReassignmentWithUndecodableInterfaceView(
             undecodableView, createdOffset: 21L, reassignmentOffset: 77L);
 
-        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -281,32 +281,29 @@ public class ContractStreamProjectorTests
 
     [Theory]
     [MemberData(nameof(PoisonValues))]
-    public void ProjectTransactionEvents_surfaces_Created_with_undecodable_create_arguments_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    public void ProjectTransactionEvents_surfaces_Created_with_undecodable_create_arguments_as_decode_failure_at_the_transactions_offset(ProtoValue poisonValue)
     {
         var created = new ProtoCreatedEvent
         {
             ContractId = "00poison",
             TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord
-            {
-                Fields = { new RecordField { Label = "amount", Value = poisonValue } },
-            },
+            CreateArguments = LedgerClientTestFixtures.OwnerArgumentsWith("amount", poisonValue),
             Offset = 50L,
         };
-        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        var transaction = new Transaction { Offset = 49L, SynchronizerId = "sync-1" };
         transaction.Events.Add(new Event { Created = created });
 
         var events = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(49L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
     [Theory]
     [MemberData(nameof(PoisonValues))]
-    public void ProjectTransactionEvents_surfaces_Exercised_with_undecodable_choice_argument_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    public void ProjectTransactionEvents_surfaces_Exercised_with_undecodable_choice_argument_as_decode_failure_at_the_transactions_offset(ProtoValue poisonValue)
     {
         var exercised = new ProtoExercisedEvent
         {
@@ -318,29 +315,26 @@ public class ContractStreamProjectorTests
             Consuming = true,
             Offset = 51L,
         };
-        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        var transaction = new Transaction { Offset = 49L, SynchronizerId = "sync-1" };
         transaction.Events.Add(new Event { Exercised = exercised });
 
         var events = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction).ToList();
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(51L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(49L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
     [Theory]
     [MemberData(nameof(PoisonValues))]
-    public void ProjectReassignmentEvents_surfaces_Assigned_with_undecodable_payload_as_decode_failure_Unclassified(ProtoValue poisonValue)
+    public void ProjectReassignmentEvents_surfaces_Assigned_with_undecodable_payload_as_decode_failure_at_the_reassignments_offset(ProtoValue poisonValue)
     {
         var created = new ProtoCreatedEvent
         {
             ContractId = "00poison",
             TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord
-            {
-                Fields = { new RecordField { Label = "amount", Value = poisonValue } },
-            },
+            CreateArguments = LedgerClientTestFixtures.OwnerArgumentsWith("amount", poisonValue),
             Offset = 60L,
         };
         var reassignment = new Reassignment { Offset = 99L };
@@ -358,7 +352,53 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(60L, "the decode-failure offset comes from the created event, not the reassignment fallback");
+        unclassified.Offset.Should().Be(LedgerOffset.At(99L), "a decode failure resumes at the containing reassignment, not at the event that failed");
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_surfaces_interface_event_carrying_no_template_id_as_DecodeFailure_at_the_transactions_offset()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00no-template",
+            Offset = 50L,
+        };
+        var transaction = new Transaction { Offset = 49L, SynchronizerId = "sync-1" };
+        transaction.Events.Add(new Event { Created = created });
+
+        var events = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(49L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+    }
+
+    [Fact]
+    public void ProjectReassignmentEvents_surfaces_interface_event_carrying_no_template_id_as_DecodeFailure_at_the_reassignments_offset()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00no-template",
+            Offset = 60L,
+        };
+        var reassignment = new Reassignment { Offset = 99L };
+        reassignment.Events.Add(new ReassignmentEvent
+        {
+            Assigned = new AssignedEvent
+            {
+                Source = "sync-src",
+                Target = "sync-tgt",
+                CreatedEvent = created,
+            },
+        });
+
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
+
+        var unclassified = events.Should().ContainSingle().Subject
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(99L), "a decode failure resumes at the containing reassignment, not at the event that failed");
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
@@ -382,7 +422,57 @@ public class ContractStreamProjectorTests
 
         var typed = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        typed.Payload.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice");
+        typed.Payload.Owner.Should().Be("alice");
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_populates_Created_Key_from_the_wire_contract_key_and_hash()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00keyed",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord
+            {
+                Fields = { new RecordField { Label = "owner", Value = new ProtoValue { Party = "alice" } } },
+            },
+            ContractKey = new ProtoValue { Party = "alice" },
+            ContractKeyHash = Google.Protobuf.ByteString.CopyFrom([0x01, 0x02, 0x03]),
+            Offset = 41L,
+        };
+        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        transaction.Events.Add(new Event { Created = created });
+
+        var typed = ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction)
+            .Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
+
+        typed.Key.Should().NotBeNull(
+            "a keyed template's materialization throws when the created event carries no key");
+        typed.Key!.Value.Should().Be(new DamlParty("alice"));
+        typed.Key.KeyHash.Should().Be(Convert.ToBase64String([0x01, 0x02, 0x03]));
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_leaves_Created_Key_null_when_the_wire_carries_no_key()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00unkeyed",
+            TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord
+            {
+                Fields = { new RecordField { Label = "owner", Value = new ProtoValue { Party = "alice" } } },
+            },
+            Offset = 42L,
+        };
+        var transaction = new Transaction { SynchronizerId = "sync-1" };
+        transaction.Events.Add(new Event { Created = created });
+
+        ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(transaction)
+            .Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject
+            .Key.Should().BeNull();
     }
 
     [Fact]
@@ -399,10 +489,10 @@ public class ContractStreamProjectorTests
         var reassignment = new Reassignment { Offset = 70L };
         reassignment.Events.Add(new ReassignmentEvent { Unassigned = unassigned });
 
-        var events = ContractStreamProjector.ProjectReassignmentEvents<InterfaceMarker>(reassignment).ToList();
+        var events = InterfaceStreamProjector.ProjectReassignmentEvents<InterfaceMarker, InterfaceMarkerView>(reassignment).ToList();
 
         var typed = events.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unassigned>().Subject;
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unassigned>().Subject;
         typed.ContractId.Value.Should().Be("00holding");
         typed.Source.Id.Should().Be("sync-src");
         typed.Target.Id.Should().Be("sync-tgt");
@@ -456,7 +546,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 85L,
         };
         var response = new GetActiveContractsResponse
@@ -479,7 +569,7 @@ public class ContractStreamProjectorTests
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
         var unclassified = events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(86L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(86L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -490,7 +580,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00other",
             TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = 90L,
         };
         var response = new GetActiveContractsResponse
@@ -512,7 +602,7 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(90L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(90L));
         unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
@@ -567,7 +657,7 @@ public class ContractStreamProjectorTests
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
         var unclassified = events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -616,7 +706,7 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
         unclassified.RawKind.Should().Be(entryCase.ToString());
     }
@@ -661,7 +751,7 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(50L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
@@ -676,7 +766,7 @@ public class ContractStreamProjectorTests
                 {
                     ContractId = "00other",
                     TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                 },
                 SynchronizerId = "sync-1",
             },
@@ -688,7 +778,7 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
@@ -725,7 +815,7 @@ public class ContractStreamProjectorTests
 
         var unclassified = events.Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
@@ -737,7 +827,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = createdOffset,
         };
         created.InterfaceViews.Add(undecodableView);
@@ -757,13 +847,13 @@ public class ContractStreamProjectorTests
     {
         var response = ActiveContractEntryWithUndecodableInterfaceView(undecodableView, createdOffset: 0L);
 
-        var projected = ContractStreamProjector
-            .ProjectActiveContractEntry<InterfaceMarker>(response, logger: null, LedgerOffset.At(77L))
+        var projected = InterfaceStreamProjector
+            .ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response, logger: null, LedgerOffset.At(77L))
             .ToList();
 
         var unclassified = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -773,13 +863,13 @@ public class ContractStreamProjectorTests
     {
         var response = ActiveContractEntryWithUndecodableInterfaceView(undecodableView, createdOffset: 21L);
 
-        var projected = ContractStreamProjector
-            .ProjectActiveContractEntry<InterfaceMarker>(response, logger: null, LedgerOffset.At(77L))
+        var projected = InterfaceStreamProjector
+            .ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response, logger: null, LedgerOffset.At(77L))
             .ToList();
 
         var unclassified = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -791,7 +881,7 @@ public class ContractStreamProjectorTests
         {
             ContractId = "00holding",
             TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
-            CreateArguments = new ProtoRecord(),
+            CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
             Offset = createdOffset,
         };
         created.InterfaceViews.Add(undecodableView);
@@ -815,13 +905,13 @@ public class ContractStreamProjectorTests
     {
         var response = IncompleteAssignedEntryWithUndecodableInterfaceView(undecodableView, createdOffset: 0L);
 
-        var projected = ContractStreamProjector
-            .ProjectActiveContractEntry<InterfaceMarker>(response, logger: null, LedgerOffset.At(77L))
+        var projected = InterfaceStreamProjector
+            .ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response, logger: null, LedgerOffset.At(77L))
             .ToList();
 
         var unclassified = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -831,13 +921,13 @@ public class ContractStreamProjectorTests
     {
         var response = IncompleteAssignedEntryWithUndecodableInterfaceView(undecodableView, createdOffset: 21L);
 
-        var projected = ContractStreamProjector
-            .ProjectActiveContractEntry<InterfaceMarker>(response, logger: null, LedgerOffset.At(77L))
+        var projected = InterfaceStreamProjector
+            .ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response, logger: null, LedgerOffset.At(77L))
             .ToList();
 
         var unclassified = projected.Should().ContainSingle().Subject
-            .Should().BeOfType<ContractStreamEvent<InterfaceMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(21L);
+            .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Unclassified>().Subject;
+        unclassified.Offset.Should().Be(LedgerOffset.At(21L));
         unclassified.Kind.Should().Be(UnclassifiedKind.InterfaceViewUnavailable);
     }
 
@@ -921,13 +1011,13 @@ public class ContractStreamProjectorTests
             {
                 ContractId = "00other",
                 TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
-                CreateArguments = new ProtoRecord(),
+                CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                 Offset = 120L,
             },
         });
         transaction.Events.Add(new Event
         {
-            Created = new ProtoCreatedEvent { ContractId = "00holding", CreateArguments = new ProtoRecord(), Offset = 120L },
+            Created = new ProtoCreatedEvent { ContractId = "00holding", CreateArguments = LedgerClientTestFixtures.OwnerArguments(), Offset = 120L },
         });
         var loggerFactory = new CapturingLoggerFactory();
 
@@ -990,7 +1080,7 @@ public class ContractStreamProjectorTests
                 {
                     ContractId = "00other",
                     TemplateId = new ProtoIdentifier { PackageId = "other-pkg", ModuleName = "Other.Module", EntityName = "Other" },
-                    CreateArguments = new ProtoRecord(),
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
                     Offset = 140L,
                 },
             },
@@ -1001,7 +1091,7 @@ public class ContractStreamProjectorTests
             {
                 Source = "sync-src",
                 Target = "sync-tgt",
-                CreatedEvent = new ProtoCreatedEvent { ContractId = "00holding", CreateArguments = new ProtoRecord(), Offset = 140L },
+                CreatedEvent = new ProtoCreatedEvent { ContractId = "00holding", CreateArguments = LedgerClientTestFixtures.OwnerArguments(), Offset = 140L },
             },
         });
         var loggerFactory = new CapturingLoggerFactory();
@@ -1015,6 +1105,45 @@ public class ContractStreamProjectorTests
             .Which.Kind.Should().Be(UnclassifiedKind.AssignedEvent);
         events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>()
             .Which.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public void ProjectActiveContractEntry_keeps_the_snapshot_running_when_an_incomplete_unassigned_carries_no_contract_id()
+    {
+        var response = new GetActiveContractsResponse
+        {
+            IncompleteUnassigned = new IncompleteUnassigned
+            {
+                CreatedEvent = new ProtoCreatedEvent
+                {
+                    ContractId = "00holding",
+                    TemplateId = new ProtoIdentifier { PackageId = "tmpl-pkg", ModuleName = "Sample.Token", EntityName = "Holding" },
+                    CreateArguments = LedgerClientTestFixtures.OwnerArguments(),
+                    Offset = 42L,
+                },
+                UnassignedEvent = new UnassignedEvent
+                {
+                    ContractId = string.Empty,
+                    Source = "sync-1",
+                    Target = "sync-2",
+                    Offset = 43L,
+                    ReassignmentId = "reassignment-1",
+                    ReassignmentCounter = 7UL,
+                },
+            },
+        };
+        var loggerFactory = new CapturingLoggerFactory();
+
+        var events = ContractStreamProjector
+            .ProjectActiveContractEntry<TemplateMarker>(response, loggerFactory.CreateLogger("test"))
+            .ToList();
+
+        events.Should().HaveCount(2);
+        events[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
+        var unclassified = events[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        unclassified.Offset.Should().Be(LedgerOffset.At(43L));
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
 }

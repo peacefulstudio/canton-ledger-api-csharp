@@ -65,7 +65,7 @@ public sealed class FakePqsClient : IPqsClient
     public Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord =>
+        where TView : IDamlRecord<TView> =>
         Task.FromResult(StagedInterfaceContracts<TInterface, TView>());
 
     /// <summary>
@@ -77,7 +77,7 @@ public sealed class FakePqsClient : IPqsClient
         PqsPage page,
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         ArgumentNullException.ThrowIfNull(page);
         return Task.FromResult(Slice(StagedInterfaceContracts<TInterface, TView>(), page));
@@ -118,13 +118,19 @@ public sealed class FakePqsClient : IPqsClient
 
     /// <inheritdoc />
     public Task<Contract<T>?> FetchByIdAsync<T>(ContractId<T> contractId, CancellationToken cancellationToken = default)
-        where T : ITemplate =>
-        Task.FromResult(StagedContracts<T>().FirstOrDefault(c => c.Id.Equals(contractId)));
+        where T : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return Task.FromResult(StagedContracts<T>().FirstOrDefault(c => c.Id.Equals(contractId)));
+    }
 
     /// <inheritdoc />
     public Task<bool> ExistsAsync<T>(ContractId<T> contractId, CancellationToken cancellationToken = default)
-        where T : ITemplate =>
-        Task.FromResult(StagedContracts<T>().Any(c => c.Id.Equals(contractId)));
+        where T : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(contractId);
+        return Task.FromResult(StagedContracts<T>().Any(c => c.Id.Equals(contractId)));
+    }
 
     private IReadOnlyList<Contract<T>> StagedContracts<T>()
         where T : ITemplate
@@ -141,7 +147,7 @@ public sealed class FakePqsClient : IPqsClient
 
     private IReadOnlyList<InterfaceContract<TInterface, TView>> StagedInterfaceContracts<TInterface, TView>()
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         if (_interfaceResults.TryGetValue(typeof(TInterface), out var staged))
         {

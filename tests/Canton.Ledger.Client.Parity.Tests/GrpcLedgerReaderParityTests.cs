@@ -1,9 +1,11 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Xunit;
 
@@ -28,18 +30,25 @@ public sealed class GrpcLedgerReaderParityTests : LedgerReaderParityTests
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        ServiceProvider? services = null;
         try
         {
             var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-            var client = new LedgerClient(
-                new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = fixture.ValidatorUserId },
-                new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync));
+            services = new ServiceCollection()
+                .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+                .AddLedgerClient(options =>
+                {
+                    options.GrpcAddress = grpcAddress;
+                    options.UserId = fixture.ValidatorUserId;
+                })
+                .BuildServiceProvider();
 
-            return new CapabilityLane<ILedgerReader>(client, async () =>
+            var reader = services.GetRequiredService<ILedgerReader>();
+            return new CapabilityLane<ILedgerReader>(reader, async () =>
             {
                 try
                 {
-                    await client.DisposeAsync().ConfigureAwait(false);
+                    await services.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
@@ -49,6 +58,11 @@ public sealed class GrpcLedgerReaderParityTests : LedgerReaderParityTests
         }
         catch
         {
+            if (services is not null)
+            {
+                await services.DisposeAsync().ConfigureAwait(false);
+            }
+
             await fixture.DisposeAsync().ConfigureAwait(false);
             throw;
         }

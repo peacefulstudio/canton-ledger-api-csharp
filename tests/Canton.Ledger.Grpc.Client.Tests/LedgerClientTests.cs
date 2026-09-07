@@ -4,6 +4,7 @@
 using System.Reflection;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -13,6 +14,7 @@ using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -27,7 +29,7 @@ using Status = Grpc.Core.Status;
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 [Collection("LedgerClient global ActivitySource")]
-public class LedgerClientTests
+public sealed class LedgerClientTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
     private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
@@ -45,13 +47,13 @@ public class LedgerClientTests
             UserId = "test-user"
         };
 
-        // Create a real channel (won't be used since we mock service client)
         _channel = GrpcChannel.ForAddress(_options.GrpcAddress);
 
-        // Create a mock CallInvoker and use ForPartsOf to create a partial mock of the service client
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
 
@@ -124,18 +126,7 @@ public class LedgerClientTests
         var transaction = new Transaction { UpdateId = "update-123", Offset = 456L, CommandId = "cmd-echoed" };
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(CreateCmd())
             .WithActAs(ActAs)
@@ -173,18 +164,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -222,18 +202,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise(cid: "00archived123");
 
@@ -270,18 +239,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise(choice: "Transfer", cid: "00contract999");
 
@@ -413,20 +371,9 @@ public class LedgerClientTests
 
         var secondCommandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(
             Substitute.For<CallInvoker>());
-        secondCommandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(secondCommandService, response);
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         using var firstChannel = GrpcChannel.ForAddress(_options.GrpcAddress);
         var firstClient = new LedgerClient(_options, firstChannel, _commandService, _tokenProvider);
@@ -454,18 +401,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise();
 
@@ -482,18 +418,7 @@ public class LedgerClientTests
     {
         var response = new SubmitAndWaitForTransactionResponse();
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise();
 
@@ -522,18 +447,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise();
 
@@ -561,18 +475,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise();
 
@@ -601,18 +504,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise(choice: "Accept");
 
@@ -641,18 +533,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise();
 
@@ -682,18 +563,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response, r => capturedRequest = r);
 
         var exerciseCommand = Exercise();
 
@@ -726,18 +596,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response, r => capturedRequest = r);
 
         var exerciseCommand = Exercise();
         var submitter = new RuntimeCommands.SubmitterInfo(
@@ -762,18 +621,7 @@ public class LedgerClientTests
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capturedRequest = r),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response, r => capturedRequest = r);
 
         var createCommand = new RuntimeCommands.CreateCommand(
             new RuntimeIdentifier("pkg", "Module", "Template"),
@@ -817,18 +665,7 @@ public class LedgerClientTests
 
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
 
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
         var exerciseCommand = Exercise(choice: "Bump");
 
@@ -862,13 +699,13 @@ public class LedgerClientTests
     [Fact]
     public void LedgerClient_constructor_does_not_throw_when_ITokenProvider_None()
     {
-        using var _ = new LedgerClient(_options, ITokenProvider.None);
+        using var _ = new LedgerClient(Options.Create(_options), ITokenProvider.None);
     }
 
     [Fact]
     public void LedgerClient_constructor_does_not_throw_when_real_provider_registered()
     {
-        using var _ = new LedgerClient(_options, _tokenProvider);
+        using var _ = new LedgerClient(Options.Create(_options), _tokenProvider);
     }
 
     [Fact]
@@ -917,7 +754,7 @@ public class LedgerClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
 
-        using var client = new LedgerClient(options, _tokenProvider, new Logger<LedgerClient>(loggerFactory));
+        using var client = new LedgerClient(Options.Create(options), _tokenProvider, new Logger<LedgerClient>(loggerFactory));
 
         loggerFactory.Records.Should().Contain(r =>
             r.Level == LogLevel.Warning
@@ -931,7 +768,7 @@ public class LedgerClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "http://participant.internal:5001" };
 
-        using var client = new LedgerClient(options, ITokenProvider.None, new Logger<LedgerClient>(loggerFactory));
+        using var client = new LedgerClient(Options.Create(options), ITokenProvider.None, new Logger<LedgerClient>(loggerFactory));
 
         loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
@@ -942,7 +779,7 @@ public class LedgerClientTests
         var loggerFactory = new CapturingLoggerFactory();
         var options = new LedgerClientOptions { GrpcAddress = "https://participant.internal:5001" };
 
-        using var client = new LedgerClient(options, _tokenProvider, new Logger<LedgerClient>(loggerFactory));
+        using var client = new LedgerClient(Options.Create(options), _tokenProvider, new Logger<LedgerClient>(loggerFactory));
 
         loggerFactory.Records.Should().NotContain(r => r.Message.Contains("plaintext http"));
     }
@@ -1035,22 +872,11 @@ public class LedgerClientTests
 
     private void StubSubmitAndWaitForTransaction(
         Transaction transaction,
-        Action<SubmitAndWaitForTransactionRequest>? capture = null)
-    {
-        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Do<SubmitAndWaitForTransactionRequest>(r => capture?.Invoke(r)),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
-    }
+        Action<SubmitAndWaitForTransactionRequest>? capture = null) =>
+        LedgerClientTestFixtures.StubCommandServiceSuccess(
+            _commandService,
+            new SubmitAndWaitForTransactionResponse { Transaction = transaction },
+            capture);
 
     private static Transaction TreeShapedTransaction()
     {
@@ -1083,7 +909,7 @@ public class LedgerClientTests
         },
     };
 
-    internal sealed record TestTemplate(string Owner) : ITemplate
+    internal sealed record TestTemplate(string Owner) : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -1093,5 +919,8 @@ public class LedgerClientTests
 
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new(record.GetRequiredField("owner").As<DamlParty>().Value);
     }
 }
