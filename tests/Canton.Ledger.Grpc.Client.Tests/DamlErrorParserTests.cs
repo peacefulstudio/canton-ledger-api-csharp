@@ -41,9 +41,7 @@ public class DamlErrorParserTests
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = raw });
 
-        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
-
-        category.Should().Be(expected);
+        ParseStructured(ex).Category.Should().Be(expected);
     }
 
     [Theory]
@@ -69,9 +67,7 @@ public class DamlErrorParserTests
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = wireCategoryId });
 
-        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
-
-        category.Should().Be(expected);
+        ParseStructured(ex).Category.Should().Be(expected);
     }
 
     [Theory]
@@ -85,9 +81,7 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string> { ["category"] = raw });
 
-        var (category, _, _, _, _) = DamlErrorParser.Parse(ex);
-
-        category.Should().Be(expected);
+        ParseStructured(ex).Category.Should().Be(expected);
     }
 
     [Fact]
@@ -99,10 +93,10 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string> { ["category"] = "TotallyMadeUpCategory" });
 
-        var (category, errorId, _, _, _) = DamlErrorParser.Parse(ex);
+        var structured = ParseStructured(ex);
 
-        category.Should().Be(DamlErrorCategory.Unknown);
-        errorId.Should().Be("OPAQUE");
+        structured.Category.Should().Be(DamlErrorCategory.Unknown);
+        structured.ErrorId.Should().Be("OPAQUE");
     }
 
     [Fact]
@@ -114,10 +108,10 @@ public class DamlErrorParserTests
             statusMessage: "x",
             metadata: new Dictionary<string, string>());
 
-        var (category, errorId, _, _, _) = DamlErrorParser.Parse(ex);
+        var structured = ParseStructured(ex);
 
-        category.Should().Be(DamlErrorCategory.Unknown);
-        errorId.Should().Be("NO_CATEGORY");
+        structured.Category.Should().Be(DamlErrorCategory.Unknown);
+        structured.ErrorId.Should().Be("NO_CATEGORY");
     }
 
     [Fact]
@@ -129,10 +123,10 @@ public class DamlErrorParserTests
             statusMessage: "not found",
             metadata: new Dictionary<string, string> { ["category"] = "InvalidGivenCurrentSystemStateResourceMissing" });
 
-        var (_, errorId, message, _, _) = DamlErrorParser.Parse(ex);
+        var structured = ParseStructured(ex);
 
-        errorId.Should().Be("CONTRACT_NOT_FOUND");
-        message.Should().Be("not found");
+        structured.ErrorId.Should().Be("CONTRACT_NOT_FOUND");
+        structured.Message.Should().Be("not found");
     }
 
     [Fact]
@@ -149,7 +143,7 @@ public class DamlErrorParserTests
                 ["sequence"] = "42",
             });
 
-        var (_, _, _, metadata, _) = DamlErrorParser.Parse(ex);
+        var metadata = ParseStructured(ex).Metadata;
 
         metadata.Should().ContainKey("category");
         metadata.Should().Contain(new KeyValuePair<string, string>("resource_id", "00abc"));
@@ -157,21 +151,18 @@ public class DamlErrorParserTests
     }
 
     [Fact]
-    public void Parse_falls_back_to_unknown_when_trailers_are_missing()
+    public void Parse_yields_an_unclassified_Unstructured_failure_when_trailers_are_missing()
     {
-        // No trailers → no rich error model available.
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Unavailable, "service down"));
 
-        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
+        var unstructured = ParseUnstructured(ex);
 
-        category.Should().Be(DamlErrorCategory.Unknown);
-        errorId.Should().BeEmpty();
-        message.Should().Be("service down");
-        metadata.Should().BeEmpty();
+        unstructured.Category.Should().BeNull();
+        unstructured.Message.Should().Be("service down");
     }
 
     [Fact]
-    public void Parse_falls_back_to_unknown_when_trailer_payload_is_unparseable()
+    public void Parse_yields_an_unclassified_Unstructured_failure_when_the_trailer_payload_is_unparseable()
     {
         var trailers = new Metadata
         {
@@ -179,18 +170,15 @@ public class DamlErrorParserTests
         };
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Internal, "garbled"), trailers);
 
-        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
+        var unstructured = ParseUnstructured(ex);
 
-        category.Should().Be(DamlErrorCategory.Unknown);
-        errorId.Should().BeEmpty();
-        message.Should().Be("garbled");
-        metadata.Should().BeEmpty();
+        unstructured.Category.Should().BeNull();
+        unstructured.Message.Should().Be("garbled");
     }
 
     [Fact]
-    public void Parse_falls_back_to_unknown_when_status_has_no_error_info()
+    public void Parse_yields_an_unclassified_Unstructured_failure_when_the_status_has_no_error_info()
     {
-        // Status is present but carries no ErrorInfo detail.
         var status = new GrpcStatus { Code = (int)StatusCode.Unknown, Message = "no details here" };
         var trailers = new Metadata
         {
@@ -198,12 +186,10 @@ public class DamlErrorParserTests
         };
         var ex = new RpcException(new GrpcCallStatus(StatusCode.Unknown, "no details here"), trailers);
 
-        var (category, errorId, message, metadata, _) = DamlErrorParser.Parse(ex);
+        var unstructured = ParseUnstructured(ex);
 
-        category.Should().Be(DamlErrorCategory.Unknown);
-        errorId.Should().BeEmpty();
-        message.Should().Be("no details here");
-        metadata.Should().BeEmpty();
+        unstructured.Category.Should().BeNull();
+        unstructured.Message.Should().Be("no details here");
     }
 
     [Theory]
@@ -223,7 +209,7 @@ public class DamlErrorParserTests
             statusMessage: "boom",
             metadata: new Dictionary<string, string> { ["category"] = wireCategory });
 
-        DamlErrorParser.Parse(ex).Category.Should().Be(expected);
+        ParseStructured(ex).Category.Should().Be(expected);
     }
 
     [Fact]
@@ -246,13 +232,11 @@ public class DamlErrorParserTests
     {
         var ex = MakeRedactedRpcException(statusCode);
 
-        var (category, errorId, message, metadata, transportStatusCode) = DamlErrorParser.Parse(ex);
+        var unstructured = ParseUnstructured(ex);
 
-        category.Should().Be(expected);
-        errorId.Should().BeEmpty();
-        message.Should().Be(RedactedMessage);
-        metadata.Should().BeEmpty();
-        transportStatusCode.Should().Be((int)statusCode);
+        unstructured.Category.Should().Be(expected);
+        unstructured.Message.Should().Be(RedactedMessage);
+        unstructured.StatusCode.Should().Be((int)statusCode);
     }
 
     [Theory]
@@ -261,13 +245,19 @@ public class DamlErrorParserTests
     [InlineData(StatusCode.InvalidArgument)]
     [InlineData(StatusCode.Unavailable)]
     [InlineData(StatusCode.Internal)]
-    public void Parse_leaves_every_other_status_code_unknown_when_the_status_carries_no_ErrorInfo(
+    public void Parse_leaves_every_other_status_code_unclassified_when_the_status_carries_no_ErrorInfo(
         StatusCode statusCode)
     {
         var ex = MakeRedactedRpcException(statusCode);
 
-        DamlErrorParser.Parse(ex).Category.Should().Be(DamlErrorCategory.Unknown);
+        ParseUnstructured(ex).Category.Should().BeNull();
     }
+
+    private static ParsedLedgerError.Structured ParseStructured(RpcException exception) =>
+        DamlErrorParser.Parse(exception).Should().BeOfType<ParsedLedgerError.Structured>().Subject;
+
+    private static ParsedLedgerError.Unstructured ParseUnstructured(RpcException exception) =>
+        DamlErrorParser.Parse(exception).Should().BeOfType<ParsedLedgerError.Unstructured>().Subject;
 
     private const string RedactedCorrelationId = "0123456789abcdef0123456789abcdef";
 

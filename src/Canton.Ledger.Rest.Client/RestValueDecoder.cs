@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using Canton.Ledger.Kernel.Wire;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Serialization;
@@ -21,10 +22,25 @@ namespace Canton.Ledger.Rest.Client;
 
 internal static class RestValueDecoder
 {
-    private static InvalidOperationException MalformedResponse(string detail) =>
-        new($"{RestTransactionResultProjector.MalformedResponsePrefix}{detail}");
+    public static DamlRecord ToDamlRecord(WireRecord? record) =>
+        MalformedResponse.Decoding(record, DecodeRecord);
 
-    public static DamlRecord ToDamlRecord(WireRecord? record)
+    public static DamlRecord ToDamlRecord<TShape>(WireRecord? record)
+        where TShape : IDamlRecord<TShape> =>
+        MalformedResponse.Decoding(record, DecodeRecordShapedAs<TShape>);
+
+    public static DamlValue ToDamlValue(WireValue value) =>
+        MalformedResponse.Decoding(value, DecodeValue);
+
+    private static DamlRecord DecodeRecord(WireRecord? record) =>
+        DecodeRecord(record, WithTypesInferredFromJson);
+
+    private static DamlRecord DecodeRecordShapedAs<TShape>(WireRecord? record)
+        where TShape : IDamlRecord<TShape> =>
+        DecodeRecord(record, lfJson => DamlLfJsonReader.ReadRecord<TShape>(lfJson));
+
+    private static DamlRecord DecodeRecord(
+        WireRecord? record, Func<JsonElement, DamlRecord> decodeLfJson)
     {
         if (record is null) return new DamlRecord(null, []);
 
@@ -34,7 +50,7 @@ internal static class RestValueDecoder
             foreach (var field in fields)
             {
                 var fieldValue = field?.Value
-                    ?? throw MalformedResponse($"Record field '{field?.Label}' has no value set.");
+                    ?? throw MalformedResponse.WithDetail($"Record field '{field?.Label}' has no value set.");
                 damlFields.Add(new DamlField(field.Label, ToDamlValue(fieldValue)));
             }
             return new DamlRecord(ToRuntimeIdentifier(record.RecordId), damlFields);
@@ -42,13 +58,17 @@ internal static class RestValueDecoder
 
         if (record.AdditionalProperties is { Count: > 0 } idiomaticFields)
         {
-            return DamlJsonSerializer.DeserializeRecord(JsonSerializer.Serialize(idiomaticFields));
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(idiomaticFields));
+            return decodeLfJson(document.RootElement);
         }
 
         return new DamlRecord(ToRuntimeIdentifier(record.RecordId), []);
     }
 
-    public static DamlValue ToDamlValue(WireValue value)
+    private static DamlRecord WithTypesInferredFromJson(JsonElement lfJson) =>
+        DamlJsonSerializer.DeserializeRecord(lfJson.GetRawText());
+
+    private static DamlValue DecodeValue(WireValue value)
     {
         if (value.Record is not null) return ToDamlRecord(value.Record);
         if (value.Variant is not null) return ToDamlVariant(value.Variant);
@@ -66,13 +86,13 @@ internal static class RestValueDecoder
         if (value.Bool is { } boolean) return new DamlBool(boolean);
         if (value.Date is { } days) return DamlDate.FromDaysSinceEpoch(days);
         if (value.AdditionalProperties.ContainsKey(WireValueNames.Unit)) return DamlUnit.Instance;
-        throw MalformedResponse("Received a wire Value with no recognisable sum case set.");
+        throw MalformedResponse.WithDetail("Received a wire Value with no recognisable sum case set.");
     }
 
     private static DamlVariant ToDamlVariant(WireVariant variant)
     {
         var inner = variant.Value
-            ?? throw MalformedResponse($"Variant '{variant.Constructor}' has no value set.");
+            ?? throw MalformedResponse.WithDetail($"Variant '{variant.Constructor}' has no value set.");
         return new DamlVariant(ToRuntimeIdentifier(variant.VariantId), variant.Constructor, ToDamlValue(inner));
     }
 
@@ -82,7 +102,7 @@ internal static class RestValueDecoder
         var values = new List<DamlValue>(elements.Count);
         foreach (var element in elements)
         {
-            values.Add(ToDamlValue(element ?? throw MalformedResponse("List contains a null element.")));
+            values.Add(ToDamlValue(element ?? throw MalformedResponse.WithDetail("List contains a null element.")));
         }
         return new DamlList(values);
     }
@@ -97,10 +117,10 @@ internal static class RestValueDecoder
         foreach (var entry in entries)
         {
             var entryValue = entry?.Value
-                ?? throw MalformedResponse($"TextMap entry '{entry?.Key}' has no value set.");
+                ?? throw MalformedResponse.WithDetail($"TextMap entry '{entry?.Key}' has no value set.");
             if (!decoded.TryAdd(entry.Key, ToDamlValue(entryValue)))
             {
-                throw MalformedResponse($"TextMap contains duplicate key '{entry.Key}'.");
+                throw MalformedResponse.WithDetail($"TextMap contains duplicate key '{entry.Key}'.");
             }
         }
         return new DamlTextMap(decoded);
@@ -112,8 +132,8 @@ internal static class RestValueDecoder
         var pairs = new List<(DamlValue Key, DamlValue Value)>(entries.Count);
         foreach (var entry in entries)
         {
-            var entryKey = entry?.Key ?? throw MalformedResponse("GenMap entry has no key set.");
-            var entryValue = entry.Value ?? throw MalformedResponse("GenMap entry has no value set.");
+            var entryKey = entry?.Key ?? throw MalformedResponse.WithDetail("GenMap entry has no key set.");
+            var entryValue = entry.Value ?? throw MalformedResponse.WithDetail("GenMap entry has no value set.");
             pairs.Add((ToDamlValue(entryKey), ToDamlValue(entryValue)));
         }
         return new DamlGenMap(pairs);

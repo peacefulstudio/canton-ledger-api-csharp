@@ -2,18 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Kernel.Telemetry;
+using Canton.Ledger.Kernel.Wire;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
 
-public sealed partial class LedgerClient
+internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     public Task<TransactionResult> GetUpdateByOffsetAsync(
         long offset,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
@@ -31,6 +33,7 @@ public sealed partial class LedgerClient
             (headers, deadline, token) => _updateService.GetUpdateByOffsetAsync(request, headers, deadline, token),
             response => ProjectPointReadTransaction(response, $"offset {offset}"),
             cancellationToken,
+            timeout: timeout,
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerClientActivityTags.CantonOffset, offset);
@@ -42,6 +45,7 @@ public sealed partial class LedgerClient
     public Task<TransactionResult> GetUpdateByIdAsync(
         string updateId,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(updateId);
@@ -59,6 +63,7 @@ public sealed partial class LedgerClient
             (headers, deadline, token) => _updateService.GetUpdateByIdAsync(request, headers, deadline, token),
             response => ProjectPointReadTransaction(response, $"id {updateId}"),
             cancellationToken,
+            timeout: timeout,
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerClientActivityTags.CantonUpdateId, updateId);
@@ -66,10 +71,12 @@ public sealed partial class LedgerClient
             });
     }
 
-    internal Task<TransactionTree> GetUpdateTreeByOffsetAsync(
+    /// <inheritdoc />
+    public Task<TransactionTree> GetUpdateTreeByOffsetAsync(
         long offset,
         RuntimeCommands.SubmitterInfo submitter,
-        CancellationToken cancellationToken)
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
 
@@ -86,6 +93,7 @@ public sealed partial class LedgerClient
             (headers, deadline, token) => _updateService.GetUpdateByOffsetAsync(request, headers, deadline, token),
             response => ProjectPointRead(response, $"offset {offset}", GrpcTransactionTreeProjector.Project),
             cancellationToken,
+            timeout: timeout,
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerClientActivityTags.CantonOffset, offset);
@@ -96,7 +104,7 @@ public sealed partial class LedgerClient
     private static TransactionResult ProjectPointReadTransaction(GetUpdateResponse response, string lookupDescription) =>
         ProjectPointRead(response, lookupDescription, GrpcTransactionResultProjector.Project);
 
-    private static TProjection ProjectPointRead<TProjection>(
+    internal static TProjection ProjectPointRead<TProjection>(
         GetUpdateResponse response,
         string lookupDescription,
         Func<Transaction, TProjection> project)
@@ -112,14 +120,9 @@ public sealed partial class LedgerClient
         {
             return project(response.Transaction);
         }
-        catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
+        catch (Exception decodeFailure) when (MalformedResponse.IsWireDecodeFailure(decodeFailure))
         {
-            var detail = decodeFailure.Message.StartsWith(GrpcTransactionResultProjector.MalformedResponsePrefix, StringComparison.Ordinal)
-                ? decodeFailure.Message[GrpcTransactionResultProjector.MalformedResponsePrefix.Length..]
-                : decodeFailure.Message;
-            throw new InvalidOperationException(
-                $"{GrpcTransactionResultProjector.MalformedResponsePrefix}the transaction at {lookupDescription} could not be decoded: {detail}",
-                decodeFailure);
+            throw MalformedResponse.CouldNotDecodeTransaction(lookupDescription, decodeFailure);
         }
     }
 }

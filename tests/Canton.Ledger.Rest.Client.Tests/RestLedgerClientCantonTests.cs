@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -12,6 +13,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -42,7 +44,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         return factory;
     }
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -50,6 +52,9 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport, string? userId = null) =>
@@ -131,7 +136,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, """{"version":"3.5.9"}""");
         var client = ClientWith(transport);
 
-        var version = await client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
+        var version = await client.GetLedgerApiVersionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         version.Should().Be("3.5.9");
         transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/version");
@@ -143,7 +148,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.ServiceUnavailable, "{}");
         var client = ClientWith(transport);
 
-        var act = () => client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
+        var act = () => client.GetLedgerApiVersionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<LedgerOperationException>();
     }
@@ -189,7 +194,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var client = ClientWith(transport);
 
         await client.GetConnectedSynchronizersAsync(
-            Alice, "participant-1", TestContext.Current.CancellationToken);
+            Alice, "participant-1", cancellationToken: TestContext.Current.CancellationToken);
 
         var query = transport.LastRequest!.RequestUri!.Query;
         query.Should().Contain("party=party%3A%3Aalice").And.Contain("participantId=participant-1");
@@ -219,7 +224,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, PointReadTransactionBody);
         var client = ClientWith(transport);
 
-        var result = await client.GetUpdateByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         result.UpdateId.Should().Be("upd-1");
         result.CompletionOffset.Value.Should().Be(7L);
@@ -235,7 +240,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
     {
         var client = ClientWith(new RecordingHttpHandler());
 
-        var act = () => client.GetUpdateByOffsetAsync(offset, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(offset, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
@@ -247,7 +252,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             HttpStatusCode.OK, """{"update": {"Reassignment": {"value": {"offset": "7", "events": []}}}}""");
         var client = ClientWith(transport);
 
-        var act = () => client.GetUpdateByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.Which.Message.Should().Contain("Reassignment");
@@ -259,7 +264,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, PointReadTransactionBody);
         var client = ClientWith(transport);
 
-        var result = await client.GetUpdateByIdAsync("upd-1", AliceSubmitter, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByIdAsync("upd-1", AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         result.UpdateId.Should().Be("upd-1");
         transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/updates/update-by-id");
@@ -274,7 +279,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
     {
         var client = ClientWith(new RecordingHttpHandler());
 
-        var act = () => client.GetUpdateByIdAsync(updateId, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateByIdAsync(updateId, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -288,7 +293,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             .WithActAs(Alice)
             .WithCommandId(new RuntimeCommands.CommandId("cmd-fire"));
 
-        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("cmd-fire");
         transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/commands/async/submit");
@@ -305,7 +310,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var submission = RuntimeCommands.CommandsSubmission.Single(RuntimeCommands.CreateCommand.For(new TestTemplate()))
             .WithActAs(Alice);
 
-        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().NotBeNullOrWhiteSpace();
         using var body = JsonDocument.Parse(transport.LastRequestBody!);
@@ -322,7 +327,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var submission = RuntimeCommands.CommandsSubmission.Single(RuntimeCommands.CreateCommand.For(new TestTemplate()))
             .WithActAs(Alice);
 
-        var act = () => client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var act = () => client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<LedgerOperationException>();
         thrown.Which.ErrorId.Should().Be("INVALID_ARGUMENT");
@@ -337,7 +342,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             .Of(new UnassignCommand("00cid", new SynchronizerId("sync-a"), new SynchronizerId("sync-b")), Alice)
             .WithCommandId(new RuntimeCommands.CommandId("cmd-reassign"));
 
-        var commandId = await client.SubmitReassignmentAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitReassignmentAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("cmd-reassign");
         transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/commands/async/submit-reassignment");
@@ -358,11 +363,86 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var submission = ReassignmentSubmission
             .Of(new UnassignCommand("00cid", new SynchronizerId("sync-a"), new SynchronizerId("sync-b")), Alice);
 
-        var act = () => client.SubmitReassignmentAsync(submission, TestContext.Current.CancellationToken);
+        var act = () => client.SubmitReassignmentAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<LedgerOperationException>();
         thrown.Which.ErrorId.Should().Be("INVALID_ARGUMENT");
     }
+
+    [Theory]
+    [InlineData(nameof(RestLedgerClient.SubmitAsync))]
+    [InlineData(nameof(RestLedgerClient.SubmitReassignmentAsync))]
+    [InlineData(nameof(RestLedgerClient.GetConnectedSynchronizersAsync))]
+    [InlineData(nameof(RestLedgerClient.GetLedgerApiVersionAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateByOffsetAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateByIdAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateTreeByOffsetAsync))]
+    public async Task RestLedgerClient_per_call_timeout_ends_a_request_the_participant_never_answers(string operation)
+    {
+        var client = ClientWith(new RecordingHttpHandler().WithNoAnswerUntilCancelled(), userId: "test-user");
+
+        var act = () => Invoke(
+            client, operation, TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken);
+
+        var elapsed = Stopwatch.StartNew();
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "the per-call deadline is the only thing that can end a request the participant never answers, so a "
+            + "timeout the transport never sees would hang the caller for the HttpClient default instead");
+
+        elapsed.Elapsed.Should().BeLessThan(
+            TimeSpan.FromSeconds(30),
+            "a timeout the transport never sees still ends this request eventually, on HttpClient's own 100-second "
+            + "default — so only the elapsed time distinguishes an honoured per-call deadline from a dropped one");
+    }
+
+    [Theory]
+    [InlineData(nameof(RestLedgerClient.SubmitAsync))]
+    [InlineData(nameof(RestLedgerClient.SubmitReassignmentAsync))]
+    [InlineData(nameof(RestLedgerClient.GetConnectedSynchronizersAsync))]
+    [InlineData(nameof(RestLedgerClient.GetLedgerApiVersionAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateByOffsetAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateByIdAsync))]
+    [InlineData(nameof(RestLedgerClient.GetUpdateTreeByOffsetAsync))]
+    public async Task RestLedgerClient_leaves_a_request_alone_when_no_per_call_timeout_is_supplied(string operation)
+    {
+        var client = ClientWith(new RecordingHttpHandler().WithNoAnswerUntilCancelled(), userId: "test-user");
+        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        var act = () => Invoke(client, operation, timeout: null, caller.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "with no per-call deadline the caller's own token is what ends the request");
+    }
+
+    private static Task Invoke(
+        RestLedgerClient client, string operation, TimeSpan? timeout, CancellationToken cancellationToken) =>
+        operation switch
+        {
+            nameof(RestLedgerClient.SubmitAsync) =>
+                client.SubmitAsync(FireSubmission(), timeout, cancellationToken),
+            nameof(RestLedgerClient.SubmitReassignmentAsync) =>
+                client.SubmitReassignmentAsync(FireReassignment(), timeout, cancellationToken),
+            nameof(RestLedgerClient.GetConnectedSynchronizersAsync) =>
+                client.GetConnectedSynchronizersAsync(timeout: timeout, cancellationToken: cancellationToken),
+            nameof(RestLedgerClient.GetLedgerApiVersionAsync) =>
+                client.GetLedgerApiVersionAsync(timeout, cancellationToken),
+            nameof(RestLedgerClient.GetUpdateByOffsetAsync) =>
+                client.GetUpdateByOffsetAsync(7L, AliceSubmitter, timeout, cancellationToken),
+            nameof(RestLedgerClient.GetUpdateByIdAsync) =>
+                client.GetUpdateByIdAsync("upd-1", AliceSubmitter, timeout, cancellationToken),
+            nameof(RestLedgerClient.GetUpdateTreeByOffsetAsync) =>
+                client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, timeout, cancellationToken),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(operation), operation, "no per-call-deadline call is mapped for this operation"),
+        };
+
+    private static RuntimeCommands.CommandsSubmission FireSubmission() =>
+        RuntimeCommands.CommandsSubmission.Single(RuntimeCommands.CreateCommand.For(new TestTemplate()))
+            .WithActAs(Alice);
+
+    private static ReassignmentSubmission FireReassignment() =>
+        ReassignmentSubmission.Of(
+            new UnassignCommand("00cid", new SynchronizerId("sync-a"), new SynchronizerId("sync-b")), Alice);
 
     [Fact]
     public async Task TrySubmitAndWaitForReassignmentAsync_projects_the_unassigned_event()
@@ -439,6 +519,58 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             .Which.Message.Should().Contain("connection refused");
     }
 
+    [Fact]
+    public async Task TrySubmitAndWaitForReassignmentAsync_carries_the_caught_projection_failure_into_the_InfraError_source_exception()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """{"reassignment": {"updateId": "upd-1", "offset": "not-an-offset", "events": []}}""");
+        var logger = new LoggerFailingOnItsFirstWrite();
+        var client = new RestLedgerClient(
+            TrackedFactory(transport),
+            Options.Create(new RestLedgerClientOptions { HttpAddress = "http://localhost:7575" }),
+            logger);
+        var submission = ReassignmentSubmission.Of(
+            new UnassignCommand("00cid", new SynchronizerId("sync-a"), new SynchronizerId("sync-b")), Alice);
+
+        var outcome = await client.TrySubmitAndWaitForReassignmentAsync<TestTemplate>(
+            submission, cancellationToken: TestContext.Current.CancellationToken);
+
+        var infraError = outcome.Should()
+            .BeOfType<ExerciseOutcome<ContractStreamEvent<TestTemplate>>.InfraError>().Subject;
+        infraError.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        infraError.Message.Should().StartWith("Could not decode the reassignment in the ledger response:");
+        infraError.Category.Should().BeNull();
+        infraError.SourceException.Should().BeSameAs(logger.Failure);
+    }
+
+    private sealed class LoggerFailingOnItsFirstWrite : ILogger<RestLedgerClient>
+    {
+        private bool _hasFailed;
+
+        public InvalidOperationException Failure { get; } = new("the log sink rejected the write");
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (_hasFailed)
+            {
+                return;
+            }
+
+            _hasFailed = true;
+            throw Failure;
+        }
+    }
+
     private const string PointReadTransactionBody =
         """
         {
@@ -453,6 +585,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
                     "CreatedEvent": {
                       "offset": "7",
                       "contractId": "00holding",
+                      "nodeId": 0,
                       "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
                       "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
                     }

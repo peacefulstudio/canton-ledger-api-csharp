@@ -1,12 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Pqs.Client;
-using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -16,9 +16,6 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class PqsRoundTripTests
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
-
     private const string PqsConnectionStringEnv = "CANTON_LOCALNET_A_VALIDATOR_1_PQS_CONNECTION_STRING";
 
     private const string LocalnetSkipMessage =
@@ -42,22 +39,8 @@ public class PqsRoundTripTests
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
-    private static LedgerClient NewLedgerClient(LocalnetFixture fixture, string userId)
+    private static async Task<Party> ScribeReadablePartyAsync(IAdminClient admin, string userId)
     {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        return new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
-    }
-
-    private static async Task<Party> ScribeReadablePartyAsync(LocalnetFixture fixture, string userId)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        using var admin = new AdminClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
         var user = await admin.GetUserAsync(userId, TestContext.Current.CancellationToken);
         Assert.False(
             string.IsNullOrWhiteSpace(user?.PrimaryParty),
@@ -77,7 +60,8 @@ public class PqsRoundTripTests
         await using var fixture = LocalnetFixture.FromEnvironment();
         var created = await CreateAssetAsync(fixture);
 
-        var pqs = new PqsClient(new PqsClientOptions { ConnectionString = pqsConnectionString });
+        await using var services = PqsServices(pqsConnectionString);
+        var pqs = services.GetRequiredService<IPqsClient>();
 
         var projected = await PollForProjectionAsync(
             () => pqs.QueryAsync<Asset>(TestContext.Current.CancellationToken),
@@ -96,7 +80,8 @@ public class PqsRoundTripTests
         await using var fixture = LocalnetFixture.FromEnvironment();
         var created = await CreateAssetAsync(fixture);
 
-        var pqs = new PqsClient(new PqsClientOptions { ConnectionString = pqsConnectionString });
+        await using var services = PqsServices(pqsConnectionString);
+        var pqs = services.GetRequiredService<IPqsClient>();
 
         var projected = await PollForProjectionAsync(
             () => pqs.QueryAsync<IHolding, HoldingView>(TestContext.Current.CancellationToken),
@@ -105,6 +90,11 @@ public class PqsRoundTripTests
         Assert.NotNull(projected);
         Assert.Equal(AssetAmount, projected!.View.Amount);
     }
+
+    private static ServiceProvider PqsServices(string pqsConnectionString) =>
+        new ServiceCollection()
+            .AddPqsClient(options => options.ConnectionString = pqsConnectionString)
+            .BuildServiceProvider();
 
     private static string RequirePqsConnectionString()
     {
@@ -130,12 +120,12 @@ public class PqsRoundTripTests
             $"Unexpected DAR upload outcome: {darOutcome}");
 
         var userId = fixture.ValidatorUserId;
-        var issuer = await ScribeReadablePartyAsync(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
 
-        using var ledger = NewLedgerClient(fixture, userId);
+        var issuer = await ScribeReadablePartyAsync(services.GetRequiredService<IAdminClient>(), userId);
+        var ledger = services.GetRequiredService<ICantonLedgerClient>();
 
-        var createOutcome = await ledger.CreateAsync(
-            new Asset(issuer, AssetAmount), issuer, TestContext.Current.CancellationToken);
+        var createOutcome = await ledger.CreateAsync(new Asset(issuer, AssetAmount), TestContext.Current.CancellationToken);
         var createdCid = Assert.IsType<ExerciseOutcome<ContractId<Asset>>.One>(createOutcome).Result;
         Assert.False(string.IsNullOrWhiteSpace(createdCid.Value), "created Asset ContractId is empty");
 

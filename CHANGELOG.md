@@ -21,6 +21,303 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Security
 
+## [0.5.0-preview.1] - 2026-09-07
+
+This is the breaking release of the preview window, and three changes dominate it.
+
+  - All four shipped clients — `LedgerClient`, `AdminClient`, `PqsClient` and `RestLedgerClient` — are `internal`, so code that constructed one has to resolve it from a service provider instead.
+  - The `Daml.*` repin to `0.5.0-preview.1` is not source-compatible with `0.4.1-preview.1` and drives most of what follows: decoded stream and snapshot payloads, streaming generics narrowed to a template that can decode itself, a stream family of its own for Daml interfaces, five records changing arity, a caller-supplied command id on the write path, and an optional per-call timeout on seven unary operations.
+  - The JSON transport streams: one pagination loop serves `POST /v2/updates` and `POST /v2/commands/completions` alike, `SupportsUnboundedStreaming` is `true` everywhere, a public exception type is deleted, two options are renamed, and a REST streaming read reports its faults in band the way gRPC always has.
+
+Plan on regenerating your bindings with `dpm codegen-cs` at `0.5.0-preview.1`; several breaks are only satisfiable by generated code, and the emitter's own `CreateAsync` signature changes in the same step. Read the BREAKING section first: six of the changes in it break at run time rather than at compile time, and each of those six is flagged in bold.
+
+### Added
+
+An interface-view stream family.
+
+  - `SubscribeAsync`, `SubscribeActiveAsync` and `SubscribeLedgerEffectsAsync` gain overloads taking a `ViewDescriptor<TInterface, TView>` — the static `View` witness the generator emits on every interface.
+  - They yield `InterfaceStreamEvent<TInterface, TView>` and `InterfaceAcsSnapshotEntry<TInterface, TView>`, whose payload is the decoded `TView` rather than the untyped `DamlRecord` an interface marker used to return.
+  - A view the participant did not compute, or one that does not decode, arrives as an unclassified row.
+  - `QueryActiveAsync<TInterface, TView>` is built on this family.
+  - `FakeLedgerClient` stages it through `WithActiveInterfaceContracts`, `WithInterfaceEvents` and `WithInterfaceLedgerEffects`.
+
+`IGrpcCallInvokerFactory` puts the raw gRPC escape hatch behind dependency injection, where `CreateCallInvoker()` existed only on the concrete `LedgerClient` and `AdminClient`.
+
+  - It lives in the new `Canton.Ledger.Grpc.Client.Raw` namespace and is registered by the opt-in `services.AddLedgerRawGrpc(...)`.
+  - With those clients now `internal` it is the only way to reach the invoker from outside the package.
+  - It is the same authenticated invoker, but on a channel built from `LedgerClientOptions` rather than borrowed from a client — so registration order stops mattering, the lifetime is the container's, and using one after the provider is disposed throws `ObjectDisposedException`, at the cost of one extra HTTP/2 connection.
+
+Also new:
+
+- `IUnboundedStreamingCapability` in `Canton.Ledger.Abstractions` carries the `SupportsUnboundedStreaming` probe, which lived on a concrete client only.
+  - Cast the injected `ICantonLedgerClient` to it — the only route now that the concrete REST client is `internal`.
+  - Every shipped client answers `true`, REST included as of this release, and `ICantonLedgerClient` is unchanged, so no external implementor grows a member.
+  - Its XML doc and the packaged REST README now name the client's own pagination loop as what the probe answers for.
+- `MalformedResponseException` is the one type both transports raise when a participant's body cannot be read.
+  - It replaces an `InvalidOperationException` whose `"Malformed response from ledger: "` prefix both clients classified by testing.
+  - It derives from `InvalidOperationException`, so an existing `catch (InvalidOperationException)` keeps working and the message text is byte-identical; `Detail` drops the leading marker.
+- `FakeLedgerClient.SubmittedCommandIds` and `.LastSubmittedCommandId` record the command id every submission actually used — the caller's when supplied, the minted one when not — so a test can assert its own id reached the wire verbatim without reaching into the transport.
+
+### Changed — BREAKING
+
+All four concrete clients — `LedgerClient`, `AdminClient`, `PqsClient` and `RestLedgerClient` — are `internal`.
+
+  - Naming any of the four, in a field, in a `new`, or in a `GetRequiredService<LedgerClient>()` that used to succeed, is `CS0122`.
+  - The gRPC and PQS clients have their public constructors *deleted* and the REST client's two are demoted to `internal`, to identical effect.
+  - Every fake in `Canton.Ledger.Testing` stays public, and so do `LedgerClientOptions`, `PqsClientOptions` and `RestLedgerClientOptions`, whose binding, validation and defaults are unchanged.
+
+To migrate, register instead of constructing and inject the interface:
+
+  - `new LedgerClient(options, tokenProvider)` becomes `services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001")` plus `provider.GetRequiredService<ICantonLedgerClient>()`.
+  - `new RestLedgerClient(httpClientFactory, options, logger)` becomes `services.AddRestLedgerClient(configuration.GetSection("Canton:Rest"))` plus the same resolve.
+  - Each `Add*` takes an `IConfiguration` or an `Action<TOptions>`, and `AddCantonLedger(configuration)` registers the ledger client, the admin client and authentication together.
+  - Inject `ICantonLedgerClient`, or the narrower `ILedgerReader`, `ILedgerWriter`, `ILedgerStreamer` and `ILedgerClient` that resolve to the same instance, then `IAdminClient` and `IPqsClient`.
+  - Drop your own `using`: the container owns the lifetime, and it validates options the deleted constructors did not.
+  - Where you downcast to `RestLedgerClient` for `SupportsUnboundedStreaming` or `GetUpdateTreeByOffsetAsync`, use `IUnboundedStreamingCapability` and `ICantonLedgerClient`.
+  - `CreateCallInvoker()` leaves with its types, replaced by `IGrpcCallInvokerFactory`; so does `PqsClient.DefaultJsonSerializerOptions`, which needs no replacement — leave `PqsClientOptions.JsonSerializerOptions` null for exactly those defaults.
+  - REST still registers the five neutral types as `Transient` rather than gRPC's `Singleton`, and `AddHealthChecks().AddRestLedgerClient()` is unaffected.
+
+Streamed and snapshot payloads are typed, and the streaming generics narrow to templates.
+
+  - `SubscribeAsync<T>`, `SubscribeActiveAsync<T>`, `SubscribeLedgerEffectsAsync<T>` and `TrySubmitAndWaitForReassignmentAsync<T>` accepted any `IDamlType` and handed back an untyped `DamlRecord`; the argument is `where T : ITemplate, IDamlRecord<T>` now, `IDamlRecord<T>` carrying a `static abstract FromRecord`.
+  - `ContractStreamEvent<T>.Created` / `.Assigned` and `AcsSnapshotEntry<T>.Created` carry a typed `T Payload` and a new mandatory `ContractKey? Key` slot directly after it, populated for real rather than passed as `null`.
+  - A payload that does not decode arrives as `Unclassified(offset, UnclassifiedKind.DecodeFailure)` instead of escaping mid-`await foreach`.
+  - `InterfaceContract<TInterface, TView>`, `QueryActiveAsync<TInterface, TView>` and both `IPqsClient.QueryAsync<TInterface, TView>` overloads tighten to `where TView : IDamlRecord<TView>`.
+
+To migrate:
+
+  - Regenerate with `dpm codegen-cs` at `0.5.0-preview.1` or later, which emits `IDamlRecord<TSelf>` and `FromRecord` on every template and view record; a hand-written stand-in needs both by hand.
+  - Read the typed payload directly — `created.Payload.Owner` in place of `created.Payload.GetRequiredField("owner")`.
+  - Rewrite positional patterns over `Created` and `Assigned`, which gain a slot.
+  - Handle `UnclassifiedKind.DecodeFailure` where you caught a decode exception.
+  - Move a call that passed an interface marker to the interface family, since a marker can never satisfy `ITemplate`: `SubscribeActiveAsync(new ViewDescriptor<IHolding, HoldingView>(), …)`.
+
+The JSON transport streams, through one pagination loop that serves the update reads and the completion stream alike.
+
+  - `SubscribeAsync` and `SubscribeLedgerEffectsAsync`, template and interface overloads both, no longer throw `NotSupportedException` for `toOffset: null`: each window is one `POST /v2/updates`, and the loop re-POSTs the next from the last offset it observed.
+  - An end offset is a termination condition on that same loop, so a bounded range wider than the participant's entry cap pages instead of failing with a `413`.
+  - `CompletionStreamAsync` rides the same loop over `POST /v2/commands/completions` and ends only on cancellation or a terminal fault.
+  - An empty window yields nothing and is reopened at the same offset, the idle timeout being the pacing.
+  - The participant's own `OffsetCheckpoint` entries are relayed, with none manufactured.
+
+**A REST `catch` stops firing, with no compile error to point at it.**
+
+  - Every REST streaming read — the ACS snapshot, the bounded offset-range reads and the open-ended tail — now ends the enumeration with a terminal `StreamError` where it used to throw.
+  - The terminal event lands on `AcsSnapshotEntry<T>`, `ContractStreamEvent<T>`, their interface-typed counterparts or `CompletionStreamEvent`, carrying the transport status, the participant's category and its message.
+  - A `catch (LedgerOperationException)` around an `await foreach` compiles, runs and never fires: drain the enumeration and switch on the terminal event instead, as gRPC consumers already do.
+  - Cancellation still throws `OperationCanceledException`, and a transport failure that never reached the participant still throws.
+  - On the completion stream the contract also covers a non-success status, an unreadable body, and a window whose entries carry no offset the next window could resume from.
+
+`LedgerResultTooLargeException` is deleted; no read is left that throws it.
+
+  - The `413` it stood for arrives as a terminal `StreamError` whose `StatusCode` is `413` and whose message names `RestLedgerClientOptions.StreamWindowLimit` to lower.
+  - Resume from the last offset you observed, with a smaller window.
+  - Naming the type is `CS0246`, so the `catch` that held it fails to compile rather than going quietly dead.
+
+`RestLedgerClientOptions.CompletionStreamLimit` and `CompletionStreamIdleTimeout` are renamed to `StreamWindowLimit` and `StreamWindowIdleTimeout`.
+
+  - They are no longer nullable, and they bound every window the loop opens rather than the completion window alone.
+  - Rename them wherever you set them, in code or in a bound configuration section.
+  - Both are always sent now, where leaving either unset sent no query parameter at all, and they default to Canton's own documented values, 200 entries and 2 s.
+  - The ACS snapshot is the one read they do not bound, being a single un-paged call.
+  - One ceiling before you raise the idle timeout: a participant running Canton `3.5.11` abandons a request held for twenty seconds and answers `503`. That number is observed rather than documented and is not validated here, so measure it against your own deployment.
+
+**Every test double that stages an ACS snapshot breaks, and it breaks when the test runs rather than when it compiles.**
+
+  - `FakeLedgerClientBuilder.WithActiveContracts<T>` and `WithActiveInterfaceContracts<TInterface, TView>` throw `ArgumentException` unless the entries end on exactly one terminal entry in last position — an `AcsSnapshotEntry<T>.Checkpoint`, or an `AcsSnapshotEntry<T>.StreamError` where the read faulted.
+  - They used to copy whatever they were given, so the fake replayed snapshots no participant emits and a consumer that reads until the terminal entry never finished reading a staged one.
+  - No signature changed, so nothing stops compiling; the throw lands when the staging call runs and names the call, the violation and the way out.
+  - Append the terminal entry: `.WithActiveContracts(LedgerEvents.Created(...), LedgerEvents.Checkpoint<T>(offset))`.
+  - To stage the broken shape on purpose, the new `WithMalformedActiveContracts<T>` and `WithMalformedActiveInterfaceContracts<TInterface, TView>` skip the check.
+  - The `ContractStreamEvent<T>` streams are exempt, their `Checkpoint` being a liveness signal rather than a terminal marker.
+
+The rest:
+
+- Seven unary `ICantonLedgerClient` operations take an optional `TimeSpan? timeout` before the trailing `cancellationToken`.
+  - `SubmitAsync`, `SubmitReassignmentAsync`, `GetConnectedSynchronizersAsync`, `GetLedgerApiVersionAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync` and `GetUpdateTreeByOffsetAsync` — so ten of the interface's twelve members accept a per-call bound.
+  - A positional caller fails to compile with `CS1503` rather than binding a token into a timeout, so name the argument: `GetUpdateByOffsetAsync(offset, submitter, cancellationToken: token)`.
+  - `null` selects the configured default; a bound becomes a per-attempt gRPC deadline recomputed on each retry, cancels the REST request that outlives it, and is ignored by `FakeLedgerClient`.
+  - The two streaming members are exempt — bound them with `CancellationTokenSource.CancelAfter`.
+  - Implementors owe seven signatures, and the change is binary-breaking.
+- `GetUpdateTreeByOffsetAsync` joins `ICantonLedgerClient` as `(long offset, SubmitterInfo submitter, TimeSpan? timeout = null, CancellationToken cancellationToken = default)`.
+  - All three clients implement it, so delete the downcast to `RestLedgerClient`, and add one member if you implement the interface yourself.
+  - `FakeLedgerClient` stages it through the new `WithUpdateTreeByOffset(offset, tree)`.
+  - A doc correction rides along: both point reads request ledger effects and differ only in projector, so read once and flatten with `TransactionTreeExtensions.ToTransactionResult` rather than reading twice.
+- `AcsSnapshotEntry<T>.Unclassified` and `ContractStreamEvent<T>.Unclassified` take an `UnclassifiedKind` in place of a free-form `string Kind`.
+  - The participant's wire text is kept in a trailing `string? RawKind` that is non-null exactly when the kind is `Unknown`.
+  - The snapshot union's `Offset` becomes `LedgerOffset?`, since `LedgerOffset` defaults to `Begin` and an entry with no readable offset used to claim it sat at the start of the ledger.
+  - Switch on the enum rather than comparing kind strings, and where you persist such an offset as a resume point, check for null and keep your previous offset.
+- `CreatedContract` goes from three slots to nine: `(string EventId, string ContractId, Identifier TemplateId, DamlRecord Payload, IReadOnlyList<Party> WitnessParties, IReadOnlyList<Party> Signatories, IReadOnlyList<Party> Observers, ContractKey? ContractKey = null, DateTimeOffset? CreatedAt = null)`.
+  - Both transaction-result projectors fill every slot from the wire event.
+  - Replace the `"{}"` payload literal with `DamlRecord.Create()`, and with a decoded record elsewhere.
+  - Supply the event id and the three party lists at every construction site.
+  - Pass `ContractKey:` deliberately rather than letting its default drop the key.
+- `ExerciseOutcome<T>.InfraError` and `LedgerOperationException` take a `DamlErrorCategory?` in third position, moving the source exception to fourth.
+  - A call that passed the exception positionally stops compiling rather than binding it to the wrong slot.
+  - Both clients populate the category from their own error parser instead of leaving it null, so a retry policy can switch on it.
+  - Name the last argument at every construction site — `new LedgerOperationException(message, statusCode, innerException: ex)` — or pass the parsed category in the new third position.
+- `ParsedLedgerError` is a closed two-arm hierarchy: `Structured(Category, ErrorId, Message, Metadata, StatusCode)` when the participant attached a classified error, `Unstructured(Message, StatusCode, Category?)` when it did not.
+  - Routing is by the declared `errorCategory: -1` rather than by a `code` whose redaction placeholder `NA` used to read as a classified error over HTTP.
+  - So a REST caller that caught a Daml error with the error id `NA` now receives an `InfraError`, or a `LedgerOperationException` carrying a status code, with the recovered authentication or authorization category — what gRPC always gave.
+  - `new ParsedLedgerError(category, errorId, message, metadata, statusCode)` becomes `new ParsedLedgerError.Structured(...)` with the same arguments in the same order.
+  - `ParsedLedgerError.Untyped(message, statusCode)` becomes `new ParsedLedgerError.Unstructured(message, statusCode)`, whose optional third argument replaces `Untyped(...) with { Category = ... }`.
+  - `Message` and `StatusCode` stay on the base type; read `Category`, `ErrorId` and `Metadata` after a pattern match.
+  - The computed `ClassifiedCategory` and `ReportedErrorId` fold both arms, answering `null` where neither classified anything.
+- `CompletionStreamEvent.StreamError` goes from two parameters to five: `(int StatusCode, string Message, DamlErrorCategory? Category = null, Exception? SourceException = null, string? ErrorId = null)`.
+  - The first two additions mirror the update-stream records upstream, and the fifth carries the participant's Canton error code.
+  - Both transports populate every added slot; `ErrorId` is `null` only where the failure carried no structured error.
+  - Equality weighs `SourceException` by reference and the code as well, so a test asserting two faults equal must supply the same exception instance.
+  - A positional pattern such as `StreamError(var code, var message)` needs three more subpatterns or a property pattern.
+  - Switch on `error.ErrorId` where you had to match the message: `STALE_STREAM_AUTHORIZATION`, which Canton documents as resolved by fetching the stream again, is otherwise indistinguishable from any other `ContentionOnSharedResources` fault.
+  - The client still retries nothing, and the code reaches the completion stream alone, the update-stream and snapshot records having no room for a fifth field.
+- `ILedgerWriter.TryCreateAsync` and `TryExerciseAsync` take a `CommandId? commandId` between `workflowId` and `timeout`, so a caller can supply the deduplication id a retry of a lost-but-accepted submission needs to reuse.
+  - It is sent verbatim, and one is minted only when you pass none.
+  - A positional `timeout` fails to compile instead of silently rebinding, so name the argument: `TryCreateAsync(template, submitter, workflowId, timeout: TimeSpan.FromSeconds(30))`.
+  - Outside implementors owe the parameter on both methods, and both changes are binary-breaking.
+- Generated `CreateAsync` no longer takes a `SubmitterInfo` — the `0.5.0-preview.1` emitter derives the submitter from the template's signatory field — and `ArchiveAsync` and `RelabelAsync` take a `SubmitterInfo` where they took a bare `Party`.
+  - This is a change in what `dpm codegen-cs` emits rather than in a type these packages publish, but it lands with the repin, because the two versions must match.
+  - Regenerate, drop the trailing `SubmitterInfo` at every `CreateAsync` call, and wrap the bare `Party` you passed to `ArchiveAsync` or `RelabelAsync`.
+- The `LedgerEvents`, `ContractEvents` and `LedgerOutcomes` factories in `Canton.Ledger.Testing` change signature to match the records they build, every one constrained `where T : ITemplate, IDamlRecord<T>`.
+  - The three `Created`/`Assigned` factories take a typed `T payload` and a `ContractKey? key`.
+  - `LedgerEvents.Unclassified` takes a `LedgerOffset?` and an `UnclassifiedKind`; `ContractEvents.Unclassified` an `UnclassifiedKind`.
+  - Both `StreamError` factories gain an optional category and exception, and `LedgerOutcomes.InfraError` gains a category before its source exception.
+  - Pass the template instance where you passed `template.ToRecord()`, add `key: null` at every keyless staging, and replace kind strings with `UnclassifiedKind` values.
+- **This one breaks silently.** Cancelling a submission over gRPC now throws `OperationCanceledException`, not `RpcException(Cancelled)`.
+  - `SubmitAsync`, `SubmitAndWaitAsync` and `SubmitReassignmentAsync` hand-wrote the traced call seam and omitted the caller-cancellation reclassification every other operation applies; all three route through the seam now.
+  - So do the five outcome-returning submissions that called `ThrowIfCancellationRequested()` inside their `catch (RpcException)` — `TryExerciseAsync`, `TrySubmitAndWaitForTransactionAsync`, its tree counterpart, `TryCreateAsync` and `TrySubmitAndWaitForReassignmentAsync`.
+  - A `catch (RpcException)` around a cancellable submit still compiles and no longer catches the cancellation: catch `OperationCanceledException` instead.
+  - Nothing is lost — the original `RpcException` is preserved as `InnerException`, and `CancellationToken` carries the token that triggered it.
+- **This one breaks silently too.** A cancelled token paired with a non-`Cancelled` participant status now returns an `InfraError` outcome instead of throwing.
+  - This is a separate change with a different trigger from the reclassification above, affecting the same five outcome-returning submissions.
+  - `ThrowIfCancellationRequested()` threw whatever the participant reported, and the client's one shared rule requires *both* a `Cancelled` status and a cancelled caller token.
+  - So a caller who cancels while the participant is answering `Unavailable` receives `ExerciseOutcome.InfraError` carrying that status, where it previously received `OperationCanceledException` and lost the status.
+  - A `catch (OperationCanceledException)` around a create or a choice exercise still compiles and stops firing on that pairing; check your own token after the call if you treat cancellation as "stop, whatever came back".
+- **This one breaks without a compile error too.** A `null` argument throws `ArgumentNullException` synchronously, on every transport.
+  - Members taking a non-nullable reference parameter used to disagree: an `async` member faulted the `Task` it returned, gRPC `TrySubmitAndWaitForTransactionAsync(null)` raised a bare `NullReferenceException`, and `FakeLedgerClient` either complained of missing staging or returned the staged outcome as though `null` were legitimate input.
+  - Every member of `ICantonLedgerClient`, `ILedgerWriter`, `IAdminClient` and `IPqsClient` validates first now and throws with `ParamName` set, at the call site rather than on the awaited task, and the fakes match the real clients exactly.
+  - No signature changed, so a caller honouring nullable reference types sees no difference; it bites reflection, `dynamic`, nullable-oblivious languages, a `null` from a deserializer, and any test that pinned the old shapes.
+  - `ListVettedPackagesAsync(packageNamePrefixes)` stays exempt on both admin clients, where `null` asks for no prefix filter.
+  - An empty rather than null DAR argument now throws `ArgumentException` on the fakes as it already did on the real clients.
+- **And one guard moves the other way, also without a compile error.** `IAdminClient.GetUserAsync("")` and `AllocatePartyAsync("")` reach the participant instead of throwing.
+  - Both guarded their identifier with `ArgumentException.ThrowIfNullOrWhiteSpace`, but the Ledger API gives the empty string a documented meaning on both fields — the empty `user_id` asks for the authenticated user, an empty `party_id_hint` lets the participant pick the id — so both guards are `ArgumentNullException.ThrowIfNull` now, as `ListUserRightsAsync` already was.
+  - Nothing stops compiling: `GetUserAsync("")` returns the authenticated user, `AllocatePartyAsync("")` allocates a participant-chosen party, and an all-whitespace identifier is answered by the participant too.
+  - A caller that leaned on the throw to validate its own input must validate before calling.
+  - `null` is unchanged on both members, and whitespace rejection is untouched wherever the field is Required — `CreateUserAsync(userId)` and `GetPackageAsync(packageId)` among them.
+  - `FakeAdminClient` mirrors both loosenings, so a test pinning the old refusal with `Assert.ThrowsAsync<ArgumentException>` needs deleting rather than adjusting.
+- `IPartyManagementServiceApi.GetParties` reads one party, and a multi-party read is a fan-out.
+  - It was declared over an `IEnumerable<string>`, but the participant serves a *single* party, so a read of two or more arrived comma-joined and came back `400 INVALID_ARGUMENT`. The generated method takes a `string party` now.
+  - For several, the new `PartyManagementServiceApiExtensions.GetPartiesAsync(parties, identityProviderId, cancellationToken)` in `Canton.Ledger.Rest.Client.Raw` issues one request per party and concatenates the details in the order you asked for, answering `IReadOnlyList<PartyDetails>` rather than a `GetPartiesResponse` envelope.
+  - An unknown party still yields no entry rather than a `404`, so N parties can return fewer than N details; an empty sequence issues no request.
+  - The fan-out costs one round trip per party where gRPC costs one in total, and `IAdminClient.GetPartiesAsync` says so on itself.
+  - The supported adapter is untouched, and `Canton.Ledger.Rest` drops the `Refit.Reflection` reference `0.4.1-preview.1` told you about.
+- `TransactionResult.ExerciseResult<TReturn>` and `AllExerciseResults<TReturn>` move from `Canton.Ledger.Grpc.Client` to `Canton.Ledger.Abstractions`, so a REST-only consumer can read a typed choice return without a `PackageReference` on the gRPC transport.
+  - The REST projector calls them now instead of a private copy of the same fold.
+  - Migration is one `using`: `using Canton.Ledger.Abstractions;` in place of `using Canton.Ledger.Grpc.Client;`.
+  - Behaviour, cardinality contract and messages are unchanged.
+  - Unlike the other relocations in this preview window these have shipped since `0.1.5-preview.1`, so a published version did carry the old namespace.
+
+### Changed
+
+- `Daml.Runtime`, `Daml.Ledger.Abstractions` and `Daml.Ledger.Abstractions.Testing.Conformance` are repinned to `0.5.0-preview.1`.
+  - That upstream release is *not* source-compatible with `0.4.1-preview.1` — see the BREAKING section for the constraint narrowing, the typed stream payloads, the record arity changes and the write-path `CommandId?` it carries through to consumers.
+  - These packages' minor moves with the `Daml.*` minor, so your version is `0.5.0-preview.1` too.
+- `ICantonLedgerClient.CompletionStreamAsync` states when the enumeration ends, where its XML doc opened with "as they arrive" and gave no termination semantics at all. Nothing breaks.
+  - Both transports honour this: enumeration may end at any time, possibly having yielded nothing.
+  - A caller that wants to keep following reopens from the highest offset it has observed — which may be the offset it passed in — and supplies its own backoff, because the call may return immediately.
+  - The backoff is the caller's because `RestLedgerClientOptions.StreamWindowIdleTimeout`, the knob governing how fast a reopen loop spins, sits on a type the neutral interface cannot name.
+  - A terminal `StreamError` invites a reopen only when its `ErrorId` says the condition is self-clearing, since reopening after a `413` reproduces it.
+- `Set<T>`, `Map<K, V>` and `NonEmpty<T>` compare structurally and copy their input, arriving through the repin, where the three stdlib mappings used to compare by reference and wrap the collection they were handed.
+  - Mutating the source afterwards no longer changes the value.
+  - A `Set<T>` built from a `SortedSet<T>` no longer preserves that input's ordering.
+  - `ToRecord()` emits GenMap entries in hash order — a test comparing the wire bytes of a `Set`-bearing payload against a fixed expectation will see the reordering.
+- The REST transport's `EstimateTrafficCostAsync(...)` translates its transport failures like the other three submit-shaped calls beside it.
+  - All four share one request envelope now: a deadline overrun reports `408`, a transport failure that never reached the participant `503`, and an unparseable success body a `LedgerOperationException` naming it malformed with the `JsonException` as `InnerException`.
+  - The last two used to surface raw, so catch `LedgerOperationException` or read `InnerException`.
+  - Refusal of an out-of-range cost is unchanged in kind, and `GetLedgerEndAsync` still lets transport exceptions through untranslated for the registered health check.
+  - The envelope also moves the four operations' argument checks off the returned `Task`, so a caller that stores the `Task` and awaits it later must guard the call itself.
+- The REST pagination loop reports a participant that stops pacing a followed stream.
+  - The hold a participant puts on an idle window — the `StreamWindowIdleTimeout` sent on every request — is the whole of a followed stream's pacing, and the client deliberately adds none of its own.
+  - The loop now counts consecutive windows that neither advance the offset nor come back held, logs a warning at a hundred of them naming the path and the offset it is stuck on, and warns again at each doubling of that run.
+  - Nothing changes for a participant that honours the timeout, and no signature moves.
+- The documented client entry points are dependency injection only.
+  - Every `new LedgerClient(...)`, `new AdminClient(...)` and `new PqsClient(...)` in the root README and the packaged gRPC and PQS READMEs is replaced by the matching `Add*` registration and a `GetRequiredService<...>()` of the interface.
+  - The gRPC key-types table stops implying the Canton-only operations need the concrete class.
+  - The packaged REST README leads its key-types table with `ICantonLedgerClient`, grows a resolve-from-the-container block, and names `LedgerActivitySourceNames` in its tracing snippet.
+
+### Removed
+
+- `LedgerClient.TryExerciseForCreatedAsync<TMarker>` is removed; the capability lives upstream now as `Daml.Ledger.Abstractions.Extensions.CreateByExercise`.
+  - Four members replace the one, split by cardinality: `TryCreateOneByExerciseAsync<TTemplate>` and `TryCreateManyByExerciseAsync<TTemplate>` return an outcome, `CreateOneByExerciseAsync<TTemplate>` and `CreateManyByExerciseAsync<TTemplate>` throw.
+  - `TryCreateOneByExerciseAsync` preserves behaviour exactly, down to the `ExerciseOutcome<ContractId<TTemplate>>` and its `One`/`None`/`Many` mapping.
+  - `TryCreateManyByExerciseAsync` is over a read-only *list* of contract ids instead, so a conforming writer answers `One` holding all of them and the type you destructure changes.
+  - Migration is one `using Daml.Ledger.Abstractions.Extensions;` and a rename, the parameter list carrying over argument for argument.
+  - These extend `ILedgerWriter`, so they resolve without a downcast — and REST callers gain the capability here for the first time.
+  - One difference does not show up in the outcome and will not fail a build: the removed method opened a span named `SubmissionClient.TryExerciseForCreatedAsync`, and the upstream extension opens none.
+  - The submission itself is traced exactly as before, as the `SubmissionClient.TrySubmitAndWaitForTransactionAsync` span it has always nested inside, but a dashboard, alert or sampling rule matching the old name goes quiet rather than erroring — grep your telemetry config for it before upgrading.
+- `ActivitySourceName` is gone from all four clients; the four static properties only forwarded to names `LedgerActivitySourceNames` already publishes.
+  - Take them from `Canton.Ledger.Kernel.Telemetry.LedgerActivitySourceNames`, which carries `GrpcLedgerClient`, `GrpcAdminClient`, `PqsClient`, `RestLedgerClient` and an `All` over the four.
+  - `tracing.AddSource(LedgerClient.ActivitySourceName)` becomes `tracing.AddCantonLedgerInstrumentation()`, or `tracing.AddSource(LedgerActivitySourceNames.RestLedgerClient)` for one transport.
+  - The emitted strings are unchanged, so no span name, dashboard, alert or sampling rule moves; the `RestLedgerClient.RetryAttempt` span is a wire-visible string constant and is unaffected.
+
+### Fixed
+
+Absent command ids and contract key hashes on the transaction paths.
+
+  - A transaction the wire carried no command id on now projects `null` rather than a default-initialized `CommandId`, which threw `InvalidOperationException` on any access to `.Value`; `TransactionResult.CommandId` is nullable, so check it for null.
+  - A command id of nothing but whitespace remains a malformed response, being present but invalid rather than absent.
+  - Separately, all four transaction projectors read the wire's contract key *hash* alongside the key, where a keyed contract read through a transaction result or tree came back with `ContractKey.KeyHash` null.
+  - The hash is excluded from `ContractKey` equality, so this changes what you can read off a key, not which keys compare equal.
+
+Submissions and errors.
+
+  - `CommandsSubmission.MinLedgerTime` reaches the participant instead of being silently discarded: gRPC maps it to the absolute and relative min-ledger-time fields, REST to their served camelCase equivalents, with the relative bound formatted as a protobuf duration string because the served document's pattern admits no BCL format.
+  - `ExerciseOutcome<T>.InfraError.SourceException` is populated on the gRPC command paths instead of always `null`, so a consumer walking `InnerException` to tell "the participant is down" from "the participant rejected us" has something to walk.
+  - The shared fold that re-wraps an `InfraError` under `TryExerciseAsync` / `TryCreateAsync` re-nulled it in transit and forwards it unchanged now.
+
+Stream and snapshot faults.
+
+  - Stream faults carry the participant's error category and the real source exception on both transports — on the template family, the interface family and the completion stream alike, with an `Unknown` classification normalized to null — where both clients left those slots null and a retry policy switching on `Category` was inert.
+  - REST no longer reports an unparseable wire offset as `LedgerOffset.Begin`: the refused entry reaches you with no offset at all, which you can see and skip.
+  - An undecodable incomplete-unassigned entry no longer ends a gRPC active-contract snapshot; it surfaces in-band as `Unclassified` with `UnclassifiedKind.DecodeFailure` at the unassignment offset and the snapshot keeps running, where an `ArgumentException` used to escape the `await foreach` and drop every remaining contract.
+
+The rest:
+
+- A decode failure on the update streams surfaces the containing update's offset on both transports.
+  - The gRPC projectors read a per-event offset — a proto3 scalar that reads `0` when unset, so a consumer persisting it as a resume point could be handed the beginning of the ledger.
+  - Per the Ledger API protos an event's `offset` *is* its update's offset, the position within it carried by `node_id`.
+  - It applies on the transaction and reassignment paths, for contract and interface streams alike.
+  - A gRPC consumer resuming from a surfaced `DecodeFailure` re-reads every event in the containing update, so its handler must be idempotent across it.
+- `AddLedgerClient` / `AddCantonLedger` register `ILedgerReader`, `ILedgerWriter` and `ILedgerStreamer`, which bound under `AddRestLedgerClient()` but failed at startup with "No service for type … has been registered" over gRPC, the container keying on the exact service type.
+  - All five transport-neutral service types resolve now, each handing back the same singleton so the one gRPC channel stays shared.
+  - Lifetimes deliberately stay per-transport — gRPC `Singleton` because its client owns an HTTP/2 channel that must be shared, REST `Transient` because its adapter is a thin per-resolution wrapper — and both are stated on the `Add*` XML docs.
+- A bug in our own projection is no longer relabelled as a malformed ledger response on a gRPC point read.
+  - `GetUpdateByOffsetAsync` and `GetUpdateByIdAsync` admitted every exception but `OperationCanceledException` into that wrapping; the filter admits `FormatException`, `MalformedTransactionTreeException` and `MalformedResponseException` now, and everything else propagates unwrapped.
+  - Every wire-value decode on both transports runs inside a guard raising `MalformedResponseException` with the original as `InnerException`, newly covering an offset below zero, an empty or all-whitespace acting- or witness-party entry, a whitespace command id, and a date or timestamp outside the Daml-LF range.
+  - A bug of ours *inside* a decoder is still relabelled, so read `InnerException` to tell the two apart.
+- A redacted participant auth failure carries a usable Canton error category over REST, where its `errorCategory` of `-1` matched none and an unauthenticated read classified as `DamlErrorCategory.Unknown`.
+  - A REST error response with no recognised category and a `401` or `403` status recovers the category from the status — `AuthInterceptorInvalidAuthenticationCredentials` and `AuthorizationChecksFailed`, the pairing `DamlErrorCategoryExtensions.ToHttpStatusCode` already declares in the other direction.
+  - The recovery runs last, so a recognised category is kept, and it is confined to those two statuses; it reaches a `401` or `403` with nothing readable in its body too.
+- A choice result that decodes to `null` reports `None` on REST, as it already did on gRPC.
+  - `ExerciseResult<TReturn>` documents `null` as a legitimate decode — an `Optional`-shaped choice return that decodes to nothing, or a unit-shaped one — but the REST projector's private copy of the fold asserted non-null, so `ExerciseForResultAsync` and `TryExerciseAsync<TResult>` answered `One` carrying `null` in a non-nullable slot.
+  - Both transports project through one shared fold now.
+- Both value codecs encode `DamlOptionalChain`, the node the `0.5.0` emitter produces for a nested `Optional (Optional t)`.
+  - Both switched exhaustively over `DamlValue` and threw `NotSupportedException` on it, so a payload with a nested optional field could not be sent over either transport.
+- A created event carrying no `nodeId` is a malformed response over REST rather than event id `"0"`.
+  - The projector read the wire's nullable `nodeId` as `created.NodeId ?? 0`, and `0` is a legal node id rather than a sentinel.
+  - The served document marks `CreatedEvent.nodeId` required in prose, so the generated `int?` is an artifact of how that document expresses requiredness.
+  - It is refused with `MalformedResponseException` naming the contract now, as an absent `templateId` already was.
+  - gRPC is unaffected — `CreatedEvent.node_id` there is a bare proto3 `int32` with no absent state.
+- The offset-checkpoint emission delay decodes in the form the participant's own document declares.
+  - `OffsetCheckpointFeature.maxOffsetCheckpointEmissionDelay` is declared in the vendored specification as a proto3-canonical duration string, but a participant serves the `{"seconds":…,"nanos":…}` `Duration` object, which threw a `JsonException` that failed the whole `GET /v2/version` body rather than that one field.
+  - It joins the table of wire durations this client reshapes, with a conformance test pinning the measurement; the converter reads both forms.
+- Six typed properties that always read `null` against a live participant carry its values: `FeaturesDescriptor.PartyManagement`, `.OffsetCheckpoint` and `.PackageFeature` on `GET /v2/version`, and `User.IsDeactivated`, `.IdentityProviderId` and `.PrimaryPartyAuthentication` on `GET /v2/authenticated-user`, all previously reachable only through `AdditionalProperties`.
+  - Three whole-type converters on the REST serializer options were reading proto snake_case keys and took the generated `[JsonPropertyName]` metadata out of play; all three are deleted.
+  - That drops the snake_case form — `user_management`, `primary_party`, `party_details` and `next_page_token` now land in `AdditionalProperties` — which no supported participant sends.
+  - `User`'s request serialization is unaffected.
+- An interactive-submission completion offset decodes instead of throwing.
+  - `ExecuteSubmissionAndWaitResponse.completionOffset` is declared as the proto3-canonical int64 string and a live participant answers with a raw JSON number, so a raw `CANTONREST001` caller of `POST /v2/interactive-submission/executeAndWait` got a `JsonException`.
+  - It is read the way every other offset on this transport already was, accepting both shapes.
+
 ## [0.4.1-preview.1] - 2026-08-27
 
 The REST transport is a real client now rather than a preview of one, and it ships on NuGet alongside the gRPC client and a package of in-memory fakes. The vendored Canton baseline moves to `3.5.9`, and Canton 3.4 is no longer supported. There is one large breaking change in here — the transport-neutral contracts have moved into a new `Canton.Ledger.Abstractions` package — and the `Daml.*` repin carries two more. Read the BREAKING section before upgrading.

@@ -28,13 +28,6 @@
 
   <ItemGroup>
     <PackageReference Include="Refit" />
-
-    <!-- IPartyManagementServiceApi.GetParties binds an unattributed IEnumerable<string> path parameter
-         through SimpleStylePathParameterFormatter, which Refit's source generator cannot build inline,
-         so that one method falls back to the reflection-based RestService.For path this package
-         supplies. Refit 14.0.1's generator no longer reports RF006 for it; the suppression that used to
-         accompany this reference was measured to silence nothing and has been dropped. -->
-    <PackageReference Include="Refit.Reflection" />
   </ItemGroup>
 
   <ItemGroup>

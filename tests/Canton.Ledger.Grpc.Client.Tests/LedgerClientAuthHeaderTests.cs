@@ -16,7 +16,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientAuthHeaderTests
+public sealed class LedgerClientAuthHeaderTests : IDisposable
 {
     private const string AuthorizationKey = "authorization";
     private static readonly Party ActAs = new("party::alice");
@@ -41,6 +41,8 @@ public class LedgerClientAuthHeaderTests
         _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient(ITokenProvider tokenProvider) => new(
         _options,

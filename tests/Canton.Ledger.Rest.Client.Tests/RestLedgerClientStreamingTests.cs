@@ -34,7 +34,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         return factory;
     }
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -42,17 +42,20 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport) =>
         new(TrackedFactory(transport));
 
     [Fact]
-    public void SupportsUnboundedStreaming_is_false()
+    public void SupportsUnboundedStreaming_is_true()
     {
         var client = ClientWith(new RecordingHttpHandler());
 
-        client.SupportsUnboundedStreaming.Should().BeFalse();
+        client.SupportsUnboundedStreaming.Should().BeTrue();
     }
 
     [Fact]
@@ -100,8 +103,8 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         entries.Should().HaveCount(3);
         entries[0].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Created>();
         var unassigned = entries[1].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Unclassified>().Subject;
-        unassigned.Offset.Value.Should().Be(11L);
-        unassigned.Kind.Should().Be(UnclassifiedKind.UnassignedEvent.ToString());
+        unassigned.Offset.Should().Be(LedgerOffset.At(11L));
+        unassigned.Kind.Should().Be(UnclassifiedKind.UnassignedEvent);
         entries[2].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>();
     }
 
@@ -124,7 +127,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
 
         entries.Should().HaveCount(2);
         var unclassified = entries[0].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         entries[1].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>()
             .Which.Resume.Offset.Value.Should().Be(42L);
     }
@@ -150,8 +153,8 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
 
         entries.Should().HaveCount(2);
         var unclassified = entries[0].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(5L);
-        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure.ToString());
+        unclassified.Offset.Should().Be(LedgerOffset.At(5L));
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
     }
 
     [Fact]
@@ -178,25 +181,27 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_throws_LedgerResultTooLargeException_on_413()
+    public async Task SubscribeActiveAsync_ends_with_a_terminal_StreamError_naming_the_window_limit_on_413()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.RequestEntityTooLarge, """{"message": "too many results"}""");
         var client = ClientWith(transport);
 
-        var act = async () =>
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
         {
-            await foreach (var _ in client.SubscribeActiveAsync<TestTemplate>(
-                Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
-            {
-            }
-        };
+            entries.Add(entry);
+        }
 
-        await act.Should().ThrowAsync<LedgerResultTooLargeException>();
+        var error = entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)HttpStatusCode.RequestEntityTooLarge);
+        error.Message.Should().Contain(nameof(RestLedgerClientOptions.StreamWindowLimit));
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_throws_LedgerOperationException_on_a_structured_error_response()
+    public async Task SubscribeActiveAsync_ends_with_a_terminal_StreamError_on_a_structured_error_response()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.BadRequest,
@@ -211,16 +216,17 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             """);
         var client = ClientWith(transport);
 
-        var act = async () =>
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
         {
-            await foreach (var _ in client.SubscribeActiveAsync<TestTemplate>(
-                Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
-            {
-            }
-        };
+            entries.Add(entry);
+        }
 
-        var thrown = await act.Should().ThrowAsync<LedgerOperationException>();
-        thrown.Which.ErrorId.Should().Be("INVALID_ARGUMENT");
+        var error = entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>().Subject;
+        error.StatusCode.Should().Be((int)HttpStatusCode.BadRequest);
+        error.Message.Should().Contain("invalid argument");
     }
 
     [Fact]
@@ -241,7 +247,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             events.Add(evt);
         }
 
-        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/updates");
+        transport.LastRequest!.RequestUri!.PathAndQuery.Should().StartWith("/v2/updates?");
         events.Should().HaveCount(2);
         events[0].Should().BeOfType<ContractStreamEvent<TestTemplate>.Created>();
         var checkpoint = events[1].Should().BeOfType<ContractStreamEvent<TestTemplate>.Checkpoint>().Subject;
@@ -249,23 +255,30 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
-    public void SubscribeAsync_throws_NotSupportedException_pointing_at_the_websocket_follow_up_when_toOffset_is_null()
+    public async Task SubscribeAsync_hands_a_caller_an_unparseable_transaction_offset_with_no_resume_point()
     {
-        var client = ClientWith(new RecordingHttpHandler());
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """
+            [{"update": {"Transaction": {"value": {"offset": "not-a-number", "synchronizerId": "sync-1", "events": [{}]}}}},
+            {"update": {"OffsetCheckpoint": {"value": {"offset": "11"}}}}]
+            """);
+        var client = ClientWith(transport);
 
-        var act = () => client.SubscribeAsync<TestTemplate>(Alice, LedgerOffset.At(0), toOffset: null);
+        var events = new List<ContractStreamEvent<TestTemplate>>();
+        await foreach (var evt in client.SubscribeAsync<TestTemplate>(
+            Alice, LedgerOffset.At(5), LedgerOffset.At(11), TestContext.Current.CancellationToken))
+        {
+            events.Add(evt);
+        }
 
-        act.Should().Throw<NotSupportedException>().WithMessage("*WebSocket*");
-    }
-
-    [Fact]
-    public void SubscribeLedgerEffectsAsync_throws_NotSupportedException_pointing_at_the_websocket_follow_up_when_toOffset_is_null()
-    {
-        var client = ClientWith(new RecordingHttpHandler());
-
-        var act = () => client.SubscribeLedgerEffectsAsync<TestTemplate>(Alice, LedgerOffset.At(0), toOffset: null);
-
-        act.Should().Throw<NotSupportedException>().WithMessage("*WebSocket*");
+        events.Should().HaveCount(2);
+        var unclassified = events[0].Should().BeOfType<ContractStreamEvent<TestTemplate>.Unclassified>().Subject;
+        unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+        unclassified.Offset.Should().BeNull(
+            "a consumer folding the stream into a resume point has to be able to skip this event");
+        events[1].Should().BeOfType<ContractStreamEvent<TestTemplate>.Checkpoint>()
+            .Subject.Offset.Value.Should().Be(11L);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Canton.Ledger.Abstractions;
 using Daml.Ledger.Abstractions;
@@ -30,7 +31,7 @@ namespace Canton.Ledger.Testing;
 /// <see cref="NotSupportedException"/> naming the missing setup, so a test never silently
 /// exercises unconfigured behaviour. Construct instances through <see cref="Create"/>.
 /// </remarks>
-public sealed partial class FakeLedgerClient : ICantonLedgerClient
+public sealed partial class FakeLedgerClient : ICantonLedgerClient, IUnboundedStreamingCapability
 {
     private readonly IReadOnlyDictionary<Type, object> _activeContracts;
     private readonly IReadOnlyDictionary<Type, object> _contractEvents;
@@ -40,6 +41,8 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
     private readonly ExerciseOutcome<TransactionResult>? _submissionOutcome;
     private readonly LedgerOffset? _ledgerEnd;
     private readonly FakeCantonSurface _canton;
+    private readonly FakeInterfaceStreams _interfaces;
+    private readonly ConcurrentQueue<CommandId> _submittedCommandIds = new();
     private long _committedWrites;
 
     internal FakeLedgerClient(
@@ -50,7 +53,8 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         IReadOnlyDictionary<Type, object> createResults,
         ExerciseOutcome<TransactionResult>? submissionOutcome,
         LedgerOffset? ledgerEnd,
-        FakeCantonSurface canton)
+        FakeCantonSurface canton,
+        FakeInterfaceStreams interfaces)
     {
         _activeContracts = activeContracts;
         _contractEvents = contractEvents;
@@ -60,7 +64,22 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         _submissionOutcome = submissionOutcome;
         _ledgerEnd = ledgerEnd;
         _canton = canton;
+        _interfaces = interfaces;
     }
+
+    /// <summary>
+    /// The command ids the outcome-returning writes carried, in submission order — the caller's own
+    /// when it supplied one, otherwise the id the fake minted in its place, which is exactly what a
+    /// real transport sends the participant. Lets a test assert that a caller-supplied id reaches
+    /// the wire unchanged and that an omitted one is replaced rather than dropped.
+    /// </summary>
+    public IReadOnlyList<CommandId> SubmittedCommandIds => [.. _submittedCommandIds];
+
+    /// <summary>
+    /// The command id the most recent outcome-returning write carried, or <see langword="null"/>
+    /// before any such write.
+    /// </summary>
+    public CommandId? LastSubmittedCommandId => SubmittedCommandIds is [.., var last] ? last : null;
 
     /// <summary>Starts a new fluent builder for a <see cref="FakeLedgerClient"/>.</summary>
     /// <returns>An empty builder; stage behaviour on it, then call <see cref="FakeLedgerClientBuilder.Build"/>.</returns>
@@ -71,7 +90,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         SubmitterInfo submitter,
         LedgerOffset? activeAtOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         Replay(
             ActiveAt(
                 Staged<IReadOnlyList<AcsSnapshotEntry<T>>>(
@@ -80,12 +99,20 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
             cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always <see langword="true"/>: a staged stream is replayed to its end whatever
+    /// <c>toOffset</c> says, so <c>toOffset: null</c> never throws here. The probe reports the
+    /// capability a consumer can rely on, not the endlessness of a real participant tail.
+    /// </remarks>
+    public bool SupportsUnboundedStreaming => true;
+
+    /// <inheritdoc />
     public IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsync<T>(
         SubmitterInfo submitter,
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         Replay(
             Within(
                 Staged<IReadOnlyList<ContractStreamEvent<T>>>(
@@ -100,7 +127,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         Replay(
             Within(
                 Staged<IReadOnlyList<ContractStreamEvent<T>>>(
@@ -114,57 +141,79 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         ExerciseCommand command,
         SubmitterInfo submitter,
         string? workflowId = null,
+        CommandId? commandId = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        RecordSubmittedCommandId(commandId);
+        return Task.FromResult(
             AdvancingLedgerEndOnCommit(
                 Staged<ExerciseOutcome<TResult>>(
                     _exerciseResults, typeof(TResult), "exercise outcome", $"WithExerciseResult<{typeof(TResult).Name}>")));
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         SubmitterInfo submitter,
         string? workflowId = null,
+        CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate =>
-        Task.FromResult(
+        where TTemplate : ITemplate
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        RecordSubmittedCommandId(commandId);
+        return Task.FromResult(
             AdvancingLedgerEndOnCommit(
                 Staged<ExerciseOutcome<ContractId<TTemplate>>>(
                     _createResults, typeof(TTemplate), "create outcome", $"WithCreateResult<{typeof(TTemplate).Name}>")));
+    }
 
     /// <inheritdoc />
     public Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
         throw Unsupported(nameof(SubmitAndWaitAsync));
+    }
 
     /// <inheritdoc />
     public Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         CommandsSubmission submission,
         SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        SubmitAndWaitAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return SubmitAndWaitAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return Task.FromResult(
             AdvancingLedgerEndOnCommit(_submissionOutcome ?? throw StagingMissing(
                 "submission outcome", nameof(TrySubmitAndWaitForTransactionAsync), "WithSubmissionOutcome")));
+    }
 
     /// <inheritdoc />
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         CommandsSubmission submission,
         SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        TrySubmitAndWaitForTransactionAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return TrySubmitAndWaitForTransactionAsync(submission.WithSubmitter(submitter), timeout, cancellationToken);
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -192,6 +241,9 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private void RecordSubmittedCommandId(CommandId? commandId) =>
+        _submittedCommandIds.Enqueue(commandId ?? new CommandId(Guid.NewGuid().ToString()));
 
     private ExerciseOutcome<T> AdvancingLedgerEndOnCommit<T>(ExerciseOutcome<T> outcome)
     {
@@ -241,7 +293,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
     private static IReadOnlyList<AcsSnapshotEntry<T>> ActiveAt<T>(
         IReadOnlyList<AcsSnapshotEntry<T>> entries,
         LedgerOffset? activeAtOffset)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         activeAtOffset is not { } snapshotOffset
             ? entries
             : entries.Where(entry => OffsetOf(entry) is not { } created || created.Value <= snapshotOffset.Value).ToArray();
@@ -250,7 +302,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
         IReadOnlyList<ContractStreamEvent<T>> events,
         LedgerOffset? fromOffset,
         LedgerOffset? toOffset)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         fromOffset is null && toOffset is null
             ? events
             : events.Where(streamEvent => IsWithin(OffsetOf(streamEvent), fromOffset, toOffset)).ToArray();
@@ -267,7 +319,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
     }
 
     private static LedgerOffset? OffsetOf<T>(AcsSnapshotEntry<T> entry)
-        where T : IDamlType => entry switch
+        where T : ITemplate, IDamlRecord<T> => entry switch
     {
         AcsSnapshotEntry<T>.Created created => created.Offset,
         AcsSnapshotEntry<T>.Unclassified unclassified => unclassified.Offset,
@@ -275,7 +327,7 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient
     };
 
     private static LedgerOffset? OffsetOf<T>(ContractStreamEvent<T> streamEvent)
-        where T : IDamlType => streamEvent switch
+        where T : ITemplate, IDamlRecord<T> => streamEvent switch
     {
         ContractStreamEvent<T>.Created created => created.Offset,
         ContractStreamEvent<T>.Archived archived => archived.Offset,

@@ -16,12 +16,12 @@ public class LedgerBuilderTests
 {
     private static readonly Party Bob = new("bob");
     private static readonly ContractId<DemoAsset> Cid = new("cid1");
-    private static readonly DamlRecord Payload = new DemoAsset(Bob, Bob, "GOLD", 42m).ToRecord();
+    private static readonly DemoAsset Payload = new DemoAsset(Bob, Bob, "GOLD", 42m);
 
     [Fact]
     public void LedgerEvents_Created_wraps_the_AcsSnapshotEntry_Created_variant()
     {
-        var entry = LedgerEvents.Created(Cid, Payload, LedgerOffset.At(1), (SynchronizerId)"sync1", new[] { Bob });
+        var entry = LedgerEvents.Created(Cid, Payload, null, LedgerOffset.At(1), (SynchronizerId)"sync1", new[] { Bob });
 
         var created = entry.Should().BeOfType<AcsSnapshotEntry<DemoAsset>.Created>().Subject;
         created.ContractId.Should().Be(Cid);
@@ -51,24 +51,25 @@ public class LedgerBuilderTests
     [Fact]
     public void LedgerEvents_Unclassified_wraps_the_AcsSnapshotEntry_Unclassified_variant()
     {
-        var entry = LedgerEvents.Unclassified<DemoAsset>(LedgerOffset.At(7), "unmapped-template");
+        var entry = LedgerEvents.Unclassified<DemoAsset>(LedgerOffset.At(7), UnclassifiedKind.Unknown, "unmapped-template");
 
         var unclassified = entry.Should().BeOfType<AcsSnapshotEntry<DemoAsset>.Unclassified>().Subject;
         unclassified.Offset.Should().Be(LedgerOffset.At(7));
-        unclassified.Kind.Should().Be("unmapped-template");
+        unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
+        unclassified.RawKind.Should().Be("unmapped-template");
     }
 
     [Fact]
     public void ContractEvents_wraps_each_stream_variant()
     {
         var witnesses = new[] { Bob };
-        ContractEvents.Created(Cid, Payload, LedgerOffset.At(1), (SynchronizerId)"s", witnesses)
+        ContractEvents.Created(Cid, Payload, null, LedgerOffset.At(1), (SynchronizerId)"s", witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Created>();
         ContractEvents.Archived<DemoAsset>(Cid, LedgerOffset.At(2), (SynchronizerId)"s", witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Archived>();
         ContractEvents.Exercised<DemoAsset>(Cid, "Transfer", new DamlText("arg"), new DamlText("res"), consuming: true, LedgerOffset.At(3), (SynchronizerId)"s", witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Exercised>();
-        ContractEvents.Assigned(Cid, Payload, LedgerOffset.At(4), (SynchronizerId)"src", (SynchronizerId)"tgt", "rid", 1L, witnesses)
+        ContractEvents.Assigned(Cid, Payload, null, LedgerOffset.At(4), (SynchronizerId)"src", (SynchronizerId)"tgt", "rid", 1L, witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Assigned>();
         ContractEvents.Unassigned<DemoAsset>(Cid, LedgerOffset.At(5), (SynchronizerId)"src", (SynchronizerId)"tgt", "rid", 1L, witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Unassigned>();
@@ -97,7 +98,7 @@ public class LedgerBuilderTests
         var result = LedgerResults.Transaction(
             "update1",
             LedgerOffset.At(5),
-            new[] { new CreatedContract("cid1", DemoAsset.TemplateId, "{}") },
+            new[] { new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null) },
             new[] { "archived1" },
             (CommandId)"cmd1");
 

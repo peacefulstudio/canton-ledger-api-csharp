@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
@@ -35,7 +36,9 @@ public class ServiceCollectionExtensionsTests
 
         var cantonDescriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(ICantonLedgerClient)).Subject;
         cantonDescriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        cantonDescriptor.ImplementationType.Should().Be<LedgerClient>();
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ICantonLedgerClient>().Should().BeOfType<LedgerClient>();
     }
 
     [Fact]
@@ -53,7 +56,9 @@ public class ServiceCollectionExtensionsTests
 
         var descriptor = services.Should().ContainSingle(d => d.ServiceType == typeof(IAdminClient)).Subject;
         descriptor.Lifetime.Should().Be(ServiceLifetime.Singleton);
-        descriptor.ImplementationType.Should().Be<AdminClient>();
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IAdminClient>().Should().BeOfType<AdminClient>();
     }
 
     [Fact]
@@ -669,5 +674,72 @@ public class ServiceCollectionExtensionsTests
         var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
 
         act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(typeof(ILedgerReader))]
+    [InlineData(typeof(ILedgerWriter))]
+    [InlineData(typeof(ILedgerStreamer))]
+    [InlineData(typeof(ILedgerClient))]
+    [InlineData(typeof(ICantonLedgerClient))]
+    public void AddLedgerClient_resolves_the_transport_neutral_surface_as_the_one_LedgerClient(Type serviceType)
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        using var provider = services.BuildServiceProvider();
+
+        var resolved = provider.GetRequiredService(serviceType);
+
+        resolved.Should().BeOfType<LedgerClient>();
+        resolved.Should().BeSameAs(provider.GetRequiredService<ICantonLedgerClient>());
+    }
+
+    [Theory]
+    [InlineData(typeof(ILedgerReader))]
+    [InlineData(typeof(ILedgerWriter))]
+    [InlineData(typeof(ILedgerStreamer))]
+    [InlineData(typeof(ILedgerClient))]
+    [InlineData(typeof(ICantonLedgerClient))]
+    public void AddLedgerClient_registers_the_transport_neutral_surface_as_singleton(Type serviceType)
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+
+        services.Should().ContainSingle(descriptor => descriptor.ServiceType == serviceType)
+            .Which.Lifetime.Should().Be(ServiceLifetime.Singleton);
+    }
+
+    [Theory]
+    [InlineData(typeof(ILedgerReader))]
+    [InlineData(typeof(ILedgerWriter))]
+    [InlineData(typeof(ILedgerStreamer))]
+    [InlineData(typeof(ILedgerClient))]
+    [InlineData(typeof(ICantonLedgerClient))]
+    public void AddCantonLedger_resolves_the_transport_neutral_surface_as_the_one_LedgerClient(Type serviceType)
+    {
+        var services = new ServiceCollection();
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001"
+            })
+            .Build();
+        services.AddCantonLedger(config);
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService(serviceType).Should().BeSameAs(provider.GetRequiredService<ICantonLedgerClient>());
+    }
+
+    [Fact]
+    public void AddLedgerClient_keeps_a_consumer_registration_made_before_it()
+    {
+        var services = new ServiceCollection();
+        var preregistered = Substitute.For<ILedgerReader>();
+        services.AddSingleton<ILedgerReader>(preregistered);
+
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ILedgerReader>().Should().BeSameAs(preregistered);
     }
 }

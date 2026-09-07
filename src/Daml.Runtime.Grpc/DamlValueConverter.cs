@@ -124,6 +124,10 @@ public static class DamlValueConverter
             {
                 Optional = new Optional { Value = o.Value is not null ? ToProtoValue(o.Value) : null }
             },
+            DamlOptionalChain c => new Value
+            {
+                Optional = new Optional { Value = c.Value is not null ? ToProtoValue(c.Value) : null }
+            },
             DamlTextMap m => ToProtoTextMapValue(m),
             DamlGenMap g => ToProtoGenMapValue(g),
             DamlEnum e => new Value

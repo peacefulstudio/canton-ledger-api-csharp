@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -20,7 +21,7 @@ using Status = Grpc.Core.Status;
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 [Collection("LedgerClient global ActivitySource")]
-public class LedgerClientActivityEnrichmentTests
+public sealed class LedgerClientActivityEnrichmentTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -42,6 +43,8 @@ public class LedgerClientActivityEnrichmentTests
         _interactiveSubmissionService = Substitute
             .ForPartsOf<Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(_options, _channel, _commandService, _tokenProvider);
 
@@ -97,20 +100,9 @@ public class LedgerClientActivityEnrichmentTests
             }
         });
         var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
-        _commandService
-            .SubmitAndWaitForTransactionAsync(
-                Arg.Any<SubmitAndWaitForTransactionRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<SubmitAndWaitForTransactionResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClient();
         await client.TryExerciseAsync<DamlUnit>(
@@ -138,7 +130,7 @@ public class LedgerClientActivityEnrichmentTests
             errorId, "contract not found", "InvalidGivenCurrentSystemStateOther");
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClient();
         await client.TryExerciseAsync<object>(
@@ -158,7 +150,7 @@ public class LedgerClientActivityEnrichmentTests
         var ex = new RpcException(new Status(StatusCode.Unavailable, $"network down {Guid.NewGuid()}"));
         LedgerClientTestFixtures.StubCommandServiceFailure(_commandService, ex);
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClient();
         await client.TryExerciseAsync<object>(
@@ -189,7 +181,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClientWithStateService();
         await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -221,7 +213,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClientWithStateService();
 
@@ -249,7 +241,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
             .WithActAs(ActAs);
@@ -285,7 +277,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var submission = RuntimeCommands.CommandsSubmission.Single(ArchiveCommand(UniqueContractId()))
             .WithActAs(ActAs);
@@ -324,7 +316,7 @@ public class LedgerClientActivityEnrichmentTests
                 () => new Metadata(),
                 () => { }));
 
-        using var capture = ActivityCapture.Of(LedgerClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
         var client = CreateClientWithInteractiveSubmissionService();
         await client.EstimateTrafficCostAsync(

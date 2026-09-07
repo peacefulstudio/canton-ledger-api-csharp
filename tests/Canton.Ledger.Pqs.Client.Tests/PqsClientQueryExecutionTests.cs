@@ -88,7 +88,7 @@ public class PqsClientQueryExecutionTests
     [Fact]
     public async Task QueryAsync_logs_records_and_rethrows_a_non_cancellation_failure()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var loggerFactory = new CapturingLoggerFactory();
         var failure = new InvalidOperationException("connection blew up");
@@ -113,7 +113,7 @@ public class PqsClientQueryExecutionTests
     [Fact]
     public async Task QueryAsync_propagates_cancellation_without_recording_an_error()
     {
-        using var capture = ActivityCapture.Of(PqsClient.ActivitySourceName);
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.PqsClient);
 
         var loggerFactory = new CapturingLoggerFactory();
         var client = ClientThatOpensWith(

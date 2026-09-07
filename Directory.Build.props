@@ -35,7 +35,7 @@
     <!-- Package versioning. AssemblyVersion/FileVersion derive from $(Version) — the
          release-numeric prefix plus a zero revision — so they can never lag the package
          version again, including when CI overrides Version with a pre-release suffix. -->
-    <Version>0.4.1-preview.1</Version>
+    <Version>0.5.0-preview.1</Version>
     <VersionReleasePrefix>$(Version)</VersionReleasePrefix>
     <VersionReleasePrefix Condition="$(VersionReleasePrefix.Contains('-'))">$(VersionReleasePrefix.Substring(0, $(VersionReleasePrefix.IndexOf('-'))))</VersionReleasePrefix>
     <VersionReleasePrefix Condition="$(VersionReleasePrefix.Contains('+'))">$(VersionReleasePrefix.Substring(0, $(VersionReleasePrefix.IndexOf('+'))))</VersionReleasePrefix>

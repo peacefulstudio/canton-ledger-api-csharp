@@ -6,48 +6,65 @@ using Daml.Runtime.Outcomes;
 namespace Canton.Ledger.Abstractions;
 
 /// <summary>
-/// A participant error decoded from the <c>google.rpc.Status</c> payload every Ledger API
-/// transport returns — the gRPC client reads it from the <c>grpc-status-details-bin</c> trailer,
-/// the HTTP client from the JSON response body — in the one shape both clients hand on to
-/// <see cref="ExerciseOutcome{T}"/> and <see cref="Daml.Ledger.Abstractions.LedgerOperationException"/>.
+/// A failure decoded from a Ledger API transport's error channel — the gRPC client reads it from
+/// the <c>grpc-status-details-bin</c> trailer, the HTTP client from the JSON response body — in the
+/// one shape both clients hand on to <see cref="ExerciseOutcome{T}"/> and
+/// <see cref="Daml.Ledger.Abstractions.LedgerOperationException"/>. The two arms are what a caller
+/// pattern-matches over: <see cref="Structured"/> when the participant attached a classified error
+/// to its answer, <see cref="Unstructured"/> when it did not and only the transport's own status is
+/// left to go on.
 /// </summary>
-/// <param name="Category">
-/// The Canton error category, classified by <see cref="MapCategory"/> from the
-/// <c>category</c> entry of the error's <c>google.rpc.ErrorInfo</c> metadata;
-/// <see cref="DamlErrorCategory.Unknown"/> when the payload carries no recognisable category.
-/// </param>
-/// <param name="ErrorId">
-/// The Canton error-code id (the <c>reason</c> of the <c>google.rpc.ErrorInfo</c> detail), e.g.
-/// <c>CONTRACT_NOT_FOUND</c>. Empty when the payload carries no <c>ErrorInfo</c> detail, which is
-/// how both clients tell a participant-issued Daml error from a bare transport failure.
-/// </param>
-/// <param name="Message">The participant's error message, or the transport's own when it issued no status.</param>
-/// <param name="Metadata">The <c>google.rpc.ErrorInfo</c> metadata verbatim, including the raw <c>category</c> entry.</param>
-/// <param name="StatusCode">
-/// The transport's status code for the failure — the HTTP response status for the JSON transport,
-/// the gRPC status code for gRPC. This is the value each client passes to
-/// <see cref="ExerciseOutcome{T}.InfraError"/>, never the <c>google.rpc.Status.code</c> carried
-/// inside the wire body.
-/// </param>
-public sealed record ParsedLedgerError(
-    DamlErrorCategory Category,
-    string ErrorId,
-    string Message,
-    IReadOnlyDictionary<string, string> Metadata,
-    int StatusCode)
+/// <remarks>
+/// The hierarchy is closed: the base constructor is private, so the only arms are the two nested
+/// here and a pattern match over them is total.
+/// </remarks>
+public abstract record ParsedLedgerError
 {
-    private const char CategoryListSeparator = ',';
+    private ParsedLedgerError(string message, int statusCode)
+    {
+        Message = message;
+        StatusCode = statusCode;
+    }
 
-    private static readonly IReadOnlyDictionary<string, string> NoMetadata =
-        new Dictionary<string, string>(0);
+    /// <summary>The participant's error message, or the transport's own when it issued no status.</summary>
+    public string Message { get; }
 
     /// <summary>
-    /// A failure carrying no participant <c>ErrorInfo</c> — an empty <see cref="ErrorId"/>,
-    /// <see cref="DamlErrorCategory.Unknown"/>, and no metadata — so callers surface it as a
-    /// transport failure rather than a Daml error.
+    /// The transport's status code for the failure — the HTTP response status for the JSON
+    /// transport, the gRPC status code for gRPC. This is the value each client passes to
+    /// <see cref="ExerciseOutcome{T}.InfraError"/>, never the <c>google.rpc.Status.code</c> carried
+    /// inside the wire body.
     /// </summary>
-    public static ParsedLedgerError Untyped(string? message, int statusCode) =>
-        new(DamlErrorCategory.Unknown, string.Empty, message ?? string.Empty, NoMetadata, statusCode);
+    public int StatusCode { get; }
+
+    /// <summary>
+    /// The classification a transport-failure slot can carry: the category when one was determined,
+    /// and <c>null</c> when it was not. <see cref="DamlErrorCategory.Unknown"/> on
+    /// <see cref="Structured"/> is a classifier that ran over a structured error and recognised
+    /// nothing, which is not a category to hand a caller.
+    /// </summary>
+    public DamlErrorCategory? ClassifiedCategory => this switch
+    {
+        Structured structured =>
+            structured.Category is DamlErrorCategory.Unknown ? null : structured.Category,
+        Unstructured unstructured => unstructured.Category,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The Canton error-code id a transport-failure slot can carry: the id a <see cref="Structured"/>
+    /// error named, and <c>null</c> when there is none to hand on — an <see cref="Unstructured"/>
+    /// failure, which has no error id by construction, and a <see cref="Structured"/> error that
+    /// named an empty one. It discriminates two failures a status and a category cannot tell apart,
+    /// such as the contention conditions that all arrive as one category.
+    /// </summary>
+    public string? ReportedErrorId => this switch
+    {
+        Structured { ErrorId.Length: > 0 } structured => structured.ErrorId,
+        _ => null,
+    };
+
+    private const char CategoryListSeparator = ',';
 
     /// <summary>
     /// Classifies a Canton error category as it arrives on the wire, whichever field carried it —
@@ -68,4 +85,58 @@ public sealed record ParsedLedgerError(
         && Enum.IsDefined(category)
             ? category
             : DamlErrorCategory.Unknown;
+
+    /// <summary>
+    /// A participant error the participant classified itself: it attached a structured error to its
+    /// answer, so the failure carries an error id, a category and the error's metadata alongside the
+    /// transport status.
+    /// </summary>
+    /// <param name="Category">
+    /// The Canton error category, classified by <see cref="MapCategory"/> from the <c>category</c>
+    /// entry of the error's metadata; <see cref="DamlErrorCategory.Unknown"/> when a classifier ran
+    /// over the structured error and found nothing it recognised. Absence of a classification is
+    /// <see cref="Unstructured"/>, never <see cref="DamlErrorCategory.Unknown"/> here.
+    /// </param>
+    /// <param name="ErrorId">
+    /// The Canton error-code id — the <c>reason</c> of the <c>google.rpc.ErrorInfo</c> detail, or
+    /// the JSON envelope's <c>code</c> — e.g. <c>CONTRACT_NOT_FOUND</c>.
+    /// </param>
+    /// <param name="Message">The participant's error message.</param>
+    /// <param name="Metadata">The error's metadata verbatim, including the raw <c>category</c> entry.</param>
+    /// <param name="StatusCode">The transport's status code for the failure.</param>
+    public sealed record Structured(
+        DamlErrorCategory Category,
+        string ErrorId,
+        string Message,
+        IReadOnlyDictionary<string, string> Metadata,
+        int StatusCode) : ParsedLedgerError(Message, StatusCode);
+
+    /// <summary>
+    /// A failure the participant attached no structured error to — a transport fault, a body the
+    /// client could not read as one, or a redacted error whose classification the participant
+    /// withheld on purpose. There is no error id and no metadata to be had; the transport status is
+    /// the whole of what arrived, and <see cref="Category"/> carries the coarse class a client
+    /// recovered from that status when one is determinate.
+    /// </summary>
+    public sealed record Unstructured : ParsedLedgerError
+    {
+        /// <summary>
+        /// Creates an unstructured failure carrying the transport's own status and message.
+        /// </summary>
+        /// <param name="message">The failure's message; a null message becomes an empty one.</param>
+        /// <param name="statusCode">The transport's status code for the failure.</param>
+        /// <param name="category">
+        /// The class recovered from <paramref name="statusCode"/>, or <c>null</c> when the failure
+        /// was not classified.
+        /// </param>
+        public Unstructured(string? message, int statusCode, DamlErrorCategory? category = null)
+            : base(message ?? string.Empty, statusCode) => Category = category;
+
+        /// <summary>
+        /// The class a client recovered from the transport status alone, and <c>null</c> when the
+        /// failure was not classified — the same contract the transport-failure slots upstream
+        /// declare.
+        /// </summary>
+        public DamlErrorCategory? Category { get; init; }
+    }
 }

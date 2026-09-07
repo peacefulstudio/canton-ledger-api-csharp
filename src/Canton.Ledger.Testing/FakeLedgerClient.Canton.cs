@@ -16,6 +16,7 @@ public sealed partial class FakeLedgerClient
     /// <inheritdoc />
     public Task<CommandId> SubmitAsync(
         CommandsSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
@@ -25,6 +26,7 @@ public sealed partial class FakeLedgerClient
     /// <inheritdoc />
     public Task<CommandId> SubmitReassignmentAsync(
         ReassignmentSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
@@ -36,7 +38,7 @@ public sealed partial class FakeLedgerClient
         ReassignmentSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(submission);
         return Task.FromResult(
@@ -72,12 +74,15 @@ public sealed partial class FakeLedgerClient
     public Task<IReadOnlyList<ConnectedSynchronizer>> GetConnectedSynchronizersAsync(
         Party? party = null,
         string? participantId = null,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(_canton.ConnectedSynchronizers ?? throw StagingMissing(
             "connected synchronizers", nameof(GetConnectedSynchronizersAsync), "WithConnectedSynchronizers"));
 
     /// <inheritdoc />
-    public Task<string> GetLedgerApiVersionAsync(CancellationToken cancellationToken = default) =>
+    public Task<string> GetLedgerApiVersionAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default) =>
         Task.FromResult(_canton.LedgerApiVersion ?? throw StagingMissing(
             "Ledger API version", nameof(GetLedgerApiVersionAsync), "WithLedgerApiVersion"));
 
@@ -85,6 +90,7 @@ public sealed partial class FakeLedgerClient
     public Task<TransactionResult> GetUpdateByOffsetAsync(
         long offset,
         SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
@@ -97,12 +103,29 @@ public sealed partial class FakeLedgerClient
     public Task<TransactionResult> GetUpdateByIdAsync(
         string updateId,
         SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(updateId);
         return Task.FromResult(_canton.UpdatesById.TryGetValue(updateId, out var result)
             ? result
             : throw StagingMissing($"update with id '{updateId}'", nameof(GetUpdateByIdAsync), "WithUpdateById"));
+    }
+
+    /// <inheritdoc />
+    public Task<TransactionTree> GetUpdateTreeByOffsetAsync(
+        long offset,
+        SubmitterInfo submitter,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
+        return Task.FromResult(_canton.UpdateTreesByOffset.TryGetValue(offset, out var tree)
+            ? tree
+            : throw StagingMissing(
+                $"transaction tree at offset {offset}",
+                nameof(GetUpdateTreeByOffsetAsync),
+                "WithUpdateTreeByOffset"));
     }
 
     /// <inheritdoc />
@@ -134,7 +157,8 @@ public sealed partial class FakeLedgerClient
 /// The Canton-specific behaviour a <see cref="FakeLedgerClient"/> replays beyond the neutral
 /// <see cref="Daml.Ledger.Abstractions.ILedgerClient"/> surface: staged reassignment and
 /// transaction-tree outcomes, completion-stream events, connected synchronizers, the Ledger API
-/// version, the traffic-cost estimate, and point-read transactions keyed by offset and id.
+/// version, the traffic-cost estimate, point-read transactions keyed by offset and id, and the
+/// tree-shaped point read keyed by offset.
 /// </summary>
 internal sealed record FakeCantonSurface(
     IReadOnlyDictionary<Type, object> ReassignmentResults,
@@ -144,7 +168,8 @@ internal sealed record FakeCantonSurface(
     string? LedgerApiVersion,
     StagedTrafficCostEstimate? TrafficCostEstimate,
     IReadOnlyDictionary<long, TransactionResult> UpdatesByOffset,
-    IReadOnlyDictionary<string, TransactionResult> UpdatesById);
+    IReadOnlyDictionary<string, TransactionResult> UpdatesById,
+    IReadOnlyDictionary<long, TransactionTree> UpdateTreesByOffset);
 
 /// <summary>
 /// A staged traffic-cost answer, boxed so that staging "the participant served no estimation" is

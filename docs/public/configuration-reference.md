@@ -95,7 +95,7 @@ OAuth2 client-credentials token acquisition, with thread-safe TTL caching and au
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `ConnectionString` | `string` | — (required) | PostgreSQL connection string for the PQS database. Required even when an `NpgsqlDataSource` is registered (it is still validated at startup); when a data source *is* registered in the container, connections are opened from it instead. |
-| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | **Code-only** — not bindable from configuration. Serializer options for contract payloads; `null` means the client's defaults. Set via the delegate overload or `PostConfigure` (below). |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | **Code-only** — not bindable from configuration. Serializer options for contract payloads; `null` means the client's defaults. Set via the delegate overload or `PostConfigure` (below). Generated template types carry their own `ContractId<T>` converter, so a payload with a contract-id field deserializes under the defaults with nothing to register. |
 
 ## `RestLedgerClientOptions` (`Canton:Rest`)
 
@@ -128,14 +128,6 @@ services.AddCantonLedger(configuration);
 The two code-only properties cannot come from `appsettings.json`. When you register from configuration but need them set, add a `PostConfigure` — it runs after configuration binding and before startup validation reads the final value:
 
 ```csharp
-services.AddPqsClient(configuration.GetSection("Canton:Pqs"));
-services.PostConfigure<PqsClientOptions>(options =>
-{
-    var json = new JsonSerializerOptions(PqsClient.DefaultJsonSerializerOptions);
-    json.Converters.Add(new MyContractIdJsonConverterFactory());
-    options.JsonSerializerOptions = json;
-});
-
 services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
 services.PostConfigure<LedgerClientOptions>(options =>
     options.ConfigureChannel = channel => channel.HttpHandler = myPooledHandler);

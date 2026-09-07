@@ -60,12 +60,13 @@ The intermediate format (`intermediate_dar.proto`) carries the complete type sur
 
 ### Stage 2: the C# emitter
 
-The .NET side (`Daml.Codegen.CSharp`) parses the `IntermediateDar` protobuf into an in-memory model and walks it with a Roslyn-based generator, emitting:
+The .NET side (`Daml.Codegen.CSharp`) parses the `IntermediateDar` protobuf into the in-memory model of the `Daml.Codegen.Intermediate` package, then walks that model with a Roslyn-based generator, emitting:
 
-- **Templates** — sealed records implementing `ITemplate`, with a static `TemplateId`, typed `ContractId<T>`, and `ToRecord()`/`FromRecord()` serialization.
+- **Templates** — sealed records implementing `ITemplate` and `IDamlRecord<TSelf>`, with a static `TemplateId`, typed `ContractId<T>`, and `ToRecord()`/`FromRecord()` serialization.
+- **Keyed templates** — additionally implementing `IHasKey<TSelf, TKey>` with a static `KeyDescriptor<TSelf, TKey>` that encodes and decodes the key. A contract read back with its key materializes as `Contract<T, TKey>`.
 - **Choices** — nested types on their template (e.g. `Iou.Transfer`) with `ExerciseCommand` builders.
-- **Records, variants, enums** — sealed records implementing `IDamlRecord`, variant hierarchies implementing `IDamlVariant`, and C# `enum`s.
-- **Interfaces** — types implementing `IDamlInterface`, with `IHasView<TView>` and `IImplements<TInterface>` linking templates to the interfaces they implement.
+- **Records, variants, enums** — sealed records implementing `IDamlRecord<TSelf>`, variant hierarchies implementing `IDamlVariant`, and C# `enum`s. Only types the DAR actually declares are emitted; placeholder records for unresolved types are not.
+- **Interfaces** — types implementing `IDamlInterface`, with `IHasView<TView>` and `IImplements<TInterface>` linking templates to the interfaces they implement. `IHasView<TView>` is a member-less marker; the interface exposes a static `View` witness of type `ViewDescriptor<TInterface, TView>` that a subscription passes to the client.
 - Optionally a `.csproj`, so a DAR can be turned directly into a NuGet package.
 
 ### Invocation
@@ -84,11 +85,11 @@ Its main areas:
 
 | Namespace | Provides |
 |---|---|
-| `Daml.Runtime.Contracts` | `ITemplate`, `IDamlInterface`, `ContractId<T>`, `Contract<T>`, key/view/implements markers |
-| `Daml.Runtime.Data` | The `DamlValue` hierarchy (`DamlInt64`, `DamlNumeric`, `DamlText`, `DamlParty`, `DamlDate`, `DamlTimestamp`, `DamlContractId`, `DamlList<T>`, `DamlOptional<T>`, `DamlTextMap<T>`, `DamlRecord`, `DamlVariant`, …), `Identifier`, and `DamlValueExtensions.FromDamlValue<T>` for unwrapping values to CLR types |
+| `Daml.Runtime.Contracts` | `ITemplate`, `IDamlInterface`, `ContractId<T>`, `Contract<T>`, `Contract<T, TKey>`, `ContractKey<TKey>`, `KeyDescriptor<T, TKey>`, `ViewDescriptor<TInterface, TView>`, key/view/implements markers |
+| `Daml.Runtime.Data` | The `DamlValue` hierarchy (`DamlInt64`, `DamlNumeric`, `DamlText`, `DamlParty`, `DamlDate`, `DamlTimestamp`, `DamlContractId`, `DamlList`, `DamlOptional`, `DamlTextMap`, `DamlRecord`, `DamlVariant`, …), `Identifier`, and `DamlValueExtensions.FromDamlValue<T>` for unwrapping values to CLR types |
 | `Daml.Runtime.Commands` | Transport-agnostic `CreateCommand`, `ExerciseCommand`, `CommandsSubmission`, `SubmitterInfo` |
 | `Daml.Runtime.Serialization` | `DamlJsonSerializer` for Ledger API JSON |
-| `Daml.Runtime.Stdlib` | Daml standard-library mappings (`Tuple`, `Either`, `Set`, `Map`, `NonEmpty`, …) |
+| `Daml.Runtime.Stdlib` | Daml standard-library mappings (`Tuple`, `Either`, `Optional<T>`, `Set`, `Map`, `NonEmpty`, …) |
 
 Generated code targets these types; the clients in this repository accept and return them. The companion package `Daml.Ledger.Abstractions` defines the transport-agnostic `ILedgerClient` interface that `Canton.Ledger.Grpc.Client` implements.
 

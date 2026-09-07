@@ -16,7 +16,7 @@ public class FakeLedgerClientTests
 {
     private static readonly Party Alice = new("alice");
     private static readonly SynchronizerId Sync = (SynchronizerId)"sync1";
-    private static readonly DamlRecord Payload = new DemoAsset(Alice, Alice, "GOLD", 1m).ToRecord();
+    private static readonly DemoAsset Payload = new DemoAsset(Alice, Alice, "GOLD", 1m);
 
     private static async Task<List<T>> CollectAsync<T>(IAsyncEnumerable<T> source)
     {
@@ -34,7 +34,8 @@ public class FakeLedgerClientTests
     {
         var created = LedgerEvents.Created(
             new ContractId<DemoAsset>("cid1"),
-            new DemoAsset(Alice, Alice, "GOLD", 1m).ToRecord(),
+            new DemoAsset(Alice, Alice, "GOLD", 1m),
+            null,
             LedgerOffset.At(1),
             (SynchronizerId)"sync1",
             new[] { Alice });
@@ -65,7 +66,8 @@ public class FakeLedgerClientTests
     {
         var created = ContractEvents.Created(
             new ContractId<DemoAsset>("cid1"),
-            new DemoAsset(Alice, Alice, "GOLD", 1m).ToRecord(),
+            new DemoAsset(Alice, Alice, "GOLD", 1m),
+            null,
             LedgerOffset.At(1),
             (SynchronizerId)"sync1",
             new[] { Alice });
@@ -74,6 +76,27 @@ public class FakeLedgerClientTests
         var entries = await CollectAsync(client.SubscribeAsync<DemoAsset>(Alice, cancellationToken: TestContext.Current.CancellationToken));
 
         entries.Should().ContainSingle().Which.Should().Be(created);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_replays_a_categorised_stream_error_with_its_source_exception()
+    {
+        var transportFault = new InvalidOperationException("connection reset");
+        var fault = ContractEvents.StreamError<DemoAsset>(
+            14,
+            "contract stream aborted",
+            DamlErrorCategory.TransientServerFailure,
+            transportFault);
+        var client = FakeLedgerClient.Create().WithContractEvents(fault).Build();
+
+        var entries = await CollectAsync(client.SubscribeAsync<DemoAsset>(Alice, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = entries.Should().ContainSingle().Which
+            .Should().BeOfType<ContractStreamEvent<DemoAsset>.StreamError>().Subject;
+        error.StatusCode.Should().Be(14);
+        error.Message.Should().Be("contract stream aborted");
+        error.Category.Should().Be(DamlErrorCategory.TransientServerFailure);
+        error.SourceException.Should().BeSameAs(transportFault);
     }
 
     [Fact]
@@ -98,7 +121,7 @@ public class FakeLedgerClientTests
         var client = FakeLedgerClient.Create().WithExerciseResult(outcome).Build();
 
         var result = await client.TryExerciseAsync<string>(
-            command: null!,
+            DemoExercise(),
             submitter: Alice,
             cancellationToken: TestContext.Current.CancellationToken);
 
@@ -110,7 +133,7 @@ public class FakeLedgerClientTests
     {
         var client = FakeLedgerClient.Create().Build();
 
-        var act = () => client.TryExerciseAsync<string>(command: null!, submitter: Alice);
+        var act = () => client.TryExerciseAsync<string>(DemoExercise(), submitter: Alice);
 
         (await act.Should().ThrowAsync<NotSupportedException>())
             .Which.Message.Should().Contain("WithExerciseResult").And.Contain("String");
@@ -135,7 +158,7 @@ public class FakeLedgerClientTests
         LedgerOutcomes.One(LedgerResults.Transaction(
             "update-1",
             LedgerOffset.At(5),
-            new[] { new CreatedContract("cid1", DemoAsset.TemplateId, "{}") },
+            new[] { new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null) },
             new[] { "archived1" },
             (CommandId)"cmd-1")),
         LedgerOutcomes.DamlError<TransactionResult>(
@@ -184,10 +207,10 @@ public class FakeLedgerClientTests
             .And.Contain(nameof(FakeLedgerClient.TrySubmitAndWaitForTransactionAsync));
     }
 
-    private static CommandsSubmission DemoSubmission() =>
-        CommandsSubmission.Single(
-            ExerciseCommand.For(new ContractId<DemoAsset>("cid1"), (ChoiceName)"Archive", DamlRecord.Create()),
-            Alice);
+    private static ExerciseCommand DemoExercise() =>
+        ExerciseCommand.For(new ContractId<DemoAsset>("cid1"), (ChoiceName)"Archive", DamlRecord.Create());
+
+    private static CommandsSubmission DemoSubmission() => CommandsSubmission.Single(DemoExercise(), Alice);
 
     [Fact]
     public async Task GetLedgerEndAsync_returns_the_staged_offset()
@@ -225,7 +248,7 @@ public class FakeLedgerClientTests
             .Build();
 
         await client.TryExerciseAsync<string>(
-            command: null!, submitter: Alice, cancellationToken: TestContext.Current.CancellationToken);
+            DemoExercise(), submitter: Alice, cancellationToken: TestContext.Current.CancellationToken);
 
         var end = await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
         end.Should().Be(LedgerOffset.At(43));
@@ -368,9 +391,11 @@ public class FakeLedgerClientTests
     {
         var client = FakeLedgerClient.Create().Build();
 
+        var submission = DemoSubmission();
+
         var ledgerEnd = () => client.GetLedgerEndAsync();
-        var submitAndWait = () => client.SubmitAndWaitAsync(null!);
-        var forTransaction = () => client.TrySubmitAndWaitForTransactionAsync(null!);
+        var submitAndWait = () => client.SubmitAndWaitAsync(submission);
+        var forTransaction = () => client.TrySubmitAndWaitForTransactionAsync(submission);
 
         (await ledgerEnd.Should().ThrowAsync<NotSupportedException>())
             .Which.Message.Should().Contain(nameof(client.GetLedgerEndAsync));
@@ -414,9 +439,9 @@ public class FakeLedgerClientTests
     {
         var client = FakeLedgerClient.Create()
             .WithContractEvents(
-                ContractEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, LedgerOffset.At(1), Sync, [Alice]),
-                ContractEvents.Created(new ContractId<DemoAsset>("cid2"), Payload, LedgerOffset.At(2), Sync, [Alice]),
-                ContractEvents.Created(new ContractId<DemoAsset>("cid3"), Payload, LedgerOffset.At(3), Sync, [Alice]))
+                ContractEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, null, LedgerOffset.At(1), Sync, [Alice]),
+                ContractEvents.Created(new ContractId<DemoAsset>("cid2"), Payload, null, LedgerOffset.At(2), Sync, [Alice]),
+                ContractEvents.Created(new ContractId<DemoAsset>("cid3"), Payload, null, LedgerOffset.At(3), Sync, [Alice]))
             .Build();
 
         var events = await CollectAsync(client.SubscribeAsync<DemoAsset>(
@@ -431,7 +456,7 @@ public class FakeLedgerClientTests
     {
         var client = FakeLedgerClient.Create()
             .WithActiveContracts(
-                LedgerEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, LedgerOffset.At(4), Sync, [Alice]),
+                LedgerEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, null, LedgerOffset.At(4), Sync, [Alice]),
                 LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(9)))
             .Build();
 
@@ -448,7 +473,7 @@ public class FakeLedgerClientTests
         await cts.CancelAsync();
         var client = FakeLedgerClient.Create()
             .WithContractEvents(
-                ContractEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, LedgerOffset.At(1), Sync, [Alice]))
+                ContractEvents.Created(new ContractId<DemoAsset>("cid1"), Payload, null, LedgerOffset.At(1), Sync, [Alice]))
             .Build();
 
         var act = async () => await CollectAsync(client.SubscribeAsync<DemoAsset>(

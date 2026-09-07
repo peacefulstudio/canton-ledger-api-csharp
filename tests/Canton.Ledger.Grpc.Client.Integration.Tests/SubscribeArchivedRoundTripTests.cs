@@ -1,14 +1,14 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Testing.Localnet;
+using Canton.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -18,9 +18,6 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class SubscribeArchivedRoundTripTests
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
-
     private const string SkipMessage =
         "Skipping: set CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL, _CLIENT_ID, _CLIENT_SECRET "
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
@@ -28,15 +25,6 @@ public class SubscribeArchivedRoundTripTests
 
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
-
-    private static LedgerClient NewClient(LocalnetFixture fixture, string userId)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        return new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
-    }
 
     [Fact]
     public async Task SubscribeAsync_delivers_an_Archived_event_when_a_contract_is_archived()
@@ -47,8 +35,9 @@ public class SubscribeArchivedRoundTripTests
         }
 
         await using var fixture = LocalnetFixture.FromEnvironment();
-        var (client, owner) = await BootstrapAsync(fixture);
-        using var _ = client;
+        var (services, owner) = await BootstrapAsync(fixture);
+        await using var _ = services;
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var startOffset = await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
@@ -72,8 +61,9 @@ public class SubscribeArchivedRoundTripTests
         }
 
         await using var fixture = LocalnetFixture.FromEnvironment();
-        var (client, owner) = await BootstrapAsync(fixture);
-        using var _ = client;
+        var (services, owner) = await BootstrapAsync(fixture);
+        await using var _ = services;
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var retainedCid = await CreateMarkerAsync(client, owner);
         var archivedCid = await CreateMarkerAsync(client, owner);
@@ -113,7 +103,7 @@ public class SubscribeArchivedRoundTripTests
         Assert.DoesNotContain(archivedCid.Value, reconstructed);
     }
 
-    private static async Task<(LedgerClient Client, Party Owner)> BootstrapAsync(LocalnetFixture fixture)
+    private static async Task<(ServiceProvider Services, Party Owner)> BootstrapAsync(LocalnetFixture fixture)
     {
         var darOutcome = await fixture.UploadDarAsync(DarPath(), TestContext.Current.CancellationToken);
         Assert.True(
@@ -128,16 +118,16 @@ public class SubscribeArchivedRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        return (NewClient(fixture, userId), owner);
+        return (LocalnetLedgerServices.ForValidator(fixture, userId), owner);
     }
 
-    private static async Task<ContractId<Marker>> CreateMarkerAsync(LedgerClient client, Party owner)
+    private static async Task<ContractId<Marker>> CreateMarkerAsync(ICantonLedgerClient client, Party owner)
     {
-        var outcome = await client.CreateAsync(new Marker(owner), owner, TestContext.Current.CancellationToken);
+        var outcome = await client.CreateAsync(new Marker(owner), TestContext.Current.CancellationToken);
         return Assert.IsType<ExerciseOutcome<ContractId<Marker>>.One>(outcome).Result;
     }
 
-    private static async Task ArchiveMarkerAsync(LedgerClient client, Party owner, ContractId<Marker> markerCid)
+    private static async Task ArchiveMarkerAsync(ICantonLedgerClient client, Party owner, ContractId<Marker> markerCid)
     {
         var archiveCommand = new ExerciseCommand(
             Marker.TemplateId,
@@ -154,7 +144,7 @@ public class SubscribeArchivedRoundTripTests
     }
 
     private static async Task<(bool Created, bool Archived)> ReadCreatedAndArchivedAsync(
-        LedgerClient client, Party owner, string contractIdValue, LedgerOffset fromOffset, LedgerOffset toOffset)
+        ICantonLedgerClient client, Party owner, string contractIdValue, LedgerOffset fromOffset, LedgerOffset toOffset)
     {
         var created = false;
         var archived = false;
@@ -178,7 +168,7 @@ public class SubscribeArchivedRoundTripTests
     }
 
     private static async Task<(HashSet<string> Active, LedgerOffset SnapshotOffset)> SnapshotActiveAsync(
-        LedgerClient client, Party owner)
+        ICantonLedgerClient client, Party owner)
     {
         var active = new HashSet<string>();
         LedgerOffset snapshotOffset = default;

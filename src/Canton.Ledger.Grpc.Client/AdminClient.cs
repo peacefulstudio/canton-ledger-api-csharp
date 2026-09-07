@@ -23,14 +23,8 @@ namespace Canton.Ledger.Grpc.Client;
 /// <summary>
 /// Implementation of the Canton participant admin client using gRPC.
 /// </summary>
-public sealed partial class AdminClient : IAdminClient
+internal sealed partial class AdminClient : IAdminClient
 {
-    /// <summary>
-    /// The <see cref="ActivitySource"/> name used for OpenTelemetry tracing.
-    /// Register with <c>tracing.AddSource(AdminClient.ActivitySourceName)</c>.
-    /// </summary>
-    public static string ActivitySourceName => LedgerActivitySourceNames.GrpcAdminClient;
-
     internal const int MaxPagesPerPaginatedCall = 10_000;
 
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<AdminClient>();
@@ -46,25 +40,12 @@ public sealed partial class AdminClient : IAdminClient
     private readonly ILogger<AdminClient> _logger;
     private bool _disposed;
 
-    /// <summary>
-    /// Creates a new AdminClient with the specified options and token provider.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public AdminClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider, ILogger<AdminClient>? logger = null)
-        : this(options.Value, tokenProvider, logger)
-    {
-    }
-
-    /// <summary>
-    /// Creates a new AdminClient with the specified options and token provider.
-    /// Logs are discarded unless a <paramref name="logger"/> is supplied.
-    /// </summary>
-    public AdminClient(LedgerClientOptions options, ITokenProvider tokenProvider, ILogger<AdminClient>? logger = null)
+    internal AdminClient(IOptions<LedgerClientOptions> options, ITokenProvider tokenProvider, ILogger<AdminClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(tokenProvider);
 
-        _options = options;
+        _options = options.Value;
         _tokenProvider = tokenProvider;
         _logger = logger ?? NullLogger<AdminClient>.Instance;
         _invoker = new LedgerCallInvoker(_options, _tokenProvider);
@@ -112,13 +93,21 @@ public sealed partial class AdminClient : IAdminClient
             cancellationToken);
 
     /// <inheritdoc />
-    public async Task<PartyDetails> AllocatePartyAsync(
+    public Task<PartyDetails> AllocatePartyAsync(
         string partyIdHint,
         string? synchronizerId = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(partyIdHint);
+        ArgumentNullException.ThrowIfNull(partyIdHint);
 
+        return AllocatePartyCoreAsync(partyIdHint, synchronizerId, cancellationToken);
+    }
+
+    private async Task<PartyDetails> AllocatePartyCoreAsync(
+        string partyIdHint,
+        string? synchronizerId,
+        CancellationToken cancellationToken)
+    {
         LogAllocatingParty(_logger, partyIdHint);
 
         var request = new AllocatePartyRequest { PartyIdHint = partyIdHint };
@@ -190,7 +179,7 @@ public sealed partial class AdminClient : IAdminClient
     }
 
     /// <inheritdoc />
-    public async Task<UserDetails> CreateUserAsync(
+    public Task<UserDetails> CreateUserAsync(
         string userId,
         string primaryParty,
         IEnumerable<UserRight>? rights = null,
@@ -199,6 +188,15 @@ public sealed partial class AdminClient : IAdminClient
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentNullException.ThrowIfNull(primaryParty);
 
+        return CreateUserCoreAsync(userId, primaryParty, rights, cancellationToken);
+    }
+
+    private async Task<UserDetails> CreateUserCoreAsync(
+        string userId,
+        string primaryParty,
+        IEnumerable<UserRight>? rights,
+        CancellationToken cancellationToken)
+    {
         LogCreatingUser(_logger, userId);
 
         var user = new User { Id = userId, PrimaryParty = primaryParty };
@@ -226,12 +224,17 @@ public sealed partial class AdminClient : IAdminClient
     private static partial void LogUserCreated(ILogger logger, string userId);
 
     /// <inheritdoc />
-    public async Task<UserDetails?> GetUserAsync(
+    public Task<UserDetails?> GetUserAsync(
         string userId,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentNullException.ThrowIfNull(userId);
 
+        return GetUserCoreAsync(userId, cancellationToken);
+    }
+
+    private async Task<UserDetails?> GetUserCoreAsync(string userId, CancellationToken cancellationToken)
+    {
         try
         {
             return await _invoker.InvokeTracedAsync<AdminClient, GetUserResponse, UserDetails?>(
@@ -250,7 +253,7 @@ public sealed partial class AdminClient : IAdminClient
     }
 
     /// <inheritdoc />
-    public async Task GrantUserRightsAsync(
+    public Task GrantUserRightsAsync(
         string userId,
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
@@ -258,6 +261,14 @@ public sealed partial class AdminClient : IAdminClient
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentNullException.ThrowIfNull(rights);
 
+        return GrantUserRightsCoreAsync(userId, rights, cancellationToken);
+    }
+
+    private async Task GrantUserRightsCoreAsync(
+        string userId,
+        IEnumerable<UserRight> rights,
+        CancellationToken cancellationToken)
+    {
         var request = new GrantUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
@@ -276,7 +287,7 @@ public sealed partial class AdminClient : IAdminClient
     private static partial void LogRightsGranted(ILogger logger, string userId);
 
     /// <inheritdoc />
-    public async Task RevokeUserRightsAsync(
+    public Task RevokeUserRightsAsync(
         string userId,
         IEnumerable<UserRight> rights,
         CancellationToken cancellationToken = default)
@@ -284,6 +295,14 @@ public sealed partial class AdminClient : IAdminClient
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentNullException.ThrowIfNull(rights);
 
+        return RevokeUserRightsCoreAsync(userId, rights, cancellationToken);
+    }
+
+    private async Task RevokeUserRightsCoreAsync(
+        string userId,
+        IEnumerable<UserRight> rights,
+        CancellationToken cancellationToken)
+    {
         var request = new RevokeUserRightsRequest { UserId = userId };
         request.Rights.AddRange(rights.Select(ToProtoRight));
 
@@ -302,12 +321,19 @@ public sealed partial class AdminClient : IAdminClient
     private static partial void LogRightsRevoked(ILogger logger, string userId);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<UserRight>?> ListUserRightsAsync(
+    public Task<IReadOnlyList<UserRight>?> ListUserRightsAsync(
         string userId,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(userId);
 
+        return ListUserRightsCoreAsync(userId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<UserRight>?> ListUserRightsCoreAsync(
+        string userId,
+        CancellationToken cancellationToken)
+    {
         try
         {
             return await _invoker.InvokeTracedAsync<AdminClient, ListUserRightsResponse, IReadOnlyList<UserRight>?>(
@@ -478,13 +504,21 @@ public sealed partial class AdminClient : IAdminClient
     }
 
     /// <inheritdoc />
-    public async Task UploadDarAsync(
+    public Task UploadDarAsync(
         byte[] darFile,
         string? submissionId = null,
         CancellationToken cancellationToken = default)
     {
         ThrowIfNullOrEmpty(darFile);
 
+        return UploadDarCoreAsync(darFile, submissionId, cancellationToken);
+    }
+
+    private async Task UploadDarCoreAsync(
+        byte[] darFile,
+        string? submissionId,
+        CancellationToken cancellationToken)
+    {
         LogUploadingDar(_logger, darFile.Length);
 
         var request = new UploadDarFileRequest
@@ -511,12 +545,17 @@ public sealed partial class AdminClient : IAdminClient
     private static partial void LogDarUploaded(ILogger logger, int darSize);
 
     /// <inheritdoc />
-    public async Task ValidateDarAsync(
+    public Task ValidateDarAsync(
         byte[] darFile,
         CancellationToken cancellationToken = default)
     {
         ThrowIfNullOrEmpty(darFile);
 
+        return ValidateDarCoreAsync(darFile, cancellationToken);
+    }
+
+    private async Task ValidateDarCoreAsync(byte[] darFile, CancellationToken cancellationToken)
+    {
         var request = new ValidateDarFileRequest { DarFile = ByteString.CopyFrom(darFile) };
 
         await _invoker.InvokeTracedAsync<AdminClient, ValidateDarFileResponse>(
@@ -596,7 +635,7 @@ public sealed partial class AdminClient : IAdminClient
     public CallInvoker CreateCallInvoker()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return new AuthenticatedCallInvoker(_channel.CreateCallInvoker(), _invoker);
+        return new AuthenticatedCallInvoker(_channel.CreateCallInvoker(), _invoker, _logger);
     }
 
     /// <summary>

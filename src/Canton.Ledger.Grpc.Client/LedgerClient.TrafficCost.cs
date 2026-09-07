@@ -9,7 +9,7 @@ using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
 
-public sealed partial class LedgerClient
+internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     /// <remarks>

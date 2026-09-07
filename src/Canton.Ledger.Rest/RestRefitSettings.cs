@@ -27,9 +27,6 @@ public static class RestRefitSettings
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters =
         {
-            new ListKnownPartiesResponseJsonConverter(),
-            new UserJsonConverter(),
-            new FeaturesDescriptorJsonConverter(),
             new WireIdentifierJsonConverter(),
             new WireValueJsonConverter(),
             new WireRecordJsonConverter(),
@@ -62,6 +59,6 @@ public static class RestRefitSettings
     public static RefitSettings Create() => new()
     {
         ContentSerializer = new SystemTextJsonContentSerializer(SerializerOptions),
-        UrlParameterFormatter = new SimpleStylePathParameterFormatter(),
+        UrlParameterFormatter = new JsonBooleanUrlParameterFormatter(),
     };
 }

@@ -3,6 +3,7 @@
 
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Helpers;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Xunit;
@@ -350,6 +351,50 @@ public class RestTransactionTreeProjectorTests
 
     private static readonly WireIdentifier InterfaceId =
         new() { PackageId = "iface-pkg", ModuleName = "Token.Api", EntityName = "IAsset" };
+
+    [Fact]
+    public void Project_states_the_shared_cross_transport_message_for_an_overlapping_subtree()
+    {
+        var act = () => RestTransactionTreeProjector.Project(Transaction(
+            Exercised(nodeId: 0, lastDescendantNodeId: 2, "00outer", "Outer"),
+            Exercised(nodeId: 1, lastDescendantNodeId: 5, "00straddles", "Straddles")));
+
+        act.Should().Throw<MalformedTransactionTreeException>()
+            .Which.Message.Should().Be(MalformedTreeMessages.SubtreeOverlapsInsteadOfNesting);
+    }
+
+    [Fact]
+    public void Project_states_the_shared_cross_transport_message_for_a_subtree_ending_before_its_exercise()
+    {
+        var act = () => RestTransactionTreeProjector.Project(Transaction(
+            Exercised(nodeId: 4, lastDescendantNodeId: 2, "00backwards", "Backwards")));
+
+        act.Should().Throw<MalformedTransactionTreeException>()
+            .Which.Message.Should().Be(MalformedTreeMessages.SubtreeEndsBeforeItsExercise);
+    }
+
+    [Fact]
+    public void Project_reports_the_tree_fault_of_a_transaction_whose_offset_is_also_unreadable()
+    {
+        var transaction = Transaction(Created(nodeId: 3, "00first"), Created(nodeId: 3, "00second"));
+        transaction.Offset = "-1";
+
+        var act = () => RestTransactionTreeProjector.Project(transaction);
+
+        act.Should().Throw<MalformedTransactionTreeException>()
+            .Which.Message.Should().Be(MalformedTreeMessages.NodeIdsDoNotAscend);
+    }
+
+    [Fact]
+    public void Project_states_the_shared_cross_transport_message_for_node_ids_that_do_not_ascend()
+    {
+        var act = () => RestTransactionTreeProjector.Project(Transaction(
+            Created(nodeId: 3, "00first"),
+            Created(nodeId: 3, "00second")));
+
+        act.Should().Throw<MalformedTransactionTreeException>()
+            .Which.Message.Should().Be(MalformedTreeMessages.NodeIdsDoNotAscend);
+    }
 
     private static WireTransaction Transaction(params WireEvent[] events) =>
         new() { UpdateId = "update-1", Offset = "42", CommandId = "cmd-1", Events = events };

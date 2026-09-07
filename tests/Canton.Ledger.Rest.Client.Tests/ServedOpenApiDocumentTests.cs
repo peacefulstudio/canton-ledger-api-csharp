@@ -94,4 +94,62 @@ public class ServedOpenApiDocumentTests
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*JsAbsentEvent*JsReassignmentEvent*");
     }
+
+    private const string Int64Excerpt =
+        """
+        openapi: 3.0.3
+        info:
+          title: JSON Ledger API HTTP endpoints
+          version: 3.5.11
+        components:
+          schemas:
+            Duration:
+              title: Duration
+              type: object
+              required:
+              - seconds
+              - nanos
+              properties:
+                seconds:
+                  type: integer
+                  format: int64
+                nanos:
+                  type: integer
+                  format: int32
+                unknownFields:
+                  $ref: '#/components/schemas/UnknownFieldSet'
+                  description: This field is automatically added as part of protobuf to json
+                    mapping
+            Field:
+              title: Field
+              type: object
+              properties:
+                varint:
+                  type: array
+                  items:
+                    type: integer
+                    format: int64
+            OffsetCheckpointFeature:
+              title: OffsetCheckpointFeature
+              type: object
+              required:
+              - maxOffsetCheckpointEmissionDelay
+              properties:
+                maxOffsetCheckpointEmissionDelay:
+                  $ref: '#/components/schemas/Duration'
+                  description: |-
+                    The maximum delay to emmit a new OffsetCheckpoint if it exists
+
+                    Required
+        """;
+
+    private static ServedOpenApiDocument Int64Excerpted() => ServedOpenApiDocument.Parse(Int64Excerpt);
+
+    [Fact]
+    public void Int64PropertySites_names_every_property_a_schema_declares_as_a_format_int64()
+        => Int64Excerpted().Int64PropertySites().Should().Equal("Duration.seconds");
+
+    [Fact]
+    public void Int64PropertySites_passes_over_an_int64_nested_below_a_property_rather_than_on_it()
+        => Int64Excerpted().Int64PropertySites().Should().NotContain("Field.varint");
 }

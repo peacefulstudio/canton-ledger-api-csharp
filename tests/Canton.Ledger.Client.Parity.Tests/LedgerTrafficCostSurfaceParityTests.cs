@@ -4,8 +4,6 @@
 using System.Reflection;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Rest.Client;
 using Canton.Ledger.Testing;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -22,12 +20,23 @@ namespace Canton.Ledger.Client.Parity.Tests;
 /// behaviourally by <see cref="LedgerTrafficCostParityTests"/> and by twin tests in the
 /// per-transport unit suites.
 /// </summary>
+/// <remarks>
+/// <see cref="FakeLedgerClient"/> is the only row, and the wired clients are absent by decision
+/// rather than by oversight: both the gRPC and the REST client are <c>internal</c>, so a consumer
+/// cannot name one, cannot downcast to one, and therefore cannot reach a same-named twin sitting
+/// beside the interface member. For those clients the defect these rows exist to catch is not merely
+/// unobserved but unreachable, and a row asserting it would restate what accessibility already
+/// settles instead of what a consumer can do. The suite can still see the wired clients — other
+/// lanes here need that visibility — so re-adding the rows would compile; it would just no longer be
+/// testing a surface anyone outside the package can touch. What stays in scope is the client a
+/// consumer can name and construct.
+/// </remarks>
 public sealed class LedgerTrafficCostSurfaceParityTests
 {
     private const string MethodName = "EstimateTrafficCostAsync";
 
     public static TheoryData<Type> ClientsServingTrafficCostEstimation() =>
-        new() { typeof(LedgerClient), typeof(RestLedgerClient), typeof(FakeLedgerClient) };
+        new() { typeof(FakeLedgerClient) };
 
     [Theory]
     [MemberData(nameof(ClientsServingTrafficCostEstimation))]

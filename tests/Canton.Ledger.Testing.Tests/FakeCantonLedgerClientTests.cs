@@ -106,7 +106,7 @@ public class FakeCantonLedgerClientTests
             .WithActAs(Alice)
             .WithCommandId(new CommandId("cmd-echo"));
 
-        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("cmd-echo");
     }
@@ -119,7 +119,7 @@ public class FakeCantonLedgerClientTests
             .Single(CreateCommand.For(new DemoAsset(Alice, Alice, "GOLD", 1m)))
             .WithActAs(Alice);
 
-        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().NotBeNullOrWhiteSpace();
     }
@@ -132,7 +132,7 @@ public class FakeCantonLedgerClientTests
             .Of(new UnassignCommand("00cid", (SynchronizerId)"src", (SynchronizerId)"tgt"), Alice)
             .WithCommandId(new CommandId("cmd-reassign"));
 
-        var commandId = await client.SubmitReassignmentAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitReassignmentAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("cmd-reassign");
     }
@@ -283,7 +283,7 @@ public class FakeCantonLedgerClientTests
     {
         var client = FakeLedgerClient.Create().WithLedgerApiVersion("3.5.9").Build();
 
-        var version = await client.GetLedgerApiVersionAsync(TestContext.Current.CancellationToken);
+        var version = await client.GetLedgerApiVersionAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         version.Should().Be("3.5.9");
     }
@@ -305,7 +305,7 @@ public class FakeCantonLedgerClientTests
         var transaction = LedgerResults.Transaction("update-1", LedgerOffset.At(5), [], [], new CommandId("cmd-1"));
         var client = FakeLedgerClient.Create().WithUpdateByOffset(5, transaction).Build();
 
-        var result = await client.GetUpdateByOffsetAsync(5, Alice, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByOffsetAsync(5, Alice, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Should().BeSameAs(transaction);
     }
@@ -326,7 +326,7 @@ public class FakeCantonLedgerClientTests
         var transaction = LedgerResults.Transaction("update-1", LedgerOffset.At(5), [], [], new CommandId("cmd-1"));
         var client = FakeLedgerClient.Create().WithUpdateById("update-1", transaction).Build();
 
-        var result = await client.GetUpdateByIdAsync("update-1", Alice, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByIdAsync("update-1", Alice, cancellationToken: TestContext.Current.CancellationToken);
 
         result.Should().BeSameAs(transaction);
     }
@@ -341,6 +341,51 @@ public class FakeCantonLedgerClientTests
 
         (await act.Should().ThrowAsync<NotSupportedException>())
             .Which.Message.Should().Contain("WithUpdateByOffset").And.Contain("offset 6");
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_returns_the_staged_tree_for_that_offset()
+    {
+        var tree = new TransactionTree("update-1", LedgerOffset.At(5), []);
+        var client = FakeLedgerClient.Create().WithUpdateTreeByOffset(5, tree).Build();
+
+        var result = await client.GetUpdateTreeByOffsetAsync(5, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        result.Should().BeSameAs(tree);
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_rejects_a_non_positive_offset()
+    {
+        var client = FakeLedgerClient.Create().Build();
+
+        var act = () => client.GetUpdateTreeByOffsetAsync(0, Alice);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_for_an_unstaged_offset_throws_descriptive_NotSupportedException()
+    {
+        var tree = new TransactionTree("update-1", LedgerOffset.At(5), []);
+        var client = FakeLedgerClient.Create().WithUpdateTreeByOffset(5, tree).Build();
+
+        var act = () => client.GetUpdateTreeByOffsetAsync(6, Alice);
+
+        (await act.Should().ThrowAsync<NotSupportedException>())
+            .Which.Message.Should().Contain("WithUpdateTreeByOffset").And.Contain("offset 6");
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_is_staged_separately_from_the_flattened_point_read()
+    {
+        var transaction = LedgerResults.Transaction("update-1", LedgerOffset.At(5), [], [], new CommandId("cmd-1"));
+        var client = FakeLedgerClient.Create().WithUpdateByOffset(5, transaction).Build();
+
+        var act = () => client.GetUpdateTreeByOffsetAsync(5, Alice);
+
+        (await act.Should().ThrowAsync<NotSupportedException>())
+            .Which.Message.Should().Contain("WithUpdateTreeByOffset");
     }
 
     [Fact]
@@ -372,7 +417,7 @@ public class FakeCantonLedgerClientTests
         var submission = ReassignmentSubmission.Of(
             new UnassignCommand("00cid", (SynchronizerId)"src", (SynchronizerId)"tgt"), Alice);
 
-        var commandId = await client.SubmitReassignmentAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitReassignmentAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().NotBeNullOrWhiteSpace();
     }

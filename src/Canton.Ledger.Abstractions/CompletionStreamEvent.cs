@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Outcomes;
+
 namespace Canton.Ledger.Abstractions;
 
 /// <summary>
@@ -85,5 +87,29 @@ public abstract record CompletionStreamEvent
     /// decoded — neither a valid gRPC error nor a valid HTTP status, so it
     /// identifies a decode failure unambiguously on either transport.</param>
     /// <param name="Message">Status detail / message from the participant or transport.</param>
-    public sealed record StreamError(int StatusCode, string Message) : CompletionStreamEvent;
+    /// <param name="Category">The Canton error category the transport's error parser
+    /// classified the fault as, or <c>null</c> when the fault carried nothing a category
+    /// could be read from. Mirrors <c>ContractStreamEvent&lt;T&gt;.StreamError.Category</c>
+    /// so a caller classifies a completion-stream fault and an update-stream fault the
+    /// same way.</param>
+    /// <param name="SourceException">The transport exception that ended the stream, or
+    /// <c>null</c> when the fault was carried in-band rather than thrown. Mirrors
+    /// <c>ContractStreamEvent&lt;T&gt;.StreamError.SourceException</c>; weighed by
+    /// reference in equality, as the upstream shape is.</param>
+    /// <param name="ErrorId">The participant's own Canton error code — <c>STALE_STREAM_AUTHORIZATION</c>,
+    /// <c>PARTICIPANT_BACKPRESSURE</c> — and <c>null</c> when the fault carried no
+    /// structured error to read one from, a payload the client could not decode
+    /// included. It is what separates two faults <paramref name="StatusCode"/> and
+    /// <paramref name="Category"/> cannot: every contention condition arrives as one
+    /// category, so only the code says which of them ended the stream, and therefore
+    /// whether reopening clears the condition or reproduces it. It has no counterpart on
+    /// <c>ContractStreamEvent&lt;T&gt;.StreamError</c> or
+    /// <c>AcsSnapshotEntry&lt;T&gt;.StreamError</c>, whose upstream shape declares no such
+    /// field.</param>
+    public sealed record StreamError(
+        int StatusCode,
+        string Message,
+        DamlErrorCategory? Category = null,
+        Exception? SourceException = null,
+        string? ErrorId = null) : CompletionStreamEvent;
 }

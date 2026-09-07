@@ -16,7 +16,7 @@ public class FakeLedgerClientConformanceTests : LedgerClientConformanceTests<Con
     private static readonly Party Alice = new("alice");
     private static readonly SynchronizerId Synchronizer = (SynchronizerId)"sync-1";
     private static readonly ContractId<ConformanceProbe> Probe = new("00probe");
-    private static readonly DamlRecord Payload = new ConformanceProbe(Alice).ToRecord();
+    private static readonly ConformanceProbe Payload = new(Alice);
     private static readonly LedgerOffset Created = LedgerOffset.At(1);
     private static readonly LedgerOffset Unclassifiable = LedgerOffset.At(2);
     private static readonly LedgerOffset Consumed = LedgerOffset.At(3);
@@ -28,14 +28,14 @@ public class FakeLedgerClientConformanceTests : LedgerClientConformanceTests<Con
         FakeLedgerClient.Create()
             .WithLedgerEnd(LedgerEnd)
             .WithActiveContracts(
-                LedgerEvents.Created(Probe, Payload, Created, Synchronizer, [Alice]),
-                LedgerEvents.Unclassified<ConformanceProbe>(Unclassifiable, nameof(UnclassifiedKind.MissingSynchronizerId)),
+                LedgerEvents.Created(Probe, Payload, null, Created, Synchronizer, [Alice]),
+                LedgerEvents.Unclassified<ConformanceProbe>(Unclassifiable, UnclassifiedKind.MissingSynchronizerId),
                 LedgerEvents.Checkpoint<ConformanceProbe>(LedgerEnd))
             .WithContractEvents(
-                ContractEvents.Created(Probe, Payload, Created, Synchronizer, [Alice]),
+                ContractEvents.Created(Probe, Payload, null, Created, Synchronizer, [Alice]),
                 ContractEvents.Archived(Probe, Consumed, Synchronizer, [Alice]))
             .WithLedgerEffects(
-                ContractEvents.Created(Probe, Payload, Created, Synchronizer, [Alice]),
+                ContractEvents.Created(Probe, Payload, null, Created, Synchronizer, [Alice]),
                 ContractEvents.Exercised(
                     Probe,
                     "Archive",
@@ -51,11 +51,28 @@ public class FakeLedgerClientConformanceTests : LedgerClientConformanceTests<Con
         FakeLedgerClient.Create()
             .WithActiveContracts(LedgerEvents.StreamError<ConformanceProbe>(14, "snapshot aborted mid-stream"))
             .Build();
+
+    protected override CommandIdConformanceFixture? CreateCommandIdFixture()
+    {
+        var client = FakeLedgerClient.Create()
+            .WithExerciseResult(LedgerOutcomes.One(DamlUnit.Instance))
+            .WithCreateResult(LedgerOutcomes.One(Probe))
+            .Build();
+
+        return new CommandIdConformanceFixture(
+            client,
+            (writer, commandId) => writer.TryExerciseAsync<DamlUnit>(ArchiveProbe, Alice, commandId: commandId),
+            (writer, commandId) => writer.TryCreateAsync(new ConformanceProbe(Alice), Alice, commandId: commandId),
+            () => ValueTask.FromResult(client.LastSubmittedCommandId?.Value));
+    }
+
+    private static readonly ExerciseCommand ArchiveProbe = new(
+        ConformanceProbe.TemplateId, Probe, new ChoiceName("Archive"), DamlRecord.Create());
 }
 
 /// <summary>The Daml marker the conformance scenario's snapshot and streams are filtered to.</summary>
 /// <param name="Owner">The party the probe contract is issued to.</param>
-public sealed record ConformanceProbe(Party Owner) : ITemplate
+public sealed record ConformanceProbe(Party Owner) : ITemplate, IDamlRecord<ConformanceProbe>
 {
     /// <inheritdoc cref="ITemplate" />
     public static Identifier TemplateId { get; } = new("conformance-pkg", "Conformance.Probe", "Probe");
@@ -74,4 +91,9 @@ public sealed record ConformanceProbe(Party Owner) : ITemplate
 
     /// <inheritdoc cref="ITemplate" />
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty((string)Owner)));
+
+    /// <summary>Creates a probe from the wire record a created event carries.</summary>
+    /// <returns>The probe the record decodes to.</returns>
+    public static ConformanceProbe FromRecord(DamlRecord record) =>
+        new((Party)record.GetRequiredField("owner").As<DamlParty>().Value);
 }

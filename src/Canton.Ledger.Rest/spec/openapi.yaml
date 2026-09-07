@@ -957,49 +957,6 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/Status'
-    /v2/parties/{parties}:
-        get:
-            tags:
-                - PartyManagementService
-            description: |-
-                Get the party details of the given parties. Only known parties will be
-                 returned in the list.
-            operationId: PartyManagementService_GetParties
-            parameters:
-                - name: parties
-                  in: path
-                  description: |-
-                    The stable, unique identifier of the Daml parties.
-                     Must be valid PartyIdStrings (as described in ``value.proto``).
-
-                     Required: must be non-empty
-                  required: true
-                  schema:
-                    type: array
-                    items:
-                        type: string
-                - name: identityProviderId
-                  in: query
-                  description: |-
-                    The id of the ``Identity Provider`` whose parties should be retrieved.
-                     If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
-
-                     Optional
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GetPartiesResponse'
-                default:
-                    description: Default error response
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Status'
     /v2/parties/{party_details.party}:
         patch:
             tags:
@@ -1027,6 +984,48 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/UpdatePartyDetailsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Status'
+    /v2/parties/{party}:
+        get:
+            tags:
+                - PartyManagementService
+            description: |-
+                Get the party details of the given party. The party is returned only when
+                 the participant knows it, so an unknown party answers with an empty list
+                 rather than an error.
+            operationId: PartyManagementService_GetParties
+            parameters:
+                - name: party
+                  in: path
+                  description: |-
+                    The stable, unique identifier of the Daml party.
+                     Must be a valid PartyIdString (as described in ``value.proto``).
+
+                     Required: must be non-empty
+                  required: true
+                  schema:
+                    type: string
+                - name: identityProviderId
+                  in: query
+                  description: |-
+                    The id of the ``Identity Provider`` whose parties should be retrieved.
+                     If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+
+                     Optional
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetPartiesResponse'
                 default:
                     description: Default error response
                     content:

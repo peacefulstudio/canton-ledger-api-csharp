@@ -25,13 +25,13 @@ public static class ReadmeSnippets
     // Mirrors README.md "Ledger Client Usage".
     public static async Task LedgerClientQuickStart()
     {
-        var options = new LedgerClientOptions
-        {
-            GrpcAddress = "https://localhost:5001",
-        };
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        services.AddAdminClient(options => options.GrpcAddress = "https://localhost:5001");
 
-        using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
-        using var adminClient = new AdminClient(options, ITokenProvider.None);
+        await using var provider = services.BuildServiceProvider();
+        var ledgerClient = provider.GetRequiredService<ICantonLedgerClient>();
+        var adminClient = provider.GetRequiredService<IAdminClient>();
 
         var party = await adminClient.AllocatePartyAsync("alice");
         var submitter = new Party(party.Party);
@@ -54,11 +54,12 @@ public static class ReadmeSnippets
     // Mirrors README.md "PQS Client Usage".
     public static async Task PqsClientQuickStart()
     {
-        var pqsOptions = new PqsClientOptions
-        {
-            ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs"
-        };
-        var pqsClient = new PqsClient(pqsOptions);
+        var services = new ServiceCollection();
+        services.AddPqsClient(options =>
+            options.ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs");
+
+        await using var provider = services.BuildServiceProvider();
+        var pqsClient = provider.GetRequiredService<IPqsClient>();
 
         var agreements = await pqsClient.QueryAsync<Agreement>();
 
@@ -81,8 +82,14 @@ public static class ReadmeSnippets
     // Mirrors README.md "Integration with Daml Code Generation".
     public static async Task CodegenIntegration()
     {
-        var options = new LedgerClientOptions { GrpcAddress = "https://localhost:5001" };
-        using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        services.AddPqsClient(options =>
+            options.ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs");
+
+        await using var provider = services.BuildServiceProvider();
+        var ledgerClient = provider.GetRequiredService<ICantonLedgerClient>();
+        var pqsClient = provider.GetRequiredService<IPqsClient>();
 
         var owner = new Party("Alice::1234...");
 
@@ -101,10 +108,6 @@ public static class ReadmeSnippets
 
         var exerciseOutcome = await ledgerClient.TryExerciseAsync<ContractId<Asset>>(command, owner);
 
-        var pqsClient = new PqsClient(new PqsClientOptions
-        {
-            ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs",
-        });
         var assets = await pqsClient.QueryAsync<Asset>(
             Filter.Field<Asset>(a => a.Owner, owner.Id));
 

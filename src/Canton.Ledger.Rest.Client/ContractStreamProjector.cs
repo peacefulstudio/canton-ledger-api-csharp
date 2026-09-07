@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Kernel.Streams;
+using Canton.Ledger.Kernel.Wire;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -27,7 +28,7 @@ internal static partial class ContractStreamProjector
     public static IEnumerable<ContractStreamEvent<T>> ProjectTransactionEvents<T>(
         WireTransaction transaction,
         ILogger? logger = null)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (!RestWireConversions.TryParseOffset(transaction.Offset, out var transactionOffset))
         {
@@ -44,7 +45,7 @@ internal static partial class ContractStreamProjector
             {
                 projected = ProjectTransactionEvent<T>(evt, synchronizerId, transactionOffset);
             }
-            catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
+            catch (Exception decodeFailure) when (StreamEventClassifier.IsNotCancellation(decodeFailure))
             {
                 projected = StreamEventClassifier.DecodeFailure<T>(transactionOffset, logger, decodeFailure);
             }
@@ -56,7 +57,7 @@ internal static partial class ContractStreamProjector
         WireEvent evt,
         SynchronizerId? synchronizerId,
         long transactionOffset)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (evt?.CreatedEvent is { } created)
         {
@@ -135,7 +136,7 @@ internal static partial class ContractStreamProjector
     public static IEnumerable<ContractStreamEvent<T>> ProjectReassignmentEvents<T>(
         WireReassignment reassignment,
         ILogger? logger = null)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (!RestWireConversions.TryParseOffset(reassignment.Offset, out var reassignmentOffset))
         {
@@ -150,7 +151,7 @@ internal static partial class ContractStreamProjector
             {
                 projected = ProjectReassignmentEvent<T>(evt, reassignmentOffset);
             }
-            catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
+            catch (Exception decodeFailure) when (StreamEventClassifier.IsNotCancellation(decodeFailure))
             {
                 projected = StreamEventClassifier.DecodeFailure<T>(reassignmentOffset, logger, decodeFailure);
             }
@@ -159,7 +160,7 @@ internal static partial class ContractStreamProjector
     }
 
     private static ContractStreamEvent<T> ProjectReassignmentEvent<T>(WireReassignmentEvent evt, long reassignmentOffset)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (evt?.JsAssignmentEvent is { } assigned)
         {
@@ -190,6 +191,7 @@ internal static partial class ContractStreamProjector
             return new ContractStreamEvent<T>.Assigned(
                 new ContractId<T>(assignedContractId),
                 payload,
+                ContractKeyOf(created),
                 LedgerOffset.At(createdOffset),
                 scope.Source,
                 scope.Target,
@@ -231,9 +233,9 @@ internal static partial class ContractStreamProjector
         GetActiveContractsResponse response,
         ILogger? logger = null,
         LedgerOffset? snapshotOffset = null)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
-        var (created, wireSynchronizerId, fallbackWireOffset, rawEntryKind) = response.ContractEntry switch
+        var (created, wireSynchronizerId, unassignmentWireOffset, rawEntryKind) = response.ContractEntry switch
         {
             { JsActiveContract: { } activeContract } =>
                 (activeContract.CreatedEvent, activeContract.SynchronizerId, (string?)null, "active-contract"),
@@ -250,9 +252,9 @@ internal static partial class ContractStreamProjector
             _ => ((WireCreatedEvent?)null, null, (string?)null, "empty-contract-entry"),
         };
 
-        if (!TryParseOptionalOffset(fallbackWireOffset, snapshotOffset, out var unassignmentOffset))
+        if (!TryParseOptionalOffset(unassignmentWireOffset, snapshotOffset, out var unassignmentOffset))
         {
-            yield return UnparseableOffsetInSnapshotEvent<T>(fallbackWireOffset, snapshotOffset, logger);
+            yield return UnparseableOffsetInSnapshotEvent<T>(unassignmentWireOffset, snapshotOffset, logger);
             yield break;
         }
 
@@ -271,15 +273,15 @@ internal static partial class ContractStreamProjector
     private static ContractStreamEvent<T> ClassifyActiveCreated<T>(
         WireCreatedEvent? created,
         string? wireSynchronizerId,
-        long fallbackOffset,
+        long entryResumeOffset,
         string rawEntryKind,
         LedgerOffset? snapshotOffset,
         ILogger? logger)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (created is null)
         {
-            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(fallbackOffset), UnclassifiedKind.Unknown, rawEntryKind);
+            return new ContractStreamEvent<T>.Unclassified(LedgerOffset.At(entryResumeOffset), UnclassifiedKind.Unknown, rawEntryKind);
         }
         if (!RestWireConversions.TryParseOffset(created.Offset, out var offset))
         {
@@ -298,7 +300,7 @@ internal static partial class ContractStreamProjector
         {
             return CreatedFromWire<T>(created, scope, offset);
         }
-        catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
+        catch (Exception decodeFailure) when (StreamEventClassifier.IsNotCancellation(decodeFailure))
         {
             return StreamEventClassifier.DecodeFailure<T>(offset, logger, decodeFailure);
         }
@@ -308,7 +310,7 @@ internal static partial class ContractStreamProjector
         WireUnassignedEvent unassigned,
         long offset,
         ILogger? logger)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var decoded = new DecodedStreamEvent<ReassignmentScope>(
             offset,
@@ -321,8 +323,10 @@ internal static partial class ContractStreamProjector
         }
         try
         {
+            var unassignedContractId = unassigned.ContractId
+                ?? throw new InvalidOperationException("Unassigned event has no contract id.");
             return new ContractStreamEvent<T>.Unassigned(
-                new ContractId<T>(unassigned.ContractId ?? string.Empty),
+                new ContractId<T>(unassignedContractId),
                 LedgerOffset.At(offset),
                 scope.Source,
                 scope.Target,
@@ -330,7 +334,7 @@ internal static partial class ContractStreamProjector
                 RestWireConversions.ParseReassignmentCounter(unassigned.ReassignmentCounter),
                 RestWireConversions.ToPartyList(unassigned.WitnessParties));
         }
-        catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
+        catch (Exception decodeFailure) when (StreamEventClassifier.IsNotCancellation(decodeFailure))
         {
             return StreamEventClassifier.DecodeFailure<T>(offset, logger, decodeFailure);
         }
@@ -340,7 +344,7 @@ internal static partial class ContractStreamProjector
         WireCreatedEvent created,
         SynchronizerId synchronizerId,
         long offset)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var contractId = created.ContractId
             ?? throw new InvalidOperationException("Created event has no contract id.");
@@ -352,60 +356,98 @@ internal static partial class ContractStreamProjector
         return new ContractStreamEvent<T>.Created(
             new ContractId<T>(contractId),
             payload,
+            ContractKeyOf(created),
             LedgerOffset.At(offset),
             synchronizerId,
             RestWireConversions.ToPartyList(created.WitnessParties));
     }
 
-    private static bool TryResolveCreatedPayload<T>(WireCreatedEvent created, out DamlRecord payload)
-        where T : IDamlType
+    internal static ContractKey? ContractKeyOf(WireCreatedEvent created)
+    {
+        if (created.ContractKey is null)
+        {
+            return null;
+        }
+
+        return new ContractKey(
+            RestValueDecoder.ToDamlValue(created.ContractKey),
+            created.TemplateId is null ? null : RestWireConversions.ToRuntimeIdentifier(created.TemplateId))
+        {
+            KeyHash = RestWireConversions.ToKeyHash(created.ContractKeyHash),
+        };
+    }
+
+    private static bool TryResolveCreatedPayload<T>(WireCreatedEvent created, out T payload)
+        where T : ITemplate, IDamlRecord<T>
     {
         if (MarkerMatcher<T>.IsInterface)
         {
-            return MarkerMatcher<T>.TryGetInterfaceViewRecord(created, out payload);
+            if (!MarkerMatcher<T>.TryGetInterfaceViewRecord<T>(created, out var view))
+            {
+                payload = default!;
+                return false;
+            }
+            payload = T.FromRecord(view);
+            return true;
         }
 
-        payload = RestValueDecoder.ToDamlRecord(created.CreateArgument);
+        payload = T.FromRecord(RestValueDecoder.ToDamlRecord<T>(created.CreateArgument));
         return true;
     }
 
-    private static void RequireTemplateId(WireIdentifier? templateId, string wireEventKind, string? contractId)
+    internal static void RequireTemplateId(WireIdentifier? templateId, string wireEventKind, string? contractId)
     {
         if (templateId is null)
         {
-            throw RestTransactionResultProjector.MalformedResponse(
+            throw MalformedResponse.MissingRequiredField(
                 $"{wireEventKind} for contract '{contractId}' has no templateId");
         }
     }
 
-    private static bool TryParseOptionalOffset(string? wireOffset, LedgerOffset? snapshotOffset, out long offset)
+    internal static bool TryParseOptionalOffset(string? wireOffset, LedgerOffset? snapshotOffset, out long offset)
     {
         offset = (snapshotOffset ?? LedgerOffset.Begin).Value;
         return wireOffset is null || RestWireConversions.TryParseOffset(wireOffset, out offset);
     }
 
-    private static ContractStreamEvent<T> UnparseableOffsetEvent<T>(string? wireOffset, ILogger? logger)
-        where T : IDamlType
+    internal static StreamEntryRefusal UnparseableOffsetRefusal(string markerName, string? wireOffset, ILogger? logger)
     {
-        LogOffsetParseFailed(logger ?? NullLogger.Instance, typeof(T).Name, wireOffset);
-        return new ContractStreamEvent<T>.Unclassified(LedgerOffset.Begin, UnclassifiedKind.DecodeFailure);
+        LogOffsetParseFailed(logger ?? NullLogger.Instance, markerName, wireOffset);
+        return new StreamEntryRefusal(null, UnclassifiedKind.DecodeFailure);
+    }
+
+    internal static StreamEntryRefusal UnparseableOffsetInSnapshotRefusal(
+        string markerName,
+        string? wireOffset,
+        LedgerOffset? snapshotOffset,
+        ILogger? logger)
+    {
+        if (snapshotOffset is not { } resumeOffset)
+        {
+            return UnparseableOffsetRefusal(markerName, wireOffset, logger);
+        }
+        LogSnapshotOffsetParseFailed(logger ?? NullLogger.Instance, markerName, wireOffset, resumeOffset.Value);
+        return new StreamEntryRefusal(resumeOffset, UnclassifiedKind.DecodeFailure);
+    }
+
+    private static ContractStreamEvent<T> UnparseableOffsetEvent<T>(string? wireOffset, ILogger? logger)
+        where T : ITemplate, IDamlRecord<T>
+    {
+        var refusal = UnparseableOffsetRefusal(typeof(T).Name, wireOffset, logger);
+        return new ContractStreamEvent<T>.Unclassified(refusal.Offset, refusal.Kind);
     }
 
     private static ContractStreamEvent<T> UnparseableOffsetInSnapshotEvent<T>(
         string? wireOffset,
         LedgerOffset? snapshotOffset,
         ILogger? logger)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
-        if (snapshotOffset is not { } resumeOffset)
-        {
-            return UnparseableOffsetEvent<T>(wireOffset, logger);
-        }
-        LogSnapshotOffsetParseFailed(logger ?? NullLogger.Instance, typeof(T).Name, wireOffset, resumeOffset.Value);
-        return new ContractStreamEvent<T>.Unclassified(resumeOffset, UnclassifiedKind.DecodeFailure);
+        var refusal = UnparseableOffsetInSnapshotRefusal(typeof(T).Name, wireOffset, snapshotOffset, logger);
+        return new ContractStreamEvent<T>.Unclassified(refusal.Offset, refusal.Kind);
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not parse the wire offset '{WireOffset}' on the {TemplateType} stream — surfaced as Unclassified (decode-failure) carrying the begin-of-ledger offset, so a consumer resuming from this event would re-read the stream from the start")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not parse the wire offset '{WireOffset}' on the {TemplateType} stream — surfaced as Unclassified (decode-failure) carrying no offset, so a consumer must not persist this event as a resume point")]
     private static partial void LogOffsetParseFailed(ILogger logger, string templateType, string? wireOffset);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not parse the wire offset '{WireOffset}' on the {TemplateType} active-contract snapshot — surfaced as Unclassified (decode-failure) carrying the snapshot offset {SnapshotOffset}, so a consumer resuming from this event resumes where the snapshot ended instead of re-reading the stream from the start")]

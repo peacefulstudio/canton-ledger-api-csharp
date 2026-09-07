@@ -19,7 +19,7 @@ All packages are versioned in lockstep and published to [nuget.org](https://www.
 | [`Canton.Ledger.Rest`](https://www.nuget.org/packages/Canton.Ledger.Rest/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Rest?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Rest/) | Raw Refit-generated surface over the Canton JSON Ledger API — experimental (`CANTONREST001`), typically consumed through `Canton.Ledger.Rest.Client` |
 | [`Canton.Ledger.Rest.Client`](https://www.nuget.org/packages/Canton.Ledger.Rest.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Rest.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Rest.Client/) | HTTP (JSON Ledger API) client — a full `ILedgerClient` / `ICantonLedgerClient` implementation over the transport-neutral interfaces |
 | [`Canton.Ledger.Pqs.Client`](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Pqs.Client?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Pqs.Client/) | Type-safe query client for the Participant Query Store (PQS) — the Npgsql-backed `IPqsClient` implementation |
-| [`Canton.Ledger.OpenTelemetry`](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.OpenTelemetry?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | OpenTelemetry SDK integration — registers the `LedgerClient`/`AdminClient`/`RestLedgerClient`/`PqsClient` `ActivitySource`s (plus Npgsql tracing) with a single `AddCantonLedgerInstrumentation()` call |
+| [`Canton.Ledger.OpenTelemetry`](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.OpenTelemetry?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.OpenTelemetry/) | OpenTelemetry SDK integration — registers every Canton client `ActivitySource` named in `LedgerActivitySourceNames` (plus Npgsql tracing) with a single `AddCantonLedgerInstrumentation()` call |
 | [`Canton.Ledger.Testing`](https://www.nuget.org/packages/Canton.Ledger.Testing/) | [![NuGet](https://img.shields.io/nuget/v/Canton.Ledger.Testing?include_prereleases)](https://www.nuget.org/packages/Canton.Ledger.Testing/) | In-memory test doubles (`FakeLedgerClient`, `FakeAdminClient`, `FakePqsClient`, `FakeTokenProvider`) and builders for unit-testing against the client surfaces without a live participant |
 | [`Daml.Runtime.Grpc`](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | [![NuGet](https://img.shields.io/nuget/v/Daml.Runtime.Grpc?include_prereleases)](https://www.nuget.org/packages/Daml.Runtime.Grpc/) | Bridge between proto `Value`/`Record` and `Daml.Runtime` `DamlValue`/`DamlRecord` |
 
@@ -37,31 +37,30 @@ dotnet add package Canton.Ledger.Pqs.Client
 
 ### Ledger Client Usage
 
+The clients are entered through dependency injection: register them on an `IServiceCollection`, then
+resolve the transport-neutral `ICantonLedgerClient` and `IAdminClient`. The container owns the gRPC
+channel and the client lifetime, binds and validates `LedgerClientOptions` at startup, and injects
+whichever `ITokenProvider` is registered.
+
 ```csharp
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Microsoft.Extensions.DependencyInjection;
 
-// Configure the client (auth is supplied via an ITokenProvider, not a token string)
-var options = new LedgerClientOptions
-{
-    GrpcAddress = "https://localhost:5001",
-};
+var services = new ServiceCollection();
+services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+services.AddAdminClient(options => options.GrpcAddress = "https://localhost:5001");
 
-// ITokenProvider.None runs unauthenticated — for local dev with an open participant.
-// For production, register a token provider (see Authentication below) or use the
-// dependency-injection path, which injects the ITokenProvider for you.
-using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
-using var adminClient = new AdminClient(options, ITokenProvider.None);
+await using var provider = services.BuildServiceProvider();
+var ledgerClient = provider.GetRequiredService<ICantonLedgerClient>();
+var adminClient = provider.GetRequiredService<IAdminClient>();
 
-// Allocate a party
 var party = await adminClient.AllocatePartyAsync("alice");
 var submitter = new Party(party.Party);
 
-// Create a contract from a generated Daml template type.
-// TryCreateAsync returns ExerciseOutcome<ContractId<T>> — switch on it instead of catching.
 var outcome = await ledgerClient.TryCreateAsync(
     new MyTemplate("field1", "field2"),
     submitter);
@@ -74,19 +73,26 @@ var contractId = outcome switch
 };
 ```
 
+`TryCreateAsync` returns an `ExerciseOutcome<ContractId<T>>` rather than throwing — switch on it
+instead of catching. A host that reads its settings from configuration can register both clients and
+their authentication in one call with `services.AddCantonLedger(configuration)`; with no
+`ITokenProvider` registered the clients run unauthenticated, which suits a local participant with
+open access.
+
 ### PQS Client Usage
 
 ```csharp
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Pqs.Client;
 using Daml.Runtime.Contracts;
+using Microsoft.Extensions.DependencyInjection;
 
-// Configure the PQS client (single-argument constructor)
-var pqsOptions = new PqsClientOptions
-{
-    ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs"
-};
-var pqsClient = new PqsClient(pqsOptions);
+var services = new ServiceCollection();
+services.AddPqsClient(options =>
+    options.ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs");
+
+await using var provider = services.BuildServiceProvider();
+var pqsClient = provider.GetRequiredService<IPqsClient>();
 
 // Query all active contracts of a template type
 var agreements = await pqsClient.QueryAsync<Agreement>();
@@ -165,19 +171,28 @@ When no `ITokenProvider` is registered, the clients run unauthenticated (`IToken
 
 These packages integrate seamlessly with [Daml.Codegen.CSharp](https://github.com/peacefulstudio/daml-codegen-csharp):
 
-```csharp
-// Generate C# from your Daml contracts
-// daml-codegen-csharp ./my-contracts.dar -o ./Generated
+```bash
+dpm codegen-cs --dar ./my-contracts.dar --out ./Generated -n MyCompany.Contracts
+```
 
+```csharp
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Pqs.Client;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Microsoft.Extensions.DependencyInjection;
 
-var options = new LedgerClientOptions { GrpcAddress = "https://localhost:5001" };
-using var ledgerClient = new LedgerClient(options, ITokenProvider.None);
+var services = new ServiceCollection();
+services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+services.AddPqsClient(options =>
+    options.ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs");
+
+await using var provider = services.BuildServiceProvider();
+var ledgerClient = provider.GetRequiredService<ICantonLedgerClient>();
+var pqsClient = provider.GetRequiredService<IPqsClient>();
 
 var owner = new Party("Alice::1234...");
 
@@ -200,10 +215,6 @@ var command = ExerciseCommand.For(
 var exerciseOutcome = await ledgerClient.TryExerciseAsync<ContractId<Asset>>(command, owner);
 
 // Query the same contracts via PQS
-var pqsClient = new PqsClient(new PqsClientOptions
-{
-    ConnectionString = "Host=localhost;Database=pqs;Username=pqs;Password=pqs",
-});
 var assets = await pqsClient.QueryAsync<Asset>(
     Filter.Field<Asset>(a => a.Owner, owner.Id));
 ```
@@ -222,7 +233,8 @@ This library targets Canton Ledger API v2. The proto files are automatically dow
 
 | Library Version | Canton Version |
 |-----------------|----------------|
-| 0.4.1 and later | 3.5.x |
+| 0.5.0 and later | 3.5.x |
+| 0.4.1 | 3.5.x |
 | 0.4.0 | 3.4.x |
 | 0.2.x | 3.4.x |
 | 0.1.x | 3.4.x |

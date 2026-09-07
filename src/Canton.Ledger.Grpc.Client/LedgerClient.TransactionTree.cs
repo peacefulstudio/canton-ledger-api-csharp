@@ -7,7 +7,7 @@ using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
 
-public sealed partial class LedgerClient
+internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
@@ -20,6 +20,10 @@ public sealed partial class LedgerClient
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default) =>
-        _submissionClient.TrySubmitAndWaitForTransactionTreeAsync(submission, submitter, timeout, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(submission);
+        return _submissionClient.TrySubmitAndWaitForTransactionTreeAsync(
+            submission, submitter, timeout, cancellationToken);
+    }
 }

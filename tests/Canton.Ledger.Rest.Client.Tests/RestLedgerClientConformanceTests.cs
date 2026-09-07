@@ -22,6 +22,24 @@ public class RestLedgerClientConformanceTests : LedgerClientConformanceTests<Res
     protected override ILedgerClient CreateClient() =>
         new RestLedgerClient(new ParticipantHttpClientFactory(new ConformanceParticipantHandler()));
 
+    protected override CommandIdConformanceFixture? CreateCommandIdFixture()
+    {
+        var participant = new RecordingSubmissionHandler();
+        var client = new RestLedgerClient(new ParticipantHttpClientFactory(participant));
+
+        return new CommandIdConformanceFixture(
+            client,
+            (writer, commandId) => writer.TryExerciseAsync<DamlUnit>(ArchiveProbe, Reader, commandId: commandId),
+            (writer, commandId) => writer.TryCreateAsync(new RestConformanceProbe("party::alice"), Reader, commandId: commandId),
+            () => ValueTask.FromResult(participant.RecordedCommandId));
+    }
+
+    private static readonly ExerciseCommand ArchiveProbe = new(
+        RestConformanceProbe.TemplateId,
+        new ContractId<RestConformanceProbe>("00probe"),
+        new ChoiceName("Archive"),
+        DamlUnit.Instance);
+
     private sealed class ParticipantHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) =>
@@ -29,9 +47,82 @@ public class RestLedgerClientConformanceTests : LedgerClientConformanceTests<Res
     }
 }
 
+/// <summary>
+/// The participant half of the command-id conformance scenario: it answers every submission with
+/// one transaction carrying both a created probe and a consuming <c>Archive</c> exercise, and keeps
+/// the <c>commandId</c> the request carried so the kit can read back what actually reached the
+/// wire.
+/// </summary>
+internal sealed class RecordingSubmissionHandler : HttpMessageHandler
+{
+    private const string ProbeTemplateIdJson =
+        """{"packageId": "conformance-pkg", "moduleName": "Conformance.Probe", "entityName": "Probe"}""";
+
+    private static readonly string SubmittedTransaction =
+        $$$"""
+        {
+          "transaction": {
+            "updateId": "upd-submitted",
+            "offset": "1",
+            "events": [
+              {
+                "CreatedEvent": {
+                  "offset": "1",
+                  "nodeId": 0,
+                  "contractId": "00probe",
+                  "templateId": {{{ProbeTemplateIdJson}}},
+                  "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]},
+                  "witnessParties": ["party::alice"]
+                }
+              },
+              {
+                "ExercisedEvent": {
+                  "offset": "1",
+                  "nodeId": 0,
+                  "contractId": "00probe",
+                  "templateId": {{{ProbeTemplateIdJson}}},
+                  "choice": "Archive",
+                  "choiceArgument": {"unit": {}},
+                  "actingParties": ["party::alice"],
+                  "consuming": true,
+                  "witnessParties": ["party::alice"],
+                  "exerciseResult": {"unit": {}}
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    /// <summary>The <c>commandId</c> the most recent submission carried, or <c>null</c> before any.</summary>
+    public string? RecordedCommandId { get; private set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var body = request.Content is null
+            ? string.Empty
+            : await request.Content.ReadAsStringAsync(cancellationToken);
+
+        using var document = JsonDocument.Parse(body);
+        RecordedCommandId = document.RootElement.TryGetProperty("commands", out var commands)
+            && commands.TryGetProperty("commandId", out var commandId)
+            ? commandId.GetString()
+            : throw new InvalidOperationException(
+                $"The submission carried no commandId, so the scenario cannot record one: {body}");
+
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            RequestMessage = request,
+            Content = new StringContent(SubmittedTransaction, Encoding.UTF8, "application/json"),
+        };
+    }
+}
+
 /// <summary>The Daml marker the conformance scenario's snapshot and streams are filtered to.</summary>
 /// <param name="Owner">The party the probe contract is issued to.</param>
-public sealed record RestConformanceProbe(string Owner) : ITemplate
+public sealed record RestConformanceProbe(string Owner) : ITemplate, IDamlRecord<RestConformanceProbe>
 {
     /// <inheritdoc cref="ITemplate" />
     public static RuntimeIdentifier TemplateId { get; } = new("conformance-pkg", "Conformance.Probe", "Probe");
@@ -50,6 +141,11 @@ public sealed record RestConformanceProbe(string Owner) : ITemplate
 
     /// <inheritdoc cref="ITemplate" />
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty(Owner)));
+
+    /// <summary>Creates a probe from the wire record a created event carries.</summary>
+    /// <returns>The probe the record decodes to.</returns>
+    public static RestConformanceProbe FromRecord(DamlRecord record) =>
+        new(record.GetRequiredField("owner").As<DamlParty>().Value);
 }
 
 /// <summary>
@@ -187,7 +283,7 @@ internal sealed class ConformanceParticipantHandler : HttpMessageHandler
         offset = offset.ToString(CultureInfo.InvariantCulture),
         contractId,
         templateId,
-        createArgument = new { fields = Array.Empty<object>() },
+        createArgument = new { fields = new[] { new { label = "owner", value = new { party = "party::alice" } } } },
         witnessParties = Witnesses,
     };
 

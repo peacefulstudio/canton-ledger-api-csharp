@@ -27,7 +27,7 @@ public sealed class RestLedgerStreamerParityTests : LedgerStreamerParityTests
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
-    protected override async Task<CapabilityLane<(ILedgerReader Reader, ILedgerWriter Writer, ILedgerStreamer Streamer, Party Owner)>>
+    protected override async Task<CapabilityLane<(ILedgerReader Reader, ILedgerWriter Writer, ICantonLedgerClient Client, Party Owner)>>
         OpenStreamerAsync(CancellationToken cancellationToken)
     {
         if (!EndpointDiscovery.IsLocalnetAvailable())
@@ -55,8 +55,8 @@ public sealed class RestLedgerStreamerParityTests : LedgerStreamerParityTests
                 fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
-            var client = services.GetRequiredService<RestLedgerClient>();
-            return new CapabilityLane<(ILedgerReader, ILedgerWriter, ILedgerStreamer, Party)>(
+            var client = services.GetRequiredService<ICantonLedgerClient>();
+            return new CapabilityLane<(ILedgerReader, ILedgerWriter, ICantonLedgerClient, Party)>(
                 (client, client, client, new Party(party.PartyId)),
                 async () =>
                 {

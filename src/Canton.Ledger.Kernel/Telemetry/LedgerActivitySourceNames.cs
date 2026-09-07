@@ -7,8 +7,9 @@ namespace Canton.Ledger.Kernel.Telemetry;
 /// The well-known <see cref="System.Diagnostics.ActivitySource"/> names of every Canton ledger
 /// client, so a host can register the whole set without referencing any concrete client assembly.
 /// Each name is the client type's fully qualified name, per
-/// <see cref="LedgerActivitySource.NameFor{T}"/>; the clients expose the same string as their own
-/// <c>ActivitySourceName</c>, and each client's test suite pins the two together.
+/// <see cref="LedgerActivitySource.NameFor{T}"/>, and this type is where a host reads it: the
+/// constants below and <c>AddCantonLedgerInstrumentation()</c> are the two supported wiring routes.
+/// Each client's test suite pins its constant to the client type's name.
 /// </summary>
 /// <remarks>
 /// The kernel is a peer of the transports and references none of them, so these are

@@ -11,7 +11,7 @@ namespace Canton.Ledger.ReadmeSnippets.Tests;
 // just enough of the ITemplate surface for the snippet harness to compile against the
 // real client API. They are never exercised against a live participant.
 
-public sealed record MyTemplate(string Field1, string Field2) : ITemplate
+public sealed record MyTemplate(string Field1, string Field2) : ITemplate, IDamlRecord<MyTemplate>
 {
     public static Identifier TemplateId { get; } = new("quickstart", "Quickstart", "MyTemplate");
     public static string PackageId => "quickstart";
@@ -22,6 +22,9 @@ public sealed record MyTemplate(string Field1, string Field2) : ITemplate
     public DamlRecord ToRecord() => DamlRecord.Create(
         DamlField.Create("field1", new DamlText(Field1)),
         DamlField.Create("field2", new DamlText(Field2)));
+
+    public static MyTemplate FromRecord(DamlRecord record) =>
+        new(record.GetRequiredField("field1").As<DamlText>().Value, record.GetRequiredField("field2").As<DamlText>().Value);
 }
 
 public sealed record Asset(

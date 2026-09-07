@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Richtypes;
 using Xunit;
@@ -12,11 +11,29 @@ using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 
+/// <summary>
+/// LocalNet coverage that a command submitted over gRPC has its accepted completion observable on
+/// <see cref="ICantonLedgerClient.CompletionStreamAsync"/> from an offset captured before the
+/// submission.
+/// </summary>
+/// <remarks>
+/// The party is allocated moments before the stream is opened, so a window can be answered with a
+/// terminal <see cref="CompletionStreamEvent.StreamError"/> whose
+/// <see cref="CompletionStreamEvent.StreamError.ErrorId"/> is <c>STALE_STREAM_AUTHORIZATION</c>: the
+/// participant opened it against a topology snapshot the allocation had already moved past, and asks
+/// for a quick retry. The drain does what <see cref="ICantonLedgerClient.CompletionStreamAsync"/>
+/// leaves to the caller — reopen from the highest offset observed, backing off between a bounded
+/// number of attempts. Every other stream error ends the drain, because the code is what tells a
+/// self-clearing condition from a fault a reopen reproduces.
+/// </remarks>
 [Trait("Category", "Integration")]
 public class CompletionStreamRoundTripTests
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
+    private const string StaleStreamAuthorization = "STALE_STREAM_AUTHORIZATION";
+    private const int StaleAuthorizationReopenAttempts = 4;
+
+    private static readonly TimeSpan DrainTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan StaleAuthorizationBackoff = TimeSpan.FromSeconds(2);
 
     private const string SkipMessage =
         "Skipping: set CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL, _CLIENT_ID, _CLIENT_SECRET "
@@ -25,15 +42,6 @@ public class CompletionStreamRoundTripTests
 
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
-
-    private static LedgerClient NewClient(LocalnetFixture fixture, string userId)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        var tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
-        return new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = userId },
-            tokenProvider);
-    }
 
     [Fact]
     public async Task Submit_completion_is_observed_on_CompletionStreamAsync_from_pre_submit_offset()
@@ -58,7 +66,8 @@ public class CompletionStreamRoundTripTests
             actAs: new[] { party.PartyId },
             cancellationToken: TestContext.Current.CancellationToken);
 
-        using var client = NewClient(fixture, userId);
+        await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
+        var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var preSubmitOffset = (await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken)).Value;
 
@@ -68,10 +77,11 @@ public class CompletionStreamRoundTripTests
             .WithActAs(owner)
             .WithCommandId(new RuntimeCommands.CommandId(commandId));
 
-        var returnedCommandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var returnedCommandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(commandId, returnedCommandId.Value);
 
-        var accepted = await ObserveAcceptedAsync(client, owner, preSubmitOffset, commandId);
+        var accepted = await ObserveAcceptedAsync(
+            client, owner, preSubmitOffset, commandId, TestContext.Current.CancellationToken);
 
         Assert.NotNull(accepted);
         Assert.Equal(commandId, accepted!.Completion.CommandId.Value);
@@ -79,17 +89,71 @@ public class CompletionStreamRoundTripTests
     }
 
     private static async Task<CompletionStreamEvent.CommandAccepted?> ObserveAcceptedAsync(
-        LedgerClient client, Party owner, long beginExclusiveOffset, string commandId)
+        ICantonLedgerClient client,
+        Party owner,
+        long beginExclusiveOffset,
+        string commandId,
+        CancellationToken cancellationToken)
     {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await foreach (var streamEvent in client.CompletionStreamAsync(owner, beginExclusiveOffset, cts.Token))
+        var fromOffset = beginExclusiveOffset;
+        for (var attempt = 0; attempt <= StaleAuthorizationReopenAttempts; attempt++)
         {
+            var window = await DrainOneWindowAsync(client, owner, fromOffset, commandId, cancellationToken);
+            if (window.Accepted is not null || !window.EndedOnStaleAuthorization)
+            {
+                return window.Accepted;
+            }
+
+            fromOffset = window.HighestObservedOffset;
+            await Task.Delay(StaleAuthorizationBackoff, cancellationToken);
+        }
+
+        return null;
+    }
+
+    private static async Task<CompletionWindow> DrainOneWindowAsync(
+        ICantonLedgerClient client,
+        Party owner,
+        long fromOffset,
+        string commandId,
+        CancellationToken cancellationToken)
+    {
+        using var windowBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        windowBudget.CancelAfter(DrainTimeout);
+
+        var highestObservedOffset = fromOffset;
+        var endedOnStaleAuthorization = false;
+
+        await foreach (var streamEvent in client.CompletionStreamAsync(owner, fromOffset, windowBudget.Token))
+        {
+            if (OffsetOf(streamEvent) is { } offset)
+            {
+                highestObservedOffset = Math.Max(highestObservedOffset, offset);
+            }
+
             if (streamEvent is CompletionStreamEvent.CommandAccepted accepted
                 && accepted.Completion.CommandId.Value == commandId)
             {
-                return accepted;
+                return new CompletionWindow(accepted, highestObservedOffset, EndedOnStaleAuthorization: false);
             }
+
+            endedOnStaleAuthorization =
+                streamEvent is CompletionStreamEvent.StreamError { ErrorId: StaleStreamAuthorization };
         }
-        return null;
+
+        return new CompletionWindow(null, highestObservedOffset, endedOnStaleAuthorization);
     }
+
+    private static long? OffsetOf(CompletionStreamEvent streamEvent) => streamEvent switch
+    {
+        CompletionStreamEvent.CommandAccepted accepted => accepted.Completion.Offset,
+        CompletionStreamEvent.CommandRejected rejected => rejected.Completion.Offset,
+        CompletionStreamEvent.Checkpoint checkpoint => checkpoint.Offset,
+        _ => null,
+    };
+
+    private sealed record CompletionWindow(
+        CompletionStreamEvent.CommandAccepted? Accepted,
+        long HighestObservedOffset,
+        bool EndedOnStaleAuthorization);
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using AwesomeAssertions;
-using Canton.Ledger.Rest.Client;
+using Canton.Ledger.Kernel.Telemetry;
 using Xunit;
 
 namespace Canton.Ledger.Rest.Client.Tests;
@@ -10,6 +10,6 @@ namespace Canton.Ledger.Rest.Client.Tests;
 public class WellKnownActivitySourceNameTests
 {
     [Fact]
-    public void RestLedgerClient_ActivitySourceName_matches_full_type_name() =>
-        RestLedgerClient.ActivitySourceName.Should().Be(typeof(RestLedgerClient).FullName);
+    public void RestLedgerClient_full_type_name_matches_the_RestLedgerClient_constant() =>
+        LedgerActivitySource.NameFor<RestLedgerClient>().Should().Be(LedgerActivitySourceNames.RestLedgerClient);
 }

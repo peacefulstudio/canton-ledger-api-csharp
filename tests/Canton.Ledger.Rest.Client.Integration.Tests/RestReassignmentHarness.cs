@@ -159,7 +159,7 @@ internal sealed class RestReassignmentHarness
 
         try
         {
-            await _lane.LedgerClient.SubmitReassignmentAsync(submission, cancellationToken);
+            await _lane.LedgerClient.SubmitReassignmentAsync(submission, cancellationToken: cancellationToken);
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {
@@ -178,7 +178,7 @@ internal sealed class RestReassignmentHarness
 
         try
         {
-            await _lane.LedgerClient.SubmitReassignmentAsync(submission, cancellationToken);
+            await _lane.LedgerClient.SubmitReassignmentAsync(submission, cancellationToken: cancellationToken);
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {

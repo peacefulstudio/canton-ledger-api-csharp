@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
 using Canton.Ledger.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -78,15 +79,13 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
     /// <exception cref="OperationCanceledException">The operation was canceled via <paramref name="cancellationToken"/>.</exception>
     public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
     {
-        var cachedToken = Volatile.Read(ref _cachedToken);
-        if (cachedToken is not null && _timeProvider.GetUtcNow().Ticks < Volatile.Read(ref _expiresAtTicks) - _options.SafetyMargin.Ticks)
+        if (TryGetUnexpiredCachedToken(out var cachedToken))
             return cachedToken;
 
         await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            cachedToken = Volatile.Read(ref _cachedToken);
-            if (cachedToken is not null && _timeProvider.GetUtcNow().Ticks < Volatile.Read(ref _expiresAtTicks) - _options.SafetyMargin.Ticks)
+            if (TryGetUnexpiredCachedToken(out cachedToken))
                 return cachedToken;
 
             return await RequestTokenAsync(cancellationToken).ConfigureAwait(false);
@@ -104,6 +103,13 @@ public sealed partial class ClientCredentialsProvider : ITokenProvider, IDisposa
         {
             _refreshLock.Release();
         }
+    }
+
+    private bool TryGetUnexpiredCachedToken([NotNullWhen(true)] out string? cachedToken)
+    {
+        cachedToken = Volatile.Read(ref _cachedToken);
+        return cachedToken is not null
+            && _timeProvider.GetUtcNow().Ticks < Volatile.Read(ref _expiresAtTicks) - _options.SafetyMargin.Ticks;
     }
 
     private async Task<string> RequestTokenAsync(CancellationToken cancellationToken)

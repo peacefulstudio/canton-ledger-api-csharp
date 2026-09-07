@@ -1,10 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Xunit;
 
@@ -24,7 +26,7 @@ public sealed class GrpcLedgerWriterParityTests : LedgerWriterParityTests
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
-    protected override async Task<CapabilityLane<(ILedgerWriter Writer, Party Owner)>> OpenWriterAsync(
+    protected override async Task<CapabilityLane<(ILedgerWriter Writer, ICantonLedgerClient Client, Party Owner)>> OpenWriterAsync(
         CancellationToken cancellationToken)
     {
         if (!EndpointDiscovery.IsLocalnetAvailable())
@@ -42,13 +44,20 @@ public sealed class GrpcLedgerWriterParityTests : LedgerWriterParityTests
             fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        var client = new LedgerClient(
-            new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = fixture.ValidatorUserId },
-            new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync));
+        var services = new ServiceCollection()
+            .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+            .AddLedgerClient(options =>
+            {
+                options.GrpcAddress = grpcAddress;
+                options.UserId = fixture.ValidatorUserId;
+            })
+            .BuildServiceProvider();
 
-        return new CapabilityLane<(ILedgerWriter, Party)>((client, new Party(party.PartyId)), async () =>
+        var writer = services.GetRequiredService<ILedgerWriter>();
+        var client = services.GetRequiredService<ICantonLedgerClient>();
+        return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>((writer, client, new Party(party.PartyId)), async () =>
         {
-            await client.DisposeAsync().ConfigureAwait(false);
+            await services.DisposeAsync().ConfigureAwait(false);
             await fixture.DisposeAsync().ConfigureAwait(false);
         });
     }

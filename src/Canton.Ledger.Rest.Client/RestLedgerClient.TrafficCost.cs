@@ -14,9 +14,14 @@ using WirePrepareSubmissionResponse = Canton.Ledger.Rest.Client.Raw.PrepareSubmi
 
 namespace Canton.Ledger.Rest.Client;
 
-public sealed partial class RestLedgerClient
+internal sealed partial class RestLedgerClient
 {
     private const string PrepareSubmissionPath = "/v2/interactive-submission/prepare";
+    private const string MissingPreparedSubmissionMessage =
+        "Server returned a successful response but no prepared submission was present for the "
+        + "traffic-cost estimate.";
+    private const string MalformedTrafficCostBodyPrefix =
+        "Server returned a malformed traffic-cost estimate response body: ";
 
     /// <inheritdoc />
     /// <remarks>
@@ -28,15 +33,15 @@ public sealed partial class RestLedgerClient
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="submission"/> is <see langword="null"/>.</exception>
     /// <exception cref="LedgerOperationException">
-    /// The participant rejected or failed the request, or answered successfully with a null body. The
-    /// participant's category, error id and message are parsed off a rejection before it is thrown, as
-    /// on every other call on this client — where the gRPC client throws <c>RpcException</c>. Two
-    /// neighbouring failures are deliberately left untranslated, matching the bounded reads here: a
-    /// transport failure that never reached the participant surfaces as the
-    /// <see cref="HttpRequestException"/> the opt-in retry pipeline classifies, and a success body
-    /// that will not parse surfaces as a <see cref="JsonException"/>. What none of them do is pass for
-    /// an absent estimation — <see langword="null"/> is returned only when the participant answered and
-    /// sent no estimation.
+    /// The participant rejected or failed the request, failed to answer it, or answered successfully
+    /// with a body that is null or will not parse. The participant's category, error id and message
+    /// are parsed off a rejection before it is thrown, as on every other call on this client — where
+    /// the gRPC client throws <c>RpcException</c>. The neighbouring failures carry the same status
+    /// codes every other timed call on this client reports: <c>408</c> for a
+    /// <paramref name="timeout"/> overrun, naming the deadline, and <c>503</c> for a transport
+    /// failure that never reached the participant. What none of them do is pass for an absent
+    /// estimation — <see langword="null"/> is returned only when the participant answered and sent no
+    /// estimation.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A reported cost was not a whole number of bytes, or exceeded <see cref="long.MaxValue"/>. The
@@ -47,36 +52,20 @@ public sealed partial class RestLedgerClient
     /// <see cref="JsonException"/> out of the deserializer. Either way an out-of-range cost is refused
     /// rather than wrapped to a negative one.
     /// </exception>
-    public async Task<TrafficCostEstimate?> EstimateTrafficCostAsync(
+    public Task<TrafficCostEstimate?> EstimateTrafficCostAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
 
-        var request = BuildPrepareSubmissionRequest(submission);
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var timeoutSource = CreateTimeoutSource(timeout, cancellationToken);
-        var requestToken = timeoutSource?.Token ?? cancellationToken;
-
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, PrepareSubmissionPath)
-        {
-            Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
-        };
-        using var response = await client.SendAsync(httpRequest, requestToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
-
-        var body = await response.Content
-            .ReadFromJsonAsync<WirePrepareSubmissionResponse>(RestRefitSettings.SerializerOptions, requestToken)
-            .ConfigureAwait(false);
-        if (body is null)
-        {
-            throw new LedgerOperationException(
-                "Server returned a successful response but no prepared submission was present for the "
-                + "traffic-cost estimate.");
-        }
-
-        return ProjectTrafficCostEstimate(body.CostEstimation);
+        return _calls.SendAsync<WirePrepareSubmissionResponse, TrafficCostEstimate?>(
+            new RestCall(
+                HttpMethod.Post, PrepareSubmissionPath, BuildPrepareSubmissionRequest(submission),
+                MissingPreparedSubmissionMessage, MalformedTrafficCostBodyPrefix),
+            body => ProjectTrafficCostEstimate(body.CostEstimation),
+            timeout,
+            cancellationToken);
     }
 
     private static TrafficCostEstimate? ProjectTrafficCostEstimate(WireCostEstimation? estimation) =>

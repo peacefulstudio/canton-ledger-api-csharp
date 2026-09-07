@@ -20,6 +20,8 @@
   <ItemGroup>
     <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\LedgerApiVersionSkewGuard.cs"
              Link="Shared\LedgerApiVersionSkewGuard.cs" />
+    <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\ServedInt64SiteCoverage.cs"
+             Link="Shared\ServedInt64SiteCoverage.cs" />
     <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\ServedOpenApiDocument.cs"
              Link="Shared\ServedOpenApiDocument.cs" />
     <Compile Include="..\Canton.Ledger.Rest.Client.Integration.Tests\YamlBlock.cs"

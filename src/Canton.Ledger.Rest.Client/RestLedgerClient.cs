@@ -1,16 +1,19 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Kernel.Telemetry;
+using Canton.Ledger.Kernel.Streams;
+using Canton.Ledger.Kernel.Wire;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
 using Microsoft.Extensions.Logging;
@@ -33,27 +36,24 @@ namespace Canton.Ledger.Rest.Client;
 /// address and the bearer-auth and activity handlers.
 /// </summary>
 /// <remarks>
-/// The streaming reads (<see cref="SubscribeActiveAsync{T}"/>, <see cref="SubscribeAsync{T}"/>,
-/// <see cref="SubscribeLedgerEffectsAsync{T}"/>) run over blocking HTTP POST — a single request
-/// whose whole response is buffered before any element is yielded, unlike the gRPC transport's
-/// true server streaming. That means a mid-read fault is never an in-band
-/// <c>StreamError</c>: it either fails the one HTTP call (surfaced as a thrown exception before
-/// the first yield) or it doesn't happen at all. An open-ended live tail (<c>toOffset = null</c>
-/// on the offset-range reads) is the one read HTTP cannot serve; see
-/// <see cref="SupportsUnboundedStreaming"/>.
-/// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient.CompletionStreamAsync"/> runs over the
-/// same blocking shape: <c>POST /v2/commands/completions</c> answers with a JSON array, so one call
-/// yields the completions in one participant-bounded window rather than an endless tail, and a
-/// caller follows the stream by reopening it from the last offset it observed.
+/// The offset-range reads (<see cref="SubscribeAsync{T}"/>,
+/// <see cref="SubscribeLedgerEffectsAsync{T}"/>) run over a pagination loop: each window is one
+/// blocking HTTP POST whose whole response is buffered, and the loop re-POSTs the next window from
+/// the last offset it observed, stitching the windows into one continuous stream. A caller cannot
+/// tell where one window ended and the next began, so an open-ended tail
+/// (<c>toOffset = null</c>) and a bounded range are the same read with and without a termination
+/// condition. A fault reaches the caller in band, as a terminal <c>StreamError</c>, never as a
+/// throw — the contract every stream on the gRPC transport already honours. A caller cancelling
+/// still gets an <see cref="OperationCanceledException"/>, and a transport failure that never
+/// reached the participant still throws.
+/// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient.CompletionStreamAsync"/> runs over that
+/// same loop and is a live tail for the same reason.
+/// <see cref="SubscribeActiveAsync{T}"/> is the one read that does not loop: the ACS snapshot is
+/// taken at a single offset, and paging it belongs to a different endpoint.
 /// </remarks>
-public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICantonLedgerClient
+internal sealed partial class RestLedgerClient
+    : Canton.Ledger.Abstractions.ICantonLedgerClient, Canton.Ledger.Abstractions.IUnboundedStreamingCapability
 {
-    /// <summary>
-    /// The <see cref="System.Diagnostics.ActivitySource"/> name used for OpenTelemetry tracing.
-    /// Register with <c>tracing.AddSource(RestLedgerClient.ActivitySourceName)</c>.
-    /// </summary>
-    public static string ActivitySourceName => LedgerActivitySourceNames.RestLedgerClient;
-
     private const string LedgerEndPath = "/v2/state/ledger-end";
     private const string SubmitAndWaitPath = "/v2/commands/submit-and-wait";
     private const string SubmitAndWaitForTransactionPath = "/v2/commands/submit-and-wait-for-transaction";
@@ -62,30 +62,46 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
 
     private const long EmptyLedgerEndOffset = 0L;
 
-    private const string UnboundedStreamingMessage =
-        "RestLedgerClient cannot serve an open-ended live tail (toOffset: null) over blocking " +
-        "HTTP POST /v2/updates. Supply an end offset for a bounded read, or use a future WebSocket " +
-        "transport (see RestLedgerClient.SupportsUnboundedStreaming).";
+    private const string MissingLedgerEndBodyMessage =
+        "Server returned a successful response but no body was present for the ledger end.";
+    private const string MissingSubmitAndWaitBodyMessage =
+        "Server returned a successful response but no body was present for submit-and-wait.";
+    private const string MalformedSubmitAndWaitBodyPrefix =
+        "Server returned a malformed submit-and-wait response body: ";
+    private const string MissingTransactionMessage =
+        "Server returned a successful response but no transaction was present.";
+    private const string MalformedTransactionPrefix =
+        "Server returned a malformed transaction: ";
 
-    private readonly IHttpClientFactory _httpClientFactory;
+    private const string LimitQueryParameter = "limit";
+    private const string StreamIdleTimeoutQueryParameter = "stream_idle_timeout_ms";
+
+    private const long UnpacedWindowWarningThreshold = 100L;
+
+    private const string UnresumableWindowMessage =
+        "The stream window carried entries but no offset the next window could resume from, so " +
+        "following it would re-read what was just delivered.";
+
+    private const string WindowLimitHint =
+        " The participant's entry cap is below the configured window limit; lower " +
+        nameof(RestLedgerClientOptions) + "." + nameof(RestLedgerClientOptions.StreamWindowLimit) +
+        " and resume from the last offset observed.";
+
+    private readonly RestCallEnvelope _calls;
     private readonly string? _userId;
-    private readonly long? _completionStreamLimit;
-    private readonly TimeSpan? _completionStreamIdleTimeout;
+    private readonly long _streamWindowLimit;
+    private readonly TimeSpan _streamWindowIdleTimeout;
+    private readonly TimeSpan _shortestHonouredWindowHold;
     private readonly ILogger<RestLedgerClient> _logger;
 
-    /// <summary>
-    /// Capability probe for <see cref="ILedgerStreamer"/> consumers: always <see langword="false"/>
-    /// today, because HTTP cannot serve an open-ended live tail
-    /// (<see cref="SubscribeAsync{T}"/>/<see cref="SubscribeLedgerEffectsAsync{T}"/> with
-    /// <c>toOffset: null</c>). Flips to <see langword="true"/> once a future WebSocket transport
-    /// lands.
-    /// </summary>
-    [SuppressMessage(
-        "Performance",
-        "CA1822:Mark members as static",
-        Justification = "An instance-level capability probe, by design (mirrors Stream.CanSeek); " +
-            "flips per-instance once a future WebSocket transport is wired in.")]
-    public bool SupportsUnboundedStreaming => false;
+    /// <inheritdoc />
+    /// <remarks>
+    /// <see langword="true"/>: <see cref="SubscribeAsync{T}"/> and
+    /// <see cref="SubscribeLedgerEffectsAsync{T}"/> serve <c>toOffset: null</c> through the
+    /// pagination loop, which re-POSTs a bounded window from the last offset it observed for as
+    /// long as the caller enumerates.
+    /// </remarks>
+    public bool SupportsUnboundedStreaming => true;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="RestLedgerClient"/> class with no configured
@@ -96,7 +112,7 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     /// (<see cref="ServiceCollectionExtensions.HttpClientName"/>) that the JSON Ledger API requests
     /// are issued through.
     /// </param>
-    public RestLedgerClient(IHttpClientFactory httpClientFactory)
+    internal RestLedgerClient(IHttpClientFactory httpClientFactory)
         : this(httpClientFactory, options: null, logger: null)
     {
     }
@@ -111,23 +127,27 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     /// </param>
     /// <param name="options">
     /// Options carrying the optional <see cref="RestLedgerClientOptions.UserId"/> sent on command
-    /// submissions. May be <see langword="null"/>, in which case no user id is sent.
+    /// submissions and the stream-window bounds every read is paged with. May be
+    /// <see langword="null"/>, in which case no user id is sent and the window bounds take their
+    /// documented defaults.
     /// </param>
     /// <param name="logger">
     /// Logger for diagnostics such as an unclassifiable <c>/v2/updates</c> variant. Defaults to
     /// <see cref="NullLogger{T}"/> when omitted.
     /// </param>
-    public RestLedgerClient(
+    internal RestLedgerClient(
         IHttpClientFactory httpClientFactory,
         IOptions<RestLedgerClientOptions>? options,
         ILogger<RestLedgerClient>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
-        _httpClientFactory = httpClientFactory;
         _userId = options?.Value.UserId;
-        _completionStreamLimit = options?.Value.CompletionStreamLimit;
-        _completionStreamIdleTimeout = options?.Value.CompletionStreamIdleTimeout;
+        _streamWindowLimit = options?.Value.StreamWindowLimit ?? RestLedgerClientOptions.DefaultStreamWindowLimit;
+        _streamWindowIdleTimeout =
+            options?.Value.StreamWindowIdleTimeout ?? RestLedgerClientOptions.DefaultStreamWindowIdleTimeout;
+        _shortestHonouredWindowHold = _streamWindowIdleTimeout / 2;
         _logger = logger ?? NullLogger<RestLedgerClient>.Instance;
+        _calls = new RestCallEnvelope(httpClientFactory, _logger);
     }
 
     /// <inheritdoc />
@@ -158,15 +178,13 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
+        var client = _calls.CreateClient();
 
-        using var timeoutSource = CreateTimeoutSource(timeout, cancellationToken);
+        using var timeoutSource = RestCallEnvelope.CreateTimeoutSource(timeout, cancellationToken);
         var requestToken = timeoutSource?.Token ?? cancellationToken;
 
-        using var response = await client
-            .GetAsync(LedgerEndPath, requestToken)
-            .ConfigureAwait(false);
-        await EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
+        using var response = await client.GetAsync(LedgerEndPath, requestToken).ConfigureAwait(false);
+        await RestCallEnvelope.EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
 
         var body = await response.Content
             .ReadFromJsonAsync<Raw.GetLedgerEndResponse>(RestRefitSettings.SerializerOptions, requestToken)
@@ -174,8 +192,7 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
 
         if (body is null)
         {
-            throw new LedgerOperationException(
-                "Server returned a successful response but no body was present for the ledger end.");
+            throw new LedgerOperationException(MissingLedgerEndBodyMessage);
         }
 
         if (body.Offset is null)
@@ -195,45 +212,43 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
 
     /// <inheritdoc />
     /// <remarks>
-    /// A bounded ACS snapshot over one blocking <c>POST /v2/state/active-contracts</c> call: the
-    /// whole response is read before any entry is yielded, then the snapshot ends with a terminal
+    /// A bounded ACS snapshot over one window of <c>POST /v2/state/active-contracts</c>: the whole
+    /// response is read before any entry is yielded, then the snapshot ends with a terminal
     /// <see cref="AcsSnapshotEntry{T}.Checkpoint"/> carrying the effective offset — even when the
-    /// snapshot is empty — so a caller can resume <see cref="SubscribeAsync{T}"/> from it. A 413
-    /// response (past the participant's <c>http-list-max-elements-limit</c>) throws
-    /// <see cref="LedgerResultTooLargeException"/>; any other non-success response throws
-    /// <see cref="LedgerOperationException"/>. Both throw before the first yield, since the whole
-    /// read is one blocking call — there is no in-band <c>StreamError</c> on this transport.
+    /// snapshot is empty — so a caller can resume <see cref="SubscribeAsync{T}"/> from it. A
+    /// failure ends the snapshot with a terminal <see cref="AcsSnapshotEntry{T}.StreamError"/>
+    /// instead, mutually exclusive with that checkpoint, so a caller is never handed a resume
+    /// offset for a snapshot it did not receive in full. A 413 (past the participant's
+    /// <c>http-list-max-elements-limit</c>) is one such failure and names the window limit to
+    /// lower. Resolving the ledger end for a null <paramref name="activeAtOffset"/> happens before
+    /// the snapshot begins, so a failure there still throws.
     /// </remarks>
     public IAsyncEnumerable<AcsSnapshotEntry<T>> SubscribeActiveAsync<T>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? activeAtOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType =>
+        where T : ITemplate, IDamlRecord<T> =>
         SubscribeActiveAsyncCore<T>(submitter, activeAtOffset, cancellationToken);
 
     private async IAsyncEnumerable<AcsSnapshotEntry<T>> SubscribeActiveAsyncCore<T>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? activeAtOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var effectiveOffset = activeAtOffset ?? await GetLedgerEndAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<T>(submitter, effectiveOffset.Value);
 
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, ActiveContractsPath)
+        var window = await ReadWindowAsync<WireGetActiveContractsResponse>(
+            ActiveContractsPath, request, cancellationToken).ConfigureAwait(false);
+        if (window.Fault is { } fault)
         {
-            Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
-        };
-        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            await ThrowForBoundedReadFailureAsync(response, cancellationToken).ConfigureAwait(false);
+            yield return new AcsSnapshotEntry<T>.StreamError(
+                fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+            yield break;
         }
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var entry in RestStreamBodyReader.Parse<WireGetActiveContractsResponse>(body))
+        foreach (var entry in window.Entries)
         {
             foreach (var projected in ContractStreamProjector.ProjectActiveContractEntry<T>(entry, _logger, effectiveOffset))
             {
@@ -246,86 +261,66 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
 
     /// <inheritdoc />
     /// <remarks>
-    /// A bounded offset-range read over one blocking <c>POST /v2/updates</c> call using the
-    /// ACS-delta transaction shape. <paramref name="toOffset"/> is required over this transport:
-    /// <see langword="null"/> (an open-ended live tail) throws <see cref="NotSupportedException"/>
-    /// — see <see cref="SupportsUnboundedStreaming"/>. An already-cancelled
-    /// <paramref name="cancellationToken"/> is honored first, throwing
-    /// <see cref="OperationCanceledException"/> ahead of any capability rejection. A 413 response
-    /// throws <see cref="LedgerResultTooLargeException"/>; any other non-success response throws
-    /// <see cref="LedgerOperationException"/>, both before the first yield.
+    /// An offset-range read over the pagination loop using the ACS-delta transaction shape. A
+    /// <paramref name="toOffset"/> of <see langword="null"/> is an open-ended tail the loop follows
+    /// for as long as the caller enumerates; a value is a termination condition on the same loop,
+    /// so a range wider than the participant's entry cap pages instead of failing. An
+    /// already-cancelled <paramref name="cancellationToken"/> is honored first, throwing
+    /// <see cref="OperationCanceledException"/> before any request is sent. A failed window ends
+    /// the enumeration with a terminal <see cref="ContractStreamEvent{T}.StreamError"/>.
     /// </remarks>
     public IAsyncEnumerable<ContractStreamEvent<T>> SubscribeAsync<T>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (toOffset is not { } endInclusive)
-        {
-            throw new NotSupportedException(UnboundedStreamingMessage);
-        }
-
-        return SubscribeUpdatesAsyncCore<T>(submitter, fromOffset, endInclusive, RestTransactionShape.AcsDelta, cancellationToken);
+        return SubscribeUpdatesAsyncCore<T>(submitter, fromOffset, toOffset, RestTransactionShape.AcsDelta, cancellationToken);
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// A bounded offset-range read over one blocking <c>POST /v2/updates</c> call using the
-    /// ledger-effects transaction shape. <paramref name="toOffset"/> is required over this
-    /// transport: <see langword="null"/> (an open-ended live tail) throws
-    /// <see cref="NotSupportedException"/> — see <see cref="SupportsUnboundedStreaming"/>. An
-    /// already-cancelled <paramref name="cancellationToken"/> is honored first, throwing
-    /// <see cref="OperationCanceledException"/> ahead of any capability rejection. A 413
-    /// response throws <see cref="LedgerResultTooLargeException"/>; any other non-success response
-    /// throws <see cref="LedgerOperationException"/>, both before the first yield.
+    /// The ledger-effects counterpart of <see cref="SubscribeAsync{T}"/>, over the same pagination
+    /// loop and with the same open-ended, termination and fault behaviour.
     /// </remarks>
     public IAsyncEnumerable<ContractStreamEvent<T>> SubscribeLedgerEffectsAsync<T>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (toOffset is not { } endInclusive)
-        {
-            throw new NotSupportedException(UnboundedStreamingMessage);
-        }
-
-        return SubscribeUpdatesAsyncCore<T>(submitter, fromOffset, endInclusive, RestTransactionShape.LedgerEffects, cancellationToken);
+        return SubscribeUpdatesAsyncCore<T>(submitter, fromOffset, toOffset, RestTransactionShape.LedgerEffects, cancellationToken);
     }
 
     private async IAsyncEnumerable<ContractStreamEvent<T>> SubscribeUpdatesAsyncCore<T>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? fromOffset,
-        LedgerOffset toOffset,
+        LedgerOffset? toOffset,
         RestTransactionShape shape,
         [EnumeratorCancellation] CancellationToken cancellationToken)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
-        var request = RestSubscribeRequestBuilder.BuildGetUpdatesRequest<T>(
-            submitter, fromOffset?.Value ?? 0L, toOffset.Value, shape);
-
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, UpdatesPath)
+        var windows = ReadUpdateWindowsAsync<T>(submitter, fromOffset, toOffset, shape, cancellationToken);
+        await foreach (var read in windows.ConfigureAwait(false))
         {
-            Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
-        };
-        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+            if (read.Fault is { } fault)
+            {
+                yield return new ContractStreamEvent<T>.StreamError(
+                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                yield break;
+            }
 
-        if (!response.IsSuccessStatusCode)
-        {
-            await ThrowForBoundedReadFailureAsync(response, cancellationToken).ConfigureAwait(false);
-        }
+            if (read.Entry is not { } update)
+            {
+                continue;
+            }
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var update in RestStreamBodyReader.Parse<WireGetUpdatesResponse>(body))
-        {
             foreach (var projected in ProjectUpdate<T>(update))
             {
                 yield return projected;
@@ -333,8 +328,34 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
         }
     }
 
+    private IAsyncEnumerable<StreamWindowRead<WireGetUpdatesResponse>> ReadUpdateWindowsAsync<T>(
+        RuntimeCommands.SubmitterInfo submitter,
+        LedgerOffset? fromOffset,
+        LedgerOffset? toOffset,
+        RestTransactionShape shape,
+        CancellationToken cancellationToken)
+        where T : IDamlType =>
+        ReadWindowsAsync<WireGetUpdatesResponse>(
+            UpdatesPath,
+            fromOffset?.Value ?? 0L,
+            toOffset?.Value,
+            beginExclusive => RestSubscribeRequestBuilder.BuildGetUpdatesRequest<T>(
+                submitter, beginExclusive, toOffset?.Value, shape),
+            UpdateResumeOffset,
+            cancellationToken);
+
+    private static long? UpdateResumeOffset(WireGetUpdatesResponse response)
+    {
+        var wireOffset = response.Update?.Transaction?.Offset
+            ?? response.Update?.Reassignment?.Offset
+            ?? response.Update?.OffsetCheckpoint?.Offset
+            ?? response.Update?.TopologyTransaction?.Offset;
+
+        return RestWireConversions.TryParseOffset(wireOffset, out var offset) ? offset : null;
+    }
+
     private IEnumerable<ContractStreamEvent<T>> ProjectUpdate<T>(WireGetUpdatesResponse update)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         if (update.Update?.Transaction is { } transaction)
         {
@@ -362,51 +383,182 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     }
 
     private static AcsSnapshotEntry<T> ToAcsSnapshotEntry<T>(ContractStreamEvent<T> entry)
-        where T : IDamlType => entry switch
+        where T : ITemplate, IDamlRecord<T> => entry switch
     {
         ContractStreamEvent<T>.Created created => new AcsSnapshotEntry<T>.Created(
-            created.ContractId, created.Payload, created.Offset, created.SynchronizerId, created.WitnessParties),
+            created.ContractId, created.Payload, created.Key, created.Offset, created.SynchronizerId, created.WitnessParties),
         ContractStreamEvent<T>.Unassigned unassigned => new AcsSnapshotEntry<T>.Unclassified(
-            unassigned.Offset, UnclassifiedKind.UnassignedEvent.ToString()),
+            unassigned.Offset, UnclassifiedKind.UnassignedEvent),
         ContractStreamEvent<T>.Unclassified unclassified => new AcsSnapshotEntry<T>.Unclassified(
-            unclassified.Offset, unclassified.RawKind ?? unclassified.Kind.ToString()),
+            unclassified.Offset, unclassified.Kind, unclassified.RawKind),
         _ => throw new InvalidOperationException(
             $"Active-contract snapshot produced an unexpected entry variant: {entry.GetType().Name}"),
     };
 
-    private static async Task ThrowForBoundedReadFailureAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private readonly record struct StreamWindow<TEntry>(IReadOnlyList<TEntry> Entries, StreamFault? Fault)
+        where TEntry : class
     {
-        if (response.StatusCode == HttpStatusCode.RequestEntityTooLarge)
+        internal static StreamWindow<TEntry> Failed(StreamFault fault) => new([], fault);
+    }
+
+    private readonly record struct StreamWindowRead<TEntry>(TEntry? Entry, StreamFault? Fault)
+        where TEntry : class
+    {
+        internal static StreamWindowRead<TEntry> Of(TEntry entry) => new(entry, null);
+
+        internal static StreamWindowRead<TEntry> Failed(StreamFault fault) => new(null, fault);
+    }
+
+    private async IAsyncEnumerable<StreamWindowRead<TEntry>> ReadWindowsAsync<TEntry>(
+        string path,
+        long beginExclusive,
+        long? endInclusive,
+        Func<long, object> buildRequest,
+        Func<TEntry, long?> resumeOffsetOf,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+        where TEntry : class
+    {
+        var windowUri = WindowPath(path);
+        var resumeFrom = beginExclusive;
+        var unpacedWindows = 0L;
+        var warnAtConsecutiveWindows = UnpacedWindowWarningThreshold;
+        while (true)
         {
-            var detail = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            throw new LedgerResultTooLargeException(
-                $"The bounded read exceeded the participant's http-list-max-elements-limit " +
-                $"(413 Content Too Large): {detail}");
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var openedFrom = resumeFrom;
+            var openedAt = Stopwatch.GetTimestamp();
+            var window = await ReadWindowAsync<TEntry>(windowUri, buildRequest(resumeFrom), cancellationToken)
+                .ConfigureAwait(false);
+            var participantHeldTheWindow = Stopwatch.GetElapsedTime(openedAt) >= _shortestHonouredWindowHold;
+            if (window.Fault is { } fault)
+            {
+                yield return StreamWindowRead<TEntry>.Failed(fault);
+                yield break;
+            }
+
+            var readAnOffset = false;
+            foreach (var entry in window.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (resumeOffsetOf(entry) is { } observed)
+                {
+                    resumeFrom = observed;
+                    readAnOffset = true;
+                }
+
+                yield return StreamWindowRead<TEntry>.Of(entry);
+            }
+
+            if (endInclusive is { } end && (window.Entries.Count < _streamWindowLimit || resumeFrom >= end))
+            {
+                yield break;
+            }
+
+            if (window.Entries.Count > 0 && !readAnOffset)
+            {
+                yield return StreamWindowRead<TEntry>.Failed(StreamFault.FromUndecodableBody(
+                    UnresumableWindowMessage, new InvalidOperationException(UnresumableWindowMessage)));
+                yield break;
+            }
+
+            if (participantHeldTheWindow || resumeFrom != openedFrom)
+            {
+                unpacedWindows = 0;
+                warnAtConsecutiveWindows = UnpacedWindowWarningThreshold;
+            }
+            else if (++unpacedWindows >= warnAtConsecutiveWindows)
+            {
+                LogStreamWindowUnpaced(_logger, unpacedWindows, windowUri, resumeFrom);
+                warnAtConsecutiveWindows *= 2;
+            }
+        }
+    }
+
+    private async Task<StreamWindow<TEntry>> ReadWindowAsync<TEntry>(
+        string requestUri, object request, CancellationToken cancellationToken)
+        where TEntry : class
+    {
+        var client = _calls.CreateClient();
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
+        {
+            Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
+        };
+        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return StreamWindow<TEntry>.Failed(
+                await WindowFaultAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        var parsed = await RestErrorParser.ParseAsync(response, cancellationToken).ConfigureAwait(false);
-        throw ToException(parsed);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!RestStreamBodyReader.TryParse<TEntry>(body, out var entries, out var decodeFailure))
+        {
+            LogStreamWindowBodyUndecodable(_logger, requestUri, decodeFailure);
+            return StreamWindow<TEntry>.Failed(StreamFault.FromUndecodableBody(
+                $"Could not decode the stream window response body: {decodeFailure.Message}", decodeFailure));
+        }
+
+        return new StreamWindow<TEntry>(entries, null);
     }
+
+    private async Task<StreamFault> WindowFaultAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var parsed = await RestErrorParser.ParseAsync(response, cancellationToken).ConfigureAwait(false);
+        var message = response.StatusCode == HttpStatusCode.RequestEntityTooLarge
+            ? parsed.Message + WindowLimitHint
+            : parsed.Message;
+
+        LogStreamWindowFailed(_logger, parsed.StatusCode, message);
+        return StreamFault.FromTransport(
+            parsed.StatusCode, message, parsed.ClassifiedCategory, parsed.ReportedErrorId, sourceException: null);
+    }
+
+    /// <summary>
+    /// The request URI for one window of a looped read: the endpoint plus the bounds that make the
+    /// participant close the window. The ACS snapshot deliberately does not go through here. It is
+    /// a single un-paged read, so an explicit <c>limit</c> would cap it at a window's worth of
+    /// contracts and hand the caller a short snapshot that looks complete, where deferring to the
+    /// participant's own cap makes an oversized snapshot a loud failure instead.
+    /// </summary>
+    private string WindowPath(string path) =>
+        $"{path}?{LimitQueryParameter}={_streamWindowLimit.ToString(CultureInfo.InvariantCulture)}" +
+        $"&{StreamIdleTimeoutQueryParameter}=" +
+        ((long)_streamWindowIdleTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
     /// <exception cref="InvalidOperationException">
     /// The transaction has zero or more than one exercised event for <paramref name="command"/>'s
     /// choice on a successful outcome (e.g. a nonconsuming choice that only forks other choices).
-    /// Matches the gRPC transport's <c>TransactionResultExerciseExtensions.ExerciseResult</c>
-    /// contract, which throws for the same shapes rather than surfacing them through
-    /// <see cref="ExerciseOutcome{T}"/>.
+    /// The projection calls <see cref="TransactionResultExerciseExtensions.ExerciseResult{TReturn}(TransactionResult, string)"/>,
+    /// which throws for those shapes rather than surfacing them through
+    /// <see cref="ExerciseOutcome{T}"/>, so both transports raise the same failure.
     /// </exception>
-    public async Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
+    public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
+        return TryExerciseCoreAsync<TResult>(command, submitter, workflowId, commandId, timeout, cancellationToken);
+    }
+
+    private async Task<ExerciseOutcome<TResult>> TryExerciseCoreAsync<TResult>(
+        RuntimeCommands.ExerciseCommand command,
+        RuntimeCommands.SubmitterInfo submitter,
+        string? workflowId,
+        RuntimeCommands.CommandId? commandId,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
         var submission = NewSubmission(
-            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}");
+            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}", commandId);
         var outcome = await TrySubmitAndWaitForTransactionCoreAsync(
                 submission,
                 RestSubscribeRequestBuilder.BuildTransactionFormat(submitter),
@@ -418,20 +570,38 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     }
 
     /// <inheritdoc />
-    public async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
+    public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
         where TTemplate : ITemplate
     {
         ArgumentNullException.ThrowIfNull(payload);
 
+        return TryCreateCoreAsync(payload, submitter, workflowId, commandId, timeout, cancellationToken);
+    }
+
+    private async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateCoreAsync<TTemplate>(
+        TTemplate payload,
+        RuntimeCommands.SubmitterInfo submitter,
+        string? workflowId,
+        RuntimeCommands.CommandId? commandId,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+        where TTemplate : ITemplate
+    {
         var createCommand = RuntimeCommands.CreateCommand.For(payload);
         var submission = NewSubmission(
-            createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
-        var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken)
+            createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}", commandId);
+        var outcome = await TrySubmitAndWaitForTransactionCoreAsync(
+                submission,
+                transactionFormat: null,
+                RestTransactionResultProjector.Project,
+                timeout,
+                cancellationToken)
             .ConfigureAwait(false);
         return RestTransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
     }
@@ -449,7 +619,7 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     }
 
     /// <inheritdoc />
-    public async Task<SubmitAndWaitResult> SubmitAndWaitAsync(
+    public Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
@@ -457,77 +627,29 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
         ArgumentNullException.ThrowIfNull(submission);
 
         var commands = RestCommandBuilder.BuildCommands(submission, _userId);
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
+        return _calls.SendAsync<Raw.SubmitAndWaitResponse, SubmitAndWaitResult>(
+            new RestCall(
+                HttpMethod.Post, SubmitAndWaitPath, commands,
+                MissingSubmitAndWaitBodyMessage, MalformedSubmitAndWaitBodyPrefix),
+            body => ProjectSubmitAndWaitResult(commands, body),
+            timeout,
+            cancellationToken);
+    }
 
-        using var timeoutSource = CreateTimeoutSource(timeout, cancellationToken);
-        var requestToken = timeoutSource?.Token ?? cancellationToken;
-
-        HttpResponseMessage response;
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, SubmitAndWaitPath)
-            {
-                Content = JsonContent.Create(commands, options: RestRefitSettings.SerializerOptions),
-            };
-            response = await client.SendAsync(request, requestToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+    private static SubmitAndWaitResult ProjectSubmitAndWaitResult(
+        Raw.Commands commands, Raw.SubmitAndWaitResponse body)
+    {
+        if (!RestWireConversions.TryParseOffset(body.CompletionOffset, out var completionOffset))
         {
             throw new LedgerOperationException(
-                $"Request exceeded the {DescribeDeadline(timeout)} deadline.", (int)HttpStatusCode.RequestTimeout, ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new LedgerOperationException(ex.Message, (int)HttpStatusCode.ServiceUnavailable, ex);
+                "Server returned a successful response but the completion offset was missing or not " +
+                "a non-negative integer for submit-and-wait.");
         }
 
-        using (response)
-        {
-            try
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    var parsed = await RestErrorParser.ParseAsync(response, requestToken).ConfigureAwait(false);
-                    throw ToException(parsed);
-                }
-
-                var body = await response.Content
-                    .ReadFromJsonAsync<Raw.SubmitAndWaitResponse>(RestRefitSettings.SerializerOptions, requestToken)
-                    .ConfigureAwait(false);
-                if (body is null)
-                {
-                    throw new LedgerOperationException(
-                        "Server returned a successful response but no body was present for submit-and-wait.");
-                }
-
-                if (!RestWireConversions.TryParseOffset(body.CompletionOffset, out var completionOffset))
-                {
-                    throw new LedgerOperationException(
-                        "Server returned a successful response but the completion offset was missing or not " +
-                        "a non-negative integer for submit-and-wait.");
-                }
-
-                return new SubmitAndWaitResult(
-                    (RuntimeCommands.CommandId)commands.CommandId,
-                    body.UpdateId,
-                    LedgerOffset.At(completionOffset));
-            }
-            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                throw new LedgerOperationException(
-                    $"Request exceeded the {DescribeDeadline(timeout)} deadline while reading the response body.",
-                    (int)HttpStatusCode.RequestTimeout, ex);
-            }
-            catch (HttpRequestException ex)
-            {
-                throw new LedgerOperationException(ex.Message, (int)HttpStatusCode.ServiceUnavailable, ex);
-            }
-            catch (JsonException ex)
-            {
-                throw new LedgerOperationException(
-                    $"Server returned a malformed submit-and-wait response body: {ex.Message}", ex);
-            }
-        }
+        return new SubmitAndWaitResult(
+            (RuntimeCommands.CommandId)commands.CommandId,
+            body.UpdateId,
+            LedgerOffset.At(completionOffset));
     }
 
     /// <inheritdoc />
@@ -555,133 +677,43 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
             submission, transactionFormat: null, RestTransactionResultProjector.Project, timeout, cancellationToken);
     }
 
-    private async Task<ExerciseOutcome<TProjection>> TrySubmitAndWaitForTransactionCoreAsync<TProjection>(
+    private Task<ExerciseOutcome<TProjection>> TrySubmitAndWaitForTransactionCoreAsync<TProjection>(
         RuntimeCommands.CommandsSubmission submission,
         Raw.TransactionFormat? transactionFormat,
         Func<Raw.Transaction, TProjection> project,
         TimeSpan? timeout,
         CancellationToken cancellationToken)
     {
-        var commands = RestCommandBuilder.BuildCommands(submission, _userId);
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-
-        using var timeoutSource = CreateTimeoutSource(timeout, cancellationToken);
-        var requestToken = timeoutSource?.Token ?? cancellationToken;
-
-        HttpResponseMessage response;
-        try
+        var requestBody = new Raw.SubmitAndWaitForTransactionRequest
         {
-            var requestBody = new Raw.SubmitAndWaitForTransactionRequest { Commands = commands };
-            if (transactionFormat is not null)
-            {
-                requestBody.TransactionFormat = transactionFormat;
-            }
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, SubmitAndWaitForTransactionPath)
-            {
-                Content = JsonContent.Create(requestBody, options: RestRefitSettings.SerializerOptions),
-            };
-            response = await client.SendAsync(request, requestToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            Commands = RestCommandBuilder.BuildCommands(submission, _userId),
+        };
+        if (transactionFormat is not null)
         {
-            return new ExerciseOutcome<TProjection>.InfraError(
-                (int)HttpStatusCode.RequestTimeout, $"Request exceeded the {DescribeDeadline(timeout)} deadline.");
-        }
-        catch (HttpRequestException transportFailure)
-        {
-            return new ExerciseOutcome<TProjection>.InfraError(
-                (int)HttpStatusCode.ServiceUnavailable, transportFailure.Message);
+            requestBody.TransactionFormat = transactionFormat;
         }
 
-        using (response)
-        {
-            try
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    var parsed = await RestErrorParser.ParseAsync(response, requestToken).ConfigureAwait(false);
-                    return ToOutcome<TProjection>(parsed);
-                }
-
-                var body = await response.Content
-                    .ReadFromJsonAsync<Raw.SubmitAndWaitForTransactionResponse>(
-                        RestRefitSettings.SerializerOptions, requestToken)
-                    .ConfigureAwait(false);
-                if (body?.Transaction is null)
-                {
-                    return new ExerciseOutcome<TProjection>.InfraError(
-                        (int)HttpStatusCode.InternalServerError,
-                        "Server returned a successful response but no transaction was present.");
-                }
-
-                return new ExerciseOutcome<TProjection>.One(project(body.Transaction));
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return new ExerciseOutcome<TProjection>.InfraError(
-                    (int)HttpStatusCode.RequestTimeout,
-                    $"Request exceeded the {DescribeDeadline(timeout)} deadline while reading the response body.");
-            }
-            catch (Exception malformed) when (
-                malformed is FormatException or JsonException or MalformedTransactionTreeException
-                || RestTransactionResultProjector.IsMalformedResponse(malformed))
-            {
-                LogTransactionResponseUndecodable(_logger, malformed);
-                return new ExerciseOutcome<TProjection>.InfraError(
-                    (int)HttpStatusCode.InternalServerError,
-                    $"Server returned a malformed transaction: {malformed.Message}");
-            }
-            catch (HttpRequestException transportFailure)
-            {
-                return new ExerciseOutcome<TProjection>.InfraError(
-                    (int)HttpStatusCode.ServiceUnavailable, transportFailure.Message);
-            }
-        }
+        return _calls.TrySendAsync<Raw.SubmitAndWaitForTransactionResponse, TProjection>(
+            new RestCall(
+                HttpMethod.Post, SubmitAndWaitForTransactionPath, requestBody,
+                MissingTransactionMessage, MalformedTransactionPrefix),
+            body => body.Transaction is { } transaction
+                ? new ExerciseOutcome<TProjection>.One(project(transaction))
+                : new ExerciseOutcome<TProjection>.InfraError(
+                    (int)HttpStatusCode.InternalServerError, MissingTransactionMessage),
+            timeout,
+            cancellationToken);
     }
-
-    private static string DescribeDeadline(TimeSpan? timeout) =>
-        timeout is { } window ? window.ToString() : "HttpClient default";
 
     private static RuntimeCommands.CommandsSubmission NewSubmission(
         RuntimeCommands.ICommand command,
         RuntimeCommands.SubmitterInfo submitter,
-        string workflowId) =>
+        string workflowId,
+        RuntimeCommands.CommandId? commandId) =>
         RuntimeCommands.CommandsSubmission.Single(command)
             .WithSubmitter(submitter)
-            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
+            .WithCommandId(commandId ?? new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
             .WithWorkflowId(new RuntimeCommands.WorkflowId(workflowId));
-
-    private static ExerciseOutcome<T> ToOutcome<T>(ParsedLedgerError parsed) =>
-        parsed.ErrorId.Length > 0
-            ? new ExerciseOutcome<T>.DamlError(parsed.Category, parsed.ErrorId, parsed.Message, parsed.Metadata)
-            : new ExerciseOutcome<T>.InfraError(parsed.StatusCode, parsed.Message);
-
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        if (response.IsSuccessStatusCode)
-        {
-            return;
-        }
-
-        var parsed = await RestErrorParser.ParseAsync(response, cancellationToken).ConfigureAwait(false);
-        throw ToException(parsed);
-    }
-
-    private static LedgerOperationException ToException(ParsedLedgerError parsed) =>
-        parsed.ErrorId.Length > 0
-            ? new LedgerOperationException(parsed.Message, parsed.Category, parsed.ErrorId, parsed.Metadata)
-            : new LedgerOperationException(parsed.Message, parsed.StatusCode);
-
-    private static CancellationTokenSource? CreateTimeoutSource(TimeSpan? timeout, CancellationToken cancellationToken)
-    {
-        if (timeout is not { } window)
-            return null;
-
-        var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        source.CancelAfter(window);
-        return source;
-    }
 
     /// <summary>
     /// No-op: <see cref="RestLedgerClient"/> holds no disposable resources of its own — its
@@ -696,8 +728,17 @@ public sealed partial class RestLedgerClient : Canton.Ledger.Abstractions.ICanto
     [LoggerMessage(Level = LogLevel.Debug, Message = "Subscribe stream for {TemplateType} skipped variant {Variant}")]
     private static partial void LogStreamVariantSkipped(ILogger logger, string templateType, string variant);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Stream window request failed with status {StatusCode} — surfaced in-band as a terminal StreamError: {Detail}")]
+    private static partial void LogStreamWindowFailed(ILogger logger, int statusCode, string detail);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Stream window response body from {Path} could not be decoded — surfaced in-band as a terminal StreamError")]
+    private static partial void LogStreamWindowBodyUndecodable(ILogger logger, string path, Exception exception);
+
     [LoggerMessage(
-        Level = LogLevel.Error,
-        Message = "The submission committed, but the transaction in the participant's response could not be projected — surfaced as an InfraError outcome")]
-    private static partial void LogTransactionResponseUndecodable(ILogger logger, Exception exception);
+        Level = LogLevel.Warning,
+        Message = "The participant answered {WindowCount} consecutive windows on {Path} from offset {Offset} " +
+                  "without advancing it and without holding it for the stream_idle_timeout_ms it was sent; that " +
+                  "hold is this stream's only pacing and the client adds none of its own")]
+    private static partial void LogStreamWindowUnpaced(
+        ILogger logger, long windowCount, string path, long offset);
 }

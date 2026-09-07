@@ -17,10 +17,11 @@ namespace Canton.Ledger.Abstractions;
 /// abstraction — fire-and-forget submission, the command completion stream,
 /// connected-synchronizer and Ledger API version discovery, offset/id point reads,
 /// tree-shaped submission, and traffic-cost estimation.
-/// This is the type registered in dependency injection (alongside <see cref="ILedgerClient"/>,
-/// which resolves to the same instance), so consumers of the flagship fire path
-/// reach these operations through the injected abstraction without downcasting to the
-/// concrete <c>LedgerClient</c> — keeping the client mockable and decoratable.
+/// This is the type registered in dependency injection, alongside <see cref="ILedgerClient"/> and the
+/// narrower reader, writer and streamer service types, all served by one adapter registration — under
+/// a singleton transport they resolve to the same instance, under a transient one to an adapter each.
+/// So consumers of the flagship fire path reach these operations through the injected abstraction
+/// without downcasting to the concrete <c>LedgerClient</c> — keeping the client mockable and decoratable.
 /// </summary>
 public interface ICantonLedgerClient : ILedgerClient
 {
@@ -43,8 +44,14 @@ public interface ICantonLedgerClient : ILedgerClient
     /// participant may have accepted the first attempt before the failure
     /// surfaced.
     /// </remarks>
+    /// <param name="submission">The commands to hand to the participant.</param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<RuntimeCommands.CommandId> SubmitAsync(
         RuntimeCommands.CommandsSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -62,8 +69,14 @@ public interface ICantonLedgerClient : ILedgerClient
     /// recorded — minted here when omitted — so a retry after a transport failure must resubmit with
     /// this same id for ledger-side deduplication.
     /// </remarks>
+    /// <param name="submission">The reassignment submission to hand to the participant.</param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
         ReassignmentSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -91,7 +104,7 @@ public interface ICantonLedgerClient : ILedgerClient
         ReassignmentSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Submits commands, waits for the resulting transaction, and returns it with its parent/child
@@ -152,20 +165,20 @@ public interface ICantonLedgerClient : ILedgerClient
     /// </para>
     /// <para>
     /// This is a materializing convenience, not a streaming read: it cannot hand a fault back
-    /// in-band, so a snapshot that faults, carries a row the projector could not classify, ends
-    /// without its terminal checkpoint, or carries a view that does not decode into
-    /// <typeparamref name="TView"/> throws <see cref="LedgerOperationException"/> rather than
+    /// in-band, so a snapshot that faults, carries a row the projector could not classify, or ends
+    /// without its terminal checkpoint throws <see cref="LedgerOperationException"/> rather than
     /// returning a short list that looks complete. The in-band terminal-<c>StreamError</c>
     /// contract binds the <c>await foreach</c> streaming surfaces; stay on
-    /// <see cref="ILedgerStreamer.SubscribeActiveAsync{T}"/> for value-shaped fault handling or
-    /// when the snapshot's resume ticket matters, since the terminal checkpoint is consumed and
-    /// discarded here.
+    /// <see cref="ILedgerStreamer.SubscribeActiveAsync{TInterface, TView}"/> for value-shaped
+    /// fault handling or when the snapshot's resume ticket matters, since the terminal checkpoint
+    /// is consumed and discarded here.
     /// </para>
     /// <para>
     /// Both shipped transports project the participant-computed view, so both serve this method.
     /// A snapshot row whose view the participant did not compute — an absent view, or one carrying
-    /// a <c>viewStatus</c> other than <c>OK</c> — reaches the drain as an unclassified row and
-    /// throws <see cref="LedgerOperationException"/> rather than yielding an empty view record.
+    /// a <c>viewStatus</c> other than <c>OK</c> — and a row whose view did not decode into
+    /// <typeparamref name="TView"/> both reach the drain as an unclassified row and throw
+    /// <see cref="LedgerOperationException"/> rather than yielding an empty view record.
     /// </para>
     /// </remarks>
     /// <typeparam name="TInterface">The generated Daml interface marker (e.g. <c>IHolding</c>).</typeparam>
@@ -174,8 +187,7 @@ public interface ICantonLedgerClient : ILedgerClient
     /// <param name="activeAtOffset">Snapshot offset; <see langword="null"/> means the current ledger end.</param>
     /// <param name="cancellationToken">Cancels the underlying snapshot stream cleanly.</param>
     /// <exception cref="LedgerOperationException">
-    /// The snapshot faulted, carried an unclassified row, carried a view that did not decode into
-    /// <typeparamref name="TView"/>, or ended without its terminal checkpoint.
+    /// The snapshot faulted, carried an unclassified row, or ended without its terminal checkpoint.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryActiveAsync<TInterface, TView>(
@@ -183,9 +195,10 @@ public interface ICantonLedgerClient : ILedgerClient
         LedgerOffset? activeAtOffset = null,
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord =>
-        InterfaceViewSnapshot.DrainAsync<TInterface, TView>(
-            SubscribeActiveAsync<TInterface>(submitter, activeAtOffset, cancellationToken),
+        where TView : IDamlRecord<TView> =>
+        InterfaceViewSnapshot.DrainAsync(
+            SubscribeActiveAsync(
+                new ViewDescriptor<TInterface, TView>(), submitter, activeAtOffset, cancellationToken),
             cancellationToken);
 
     /// <summary>
@@ -209,6 +222,24 @@ public interface ICantonLedgerClient : ILedgerClient
     /// gets an <see cref="OperationCanceledException"/>, not a
     /// <see cref="CompletionStreamEvent.StreamError"/>.
     /// </summary>
+    /// <remarks>
+    /// Enumeration may end at any time, possibly having yielded nothing. A caller that wants
+    /// to keep following reopens from the highest offset it has observed — which may be the
+    /// offset it passed in as <paramref name="beginExclusiveOffset"/> — and supplies its own
+    /// backoff, because the call may return immediately. An ordinary ending carries no closing
+    /// entry: <see cref="CompletionStreamEvent.Checkpoint"/> is emitted on the participant's own
+    /// cadence rather than as a terminator, so a caller that observed nothing resumes from the
+    /// offset it started from, and an immediate reopen is the right answer.
+    /// <para>
+    /// An enumeration that ends with a terminal <see cref="CompletionStreamEvent.StreamError"/>
+    /// invites a reopen only when its <see cref="CompletionStreamEvent.StreamError.ErrorId"/> says
+    /// the condition is self-clearing: <c>STALE_STREAM_AUTHORIZATION</c> resolves on a fresh stream,
+    /// or fails with an explicit authentication or permission denial, while a fault the participant
+    /// will report again — a window the participant answered with <c>413</c>, say — reproduces
+    /// itself on the next call. The client retries none of them; reading the code is how a caller
+    /// tells the two apart.
+    /// </para>
+    /// </remarks>
     IAsyncEnumerable<CompletionStreamEvent> CompletionStreamAsync(
         RuntimeCommands.SubmitterInfo submitter,
         long beginExclusiveOffset = 0L,
@@ -226,17 +257,26 @@ public interface ICantonLedgerClient : ILedgerClient
     /// Optional participant id, for a participant querying another participant's
     /// mapping. Null defaults to the host participant.
     /// </param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<ConnectedSynchronizer>> GetConnectedSynchronizersAsync(
         Party? party = null,
         string? participantId = null,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the Ledger API version reported by the participant.
     /// </summary>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<string> GetLedgerApiVersionAsync(CancellationToken cancellationToken = default);
+    Task<string> GetLedgerApiVersionAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Looks up a single update by its absolute offset, projected the same way as
@@ -247,6 +287,9 @@ public interface ICantonLedgerClient : ILedgerClient
     /// </summary>
     /// <param name="offset">The absolute offset of the update to look up. Must be positive.</param>
     /// <param name="submitter">The parties whose visibility scopes the lookup.</param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="offset"/> is zero or negative.
@@ -260,6 +303,7 @@ public interface ICantonLedgerClient : ILedgerClient
     Task<TransactionResult> GetUpdateByOffsetAsync(
         long offset,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -271,6 +315,9 @@ public interface ICantonLedgerClient : ILedgerClient
     /// </summary>
     /// <param name="updateId">The id of the update to look up.</param>
     /// <param name="submitter">The parties whose visibility scopes the lookup.</param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">
     /// The update with <paramref name="updateId"/> is a reassignment or topology
@@ -281,6 +328,50 @@ public interface ICantonLedgerClient : ILedgerClient
     Task<TransactionResult> GetUpdateByIdAsync(
         string updateId,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Looks up a single update by its absolute offset and returns it with its parent/child hierarchy
+    /// intact — which exercise caused which sub-creates and sub-exercises. The tree-shaped counterpart
+    /// to <see cref="GetUpdateByOffsetAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Always reads the participant's ledger-effects view, because hierarchy is only meaningful over
+    /// creates and exercises. <see cref="GetUpdateByOffsetAsync"/> asks for that same view over the same
+    /// RPC and differs only in projection: it flattens the response into created/archived/exercised
+    /// lists, while this method rebuilds the parent/child structure from the node ids already carried on
+    /// those events. A caller wanting both shapes reads once and flattens the tree with
+    /// <see cref="TransactionTreeExtensions.ToTransactionResult"/> rather than reading twice.
+    /// </para>
+    /// <para>
+    /// The <paramref name="submitter"/>'s combined <c>ActAs ∪ ReadAs</c> parties scope visibility, with
+    /// no template or interface restriction. An event whose parent exercise the participant filtered
+    /// out attaches to the nearest enclosing exercise those parties can still see, or surfaces as a
+    /// root when none remains, so node-id gaps are normal and tolerated.
+    /// </para>
+    /// </remarks>
+    /// <param name="offset">The absolute offset of the update to look up. Must be positive.</param>
+    /// <param name="submitter">The parties whose visibility scopes the lookup.</param>
+    /// <param name="timeout">
+    /// Per-call deadline overriding the client's configured request timeout.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="offset"/> is zero or negative.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The update at <paramref name="offset"/> is a reassignment or topology transaction rather than a
+    /// ledger transaction, its payload is malformed, or its node ids cannot describe a tree — the last
+    /// carried as a <c>MalformedTransactionTreeException</c> in
+    /// <see cref="Exception.InnerException"/>, so catch this base type rather than the derived one.
+    /// A tree that cannot be rebuilt fails loudly instead of coming back silently wrong.
+    /// </exception>
+    Task<TransactionTree> GetUpdateTreeByOffsetAsync(
+        long offset,
+        RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

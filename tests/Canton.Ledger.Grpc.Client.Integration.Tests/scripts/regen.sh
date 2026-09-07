@@ -87,6 +87,16 @@ if grep -rqn 'ArgumentEncoder = _ => DamlUnit.Instance' "${GEN}"; then
   exit 1
 fi
 
+if ! grep -rqn 'ViewDescriptor<' "${GEN}"; then
+  echo "ERROR: no emitted interface carries a ViewDescriptor witness; the Archive-argument guardrail above is satisfied by 0.4.x output too, so it cannot catch this. The codegen bundle that ran predates 0.5.0-preview.1 (likely a stale dpm component reused from cache despite the pinned digest). Refusing to overwrite ${OUT}." >&2
+  exit 1
+fi
+
+if ! grep -rqn 'KeyDescriptor<' "${GEN}"; then
+  echo "ERROR: no emitted template carries a KeyDescriptor witness; the keyed template did not reach the emitted tree (a stale DAR, or a keyless RichTypes.daml). Refusing to overwrite ${OUT}." >&2
+  exit 1
+fi
+
 emitted_cs_count="$(find "${GEN}" -name '*.cs' | wc -l | tr -d ' ')"
 if [ "${emitted_cs_count}" -eq 0 ]; then
   echo "ERROR: dpm codegen-cs produced no .cs files under ${GEN}; the Archive-argument guardrail above passes vacuously on empty output. Refusing to overwrite ${OUT}." >&2

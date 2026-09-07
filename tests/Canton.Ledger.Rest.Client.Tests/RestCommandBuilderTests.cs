@@ -18,7 +18,7 @@ public class RestCommandBuilderTests
     private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
     private static readonly RuntimeIdentifier DisclosedTemplateId = new("disclosed-pkg", "Disclosed", "Contract");
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -27,6 +27,9 @@ public class RestCommandBuilderTests
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
         public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private static RuntimeCommands.CreateCommand Create() =>
@@ -38,6 +41,107 @@ public class RestCommandBuilderTests
             new ContractId<TestTemplate>(cid),
             new RuntimeCommands.ChoiceName(choice),
             DamlUnit.Instance);
+
+    private static readonly DateTimeOffset LedgerTimeBound =
+        new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void BuildCommands_maps_a_relative_min_ledger_time_to_minLedgerTimeRel()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromSeconds(5)));
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: "test-user");
+
+        commands.MinLedgerTimeRel.Should().Be(
+            "5s",
+            "a caller's do-not-commit-before bound is dropped on the floor while the field stays unset");
+        commands.MinLedgerTimeAbs.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_maps_an_absolute_min_ledger_time_to_minLedgerTimeAbs()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Absolute(LedgerTimeBound));
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: "test-user");
+
+        commands.MinLedgerTimeAbs.Should().Be(LedgerTimeBound);
+        commands.MinLedgerTimeRel.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_writes_a_sub_second_relative_bound_as_a_fractional_protobuf_duration()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromMilliseconds(1500)));
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: "test-user");
+
+        commands.MinLedgerTimeRel.Should().Be("1.5s");
+    }
+
+    [Fact]
+    public void BuildCommands_omits_minLedgerTimeRel_from_the_wire_when_the_bound_is_absolute()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Absolute(LedgerTimeBound));
+
+        var json = JsonSerializer.Serialize(
+            RestCommandBuilder.BuildCommands(submission, userId: null), RestRefitSettings.SerializerOptions);
+
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.TryGetProperty("minLedgerTimeRel", out _).Should().BeFalse(
+            "the unset half of a mutually exclusive pair must never be written at all — the generated "
+            + "property is a non-nullable string, so filling it with null relies on the serializer to "
+            + "undo an assignment the type says cannot happen");
+        document.RootElement.TryGetProperty("minLedgerTimeAbs", out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildCommands_omits_minLedgerTimeAbs_from_the_wire_when_the_bound_is_relative()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromSeconds(5)));
+
+        var json = JsonSerializer.Serialize(
+            RestCommandBuilder.BuildCommands(submission, userId: null), RestRefitSettings.SerializerOptions);
+
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.TryGetProperty("minLedgerTimeAbs", out _).Should().BeFalse();
+        document.RootElement.TryGetProperty("minLedgerTimeRel", out _).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-500)]
+    [InlineData(-1500)]
+    public void A_negative_relative_bound_is_refused_before_it_can_reach_the_builder(int milliseconds)
+    {
+        var act = () => new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromMilliseconds(milliseconds));
+
+        act.Should().Throw<ArgumentOutOfRangeException>(
+            "a do-not-commit-before bound that has already passed is not a bound, so the bound type "
+            + "refuses it before RestWireConversions.ToWireDuration is ever reached");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_both_min_ledger_time_bounds_unset_when_the_submission_imposes_none()
+    {
+        var commands = RestCommandBuilder.BuildCommands(
+            RuntimeCommands.CommandsSubmission.Single(Create()).WithActAs(Alice), userId: "test-user");
+
+        commands.MinLedgerTimeAbs.Should().BeNull();
+        commands.MinLedgerTimeRel.Should().BeNull();
+    }
 
     [Fact]
     public void BuildCommands_sets_command_id_workflow_id_user_id_and_act_as()

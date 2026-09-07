@@ -13,7 +13,8 @@ namespace Canton.Ledger.Testing.Helpers;
 /// <c>MarkerMatcher</c> matches wire events against, so every transport must describe the same
 /// template for a cross-transport comparison to mean anything.
 /// </summary>
-public sealed record TemplateMarker(string Owner) : ITemplate
+public sealed record TemplateMarker(
+    [property: DamlFieldAttribute("owner")] string Owner) : ITemplate, IDamlRecord<TemplateMarker>
 {
     /// <summary>The template identity wire events must carry to classify as this marker.</summary>
     public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
@@ -33,13 +34,17 @@ public sealed record TemplateMarker(string Owner) : ITemplate
     /// <inheritdoc />
     public DamlRecord ToRecord() => DamlRecord.Create(
         DamlField.Create("owner", new DamlParty(Owner)));
+
+    /// <summary>Creates an instance from a DamlRecord.</summary>
+    public static TemplateMarker FromRecord(DamlRecord record) =>
+        new(record.GetRequiredField("owner").As<DamlParty>().Value);
 }
 
 /// <summary>
 /// The interface marker both transports' stream tests subscribe as <c>T</c> when exercising the
 /// interface-typed read path.
 /// </summary>
-public sealed record InterfaceMarker : IDamlInterface
+public sealed record InterfaceMarker : IDamlInterface, IHasView<InterfaceMarkerView>
 {
     /// <summary>The interface identity wire events must implement to classify as this marker.</summary>
     public static RuntimeIdentifier InterfaceId { get; } = new("iface-pkg", "Token.Api", "IHolding");
@@ -61,12 +66,31 @@ public sealed record InterfaceMarker : IDamlInterface
 }
 
 /// <summary>
+/// The view record <see cref="InterfaceMarker"/> projects. Its single text field carries
+/// <see cref="ActiveContractScenario.InterfaceViewValue"/> on a participant-computed view, which is
+/// how the parity suite tells a decoded view apart from the implementing template's create
+/// argument.
+/// </summary>
+/// <param name="Amount">The amount the participant-computed view reports.</param>
+public sealed record InterfaceMarkerView(
+    [property: DamlFieldAttribute("amount")] string Amount) : IDamlRecord<InterfaceMarkerView>
+{
+    /// <inheritdoc />
+    public DamlRecord ToRecord() => DamlRecord.Create(
+        DamlField.Create("amount", new DamlText(Amount)));
+
+    /// <summary>Creates an instance from a DamlRecord.</summary>
+    public static InterfaceMarkerView FromRecord(DamlRecord record) =>
+        new(record.GetRequiredField("amount").As<DamlText>().Value);
+}
+
+/// <summary>
 /// The view record <see cref="IViewedInterfaceMarker"/> projects, shaped exactly as
 /// <c>daml-codegen-csharp</c> emits an interface view: a <see cref="DamlFieldAttribute"/> per
 /// property and a <c>public static FromRecord(DamlRecord)</c> factory.
 /// </summary>
 public sealed record ViewedInterfaceView(
-    [property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord
+    [property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord<ViewedInterfaceView>
 {
     /// <inheritdoc />
     public DamlRecord ToRecord() => DamlRecord.Create(

@@ -36,7 +36,7 @@ public sealed class FakeLedgerCompletionParityTests : LedgerCompletionParityTest
             .Single(CreateCommand.For(new Marker(owner)))
             .WithActAs(owner)
             .WithCommandId(expectedCommandId);
-        var returnedCommandId = await client.SubmitAsync(submission, cancellationToken);
+        var returnedCommandId = await client.SubmitAsync(submission, cancellationToken: cancellationToken);
 
         var probe = new CompletionProbe(client, owner, BeginExclusiveOffset: 0, returnedCommandId);
         return new CapabilityLane<CompletionProbe>(probe, client.DisposeAsync);

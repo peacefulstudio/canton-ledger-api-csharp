@@ -29,10 +29,10 @@ when omitted).
 | Type | Purpose |
 |------|---------|
 | `FakeLedgerClient` | Configurable in-memory `ICantonLedgerClient` (and thus `ILedgerClient`). Build it with the fluent builder from `FakeLedgerClient.Create()`. Any member, Daml type, or Canton read you did not stage throws a descriptive `NotSupportedException`. |
-| `FakeLedgerClientBuilder` | `WithLedgerEnd` (the ledger end *before* any write — stage an event for a bounded window opened around the `n`th write at that offset plus `n`), `WithActiveContracts<T>`, `WithContractEvents<T>`, `WithLedgerEffects<T>`, `WithExerciseResult<TResult>`, `WithCreateResult<TTemplate>`, `WithSubmissionOutcome`, `WithTransactionTree`, `WithReassignmentResult<T>`, `WithCompletionEvents`, `WithConnectedSynchronizers`, `WithLedgerApiVersion`, `WithTrafficCostEstimate` (staging `null` replays a participant that served no estimation), `WithUpdateByOffset`, `WithUpdateById`, then `Build()`. |
-| `LedgerEvents` | Factories for `AcsSnapshotEntry<T>` variants: `Created`, `Checkpoint`, `StreamError`, `Unclassified`. |
-| `ContractEvents` | Factories for `ContractStreamEvent<T>` variants: `Created`, `Archived`, `Assigned`, `Unassigned`, `Exercised`, `Checkpoint`, `StreamError`, `Unclassified`. |
-| `LedgerOutcomes` | Factories for `ExerciseOutcome<T>` variants: `One`, `None`, `Many`, `DamlError`, `InfraError`. |
+| `FakeLedgerClientBuilder` | `WithLedgerEnd` (the ledger end *before* any write — stage an event for a bounded window opened around the `n`th write at that offset plus `n`), `WithActiveContracts<T>` (the staged snapshot must end on a single terminal `Checkpoint` or `StreamError`, as a participant's does — `WithMalformedActiveContracts<T>` stages one that deliberately does not), `WithContractEvents<T>`, `WithLedgerEffects<T>`, `WithExerciseResult<TResult>`, `WithCreateResult<TTemplate>`, `WithSubmissionOutcome`, `WithTransactionTree`, `WithReassignmentResult<T>`, `WithCompletionEvents`, `WithConnectedSynchronizers`, `WithLedgerApiVersion`, `WithTrafficCostEstimate` (staging `null` replays a participant that served no estimation), `WithUpdateByOffset`, `WithUpdateById`, then `Build()`. |
+| `LedgerEvents` | Factories for `AcsSnapshotEntry<T>` variants, all constrained `where T : ITemplate, IDamlRecord<T>`: `Created` (typed `T` payload plus a `ContractKey? key`), `Checkpoint`, `StreamError` (an optional `DamlErrorCategory?` and source `Exception?` after the status code and message), `Unclassified` (a nullable `LedgerOffset?` and an `UnclassifiedKind`). |
+| `ContractEvents` | Factories for `ContractStreamEvent<T>` variants, all constrained `where T : ITemplate, IDamlRecord<T>`: `Created` and `Assigned` (typed `T` payload plus a `ContractKey? key`), `Archived`, `Unassigned`, `Exercised`, `Checkpoint`, `StreamError` (an optional `DamlErrorCategory?` and source `Exception?` after the status code and message), `Unclassified` (an `UnclassifiedKind`). |
+| `LedgerOutcomes` | Factories for `ExerciseOutcome<T>` variants: `One`, `None`, `Many`, `DamlError`, `InfraError` (an optional `DamlErrorCategory?` before the source `Exception?`). |
 | `LedgerResults` | Factories for `TransactionResult`, `SubmitAndWaitResult`, `Contract<T>`. |
 | `FakeAdminClient` | Configurable in-memory `IAdminClient`. Build it with `FakeAdminClient.Create()`. Query-style members you did not stage throw `NotSupportedException`; the void command members (`GrantUserRightsAsync`, `RevokeUserRightsAsync`, `UploadDarAsync`, `ValidateDarAsync`) always succeed. |
 | `FakeAdminClientBuilder` | `WithParticipantId`, `WithAllocatedParty`, `WithParties`, `WithUser`, `WithUsers`, `WithUserRights`, `WithKnownPackages`, `WithPackage`, `WithVettedPackages`, then `Build()`. |
@@ -57,7 +57,8 @@ ILedgerClient client = FakeLedgerClient.Create()
     .WithActiveContracts(
         LedgerEvents.Created(
             new ContractId<DemoAsset>("cid1"),
-            asset.ToRecord(),
+            asset,
+            key: null,
             LedgerOffset.At(1),
             (SynchronizerId)"sync1",
             new[] { owner }),
@@ -114,13 +115,23 @@ submission; stage a success or a failure to drive either branch:
 using Canton.Ledger.Testing;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 
 ILedgerClient happy = FakeLedgerClient.Create()
     .WithSubmissionOutcome(LedgerOutcomes.One(LedgerResults.Transaction(
         "update-1",
         LedgerOffset.At(5),
-        new[] { new CreatedContract("cid1", DemoAsset.TemplateId, "{}") },
+        [
+            new CreatedContract(
+                "event-1",
+                "cid1",
+                DemoAsset.TemplateId,
+                DamlRecord.Create(),
+                WitnessParties: [],
+                Signatories: [],
+                Observers: []),
+        ],
         archivedContractIds: [],
         (CommandId)"cmd-1")))
     .Build();

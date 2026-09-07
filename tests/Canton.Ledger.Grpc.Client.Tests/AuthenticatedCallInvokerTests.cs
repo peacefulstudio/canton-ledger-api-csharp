@@ -8,6 +8,7 @@ using Com.Daml.Ledger.Api.V2;
 using AwesomeAssertions;
 using Google.Protobuf;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 using Status = Grpc.Core.Status;
@@ -40,8 +41,11 @@ public class AuthenticatedCallInvokerTests
             Retry = retry ?? new RetryOptions(),
         };
 
-    private AuthenticatedCallInvoker CreateInvoker(ITokenProvider tokenProvider, LedgerClientOptions? options = null) =>
-        new(_inner, new LedgerCallInvoker(options ?? Options(), tokenProvider));
+    private AuthenticatedCallInvoker CreateInvoker(
+        ITokenProvider tokenProvider,
+        LedgerClientOptions? options = null,
+        ILogger? logger = null) =>
+        new(_inner, new LedgerCallInvoker(options ?? Options(), tokenProvider), logger);
 
     [Fact]
     public async Task AsyncUnaryCall_attaches_a_bearer_authorization_header_from_the_token_provider()
@@ -296,6 +300,37 @@ public class AuthenticatedCallInvokerTests
             () => Status.DefaultSuccess,
             () => new Metadata(),
             () => { });
+
+    [Fact]
+    public async Task AsyncServerStreamingCall_logs_a_failing_dispose_of_an_abandoned_call_instead_of_swallowing_it()
+    {
+        var disposeFailure = new ObjectDisposedException("call");
+        _inner
+            .AsyncServerStreamingCall(
+                Arg.Any<Method<GetUpdatesRequest, GetUpdatesResponse>>(),
+                Arg.Any<string?>(),
+                Arg.Any<CallOptions>(),
+                Arg.Any<GetUpdatesRequest>())
+            .Returns(new AsyncServerStreamingCall<GetUpdatesResponse>(
+                new FakeStreamReader<GetUpdatesResponse>([new GetUpdatesResponse()]),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => throw disposeFailure));
+
+        using var loggerFactory = new CapturingLoggerFactory();
+        var invoker = CreateInvoker(ITokenProvider.None, logger: loggerFactory.CreateLogger("test"));
+
+        var call = invoker.AsyncServerStreamingCall(
+            ServerStreamingMethod, host: null, CallOptionsFor(), new GetUpdatesRequest());
+        await call.ResponseStream.MoveNext(TestContext.Current.CancellationToken);
+
+        var dispose = () => call.Dispose();
+
+        dispose.Should().NotThrow("a best-effort dispose of an abandoned call must not surface to the caller");
+        loggerFactory.Records.Should().Contain(record =>
+            record.Level == LogLevel.Debug && record.Exception == disposeFailure);
+    }
 
     private static AsyncUnaryCall<T> Faulted<T>(RpcException exception) =>
         new(

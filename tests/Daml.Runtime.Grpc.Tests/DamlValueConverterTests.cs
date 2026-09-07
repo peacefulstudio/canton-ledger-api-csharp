@@ -302,6 +302,27 @@ public class DamlValueConverterTests
     }
 
     [Fact]
+    public void ToProtoValue_encodes_a_present_DamlOptionalChain_level_as_a_nested_Optional()
+    {
+        var chain = DamlOptionalChain.Some(DamlOptionalChain.None);
+
+        var protoValue = DamlValueConverter.ToProtoValue(chain);
+
+        protoValue.Optional.Should().NotBeNull();
+        protoValue.Optional.Value.Optional.Should().NotBeNull();
+        protoValue.Optional.Value.Optional.Value.Should().BeNull();
+    }
+
+    [Fact]
+    public void ToProtoValue_encodes_an_absent_DamlOptionalChain_level_as_an_empty_Optional()
+    {
+        var protoValue = DamlValueConverter.ToProtoValue(DamlOptionalChain.None);
+
+        protoValue.Optional.Should().NotBeNull();
+        protoValue.Optional.Value.Should().BeNull();
+    }
+
+    [Fact]
     public void ToProtoValue_converts_text_map()
     {
         var map = new DamlTextMap(new Dictionary<string, DamlValue>

@@ -54,7 +54,7 @@ public interface IPqsClient
     Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryAsync<TInterface, TView>(
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord;
+        where TView : IDamlRecord<TView>;
 
     /// <summary>
     /// Queries active contracts matching a filter.
@@ -108,7 +108,7 @@ public interface IPqsClient
         PqsPage page,
         CancellationToken cancellationToken = default)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord;
+        where TView : IDamlRecord<TView>;
 
     /// <summary>
     /// Queries a bounded page of active contracts matching a filter, applying

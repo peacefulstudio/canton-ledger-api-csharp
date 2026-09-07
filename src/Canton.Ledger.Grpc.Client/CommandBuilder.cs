@@ -5,6 +5,7 @@ using Canton.Ledger.Abstractions;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Grpc;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using static Canton.Ledger.Kernel.Commands.ReassignmentCommandPolicy;
 using RuntimeCommands = Daml.Runtime.Commands;
 using ProtoUnassignCommand = Com.Daml.Ledger.Api.V2.UnassignCommand;
@@ -50,6 +51,13 @@ internal sealed class CommandBuilder
         if (submission.DisclosedContracts is { Count: > 0 } disclosedContracts)
         {
             commands.DisclosedContracts.AddRange(disclosedContracts.Select(ToProtoDisclosedContract));
+        }
+
+        if (submission.MinLedgerTime is { } minLedgerTime)
+        {
+            var (absolute, relative) = ToProtoMinLedgerTime(minLedgerTime);
+            commands.MinLedgerTimeAbs = absolute;
+            commands.MinLedgerTimeRel = relative;
         }
 
         foreach (var cmd in submission.Commands)
@@ -104,6 +112,12 @@ internal sealed class CommandBuilder
         reassignmentCommands.Commands.Add(ToProtoReassignmentCommand(submission.Command));
         return reassignmentCommands;
     }
+
+    private static (Timestamp? Absolute, Duration? Relative) ToProtoMinLedgerTime(
+        RuntimeCommands.MinLedgerTime bound) =>
+        bound.Match<(Timestamp?, Duration?)>(
+            absolute: instant => (Timestamp.FromDateTimeOffset(instant), null),
+            relative: delay => (null, Duration.FromTimeSpan(delay)));
 
     private static DisclosedContract ToProtoDisclosedContract(RuntimeCommands.DisclosedContract disclosed) =>
         new()

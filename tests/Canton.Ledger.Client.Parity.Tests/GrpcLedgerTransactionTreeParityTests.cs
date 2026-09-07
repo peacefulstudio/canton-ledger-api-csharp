@@ -5,6 +5,7 @@ using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
 using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
 using Xunit;
 
@@ -33,6 +34,7 @@ public sealed class GrpcLedgerTransactionTreeParityTests : LedgerTransactionTree
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        ServiceProvider? services = null;
         try
         {
             await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
@@ -43,15 +45,21 @@ public sealed class GrpcLedgerTransactionTreeParityTests : LedgerTransactionTree
                 .ConfigureAwait(false);
 
             var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-            var client = new LedgerClient(
-                new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = fixture.ValidatorUserId },
-                new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync));
+            services = new ServiceCollection()
+                .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+                .AddLedgerClient(options =>
+                {
+                    options.GrpcAddress = grpcAddress;
+                    options.UserId = fixture.ValidatorUserId;
+                })
+                .BuildServiceProvider();
 
+            var client = services.GetRequiredService<ICantonLedgerClient>();
             return new CapabilityLane<(ICantonLedgerClient, Party)>((client, new Party(party.PartyId)), async () =>
             {
                 try
                 {
-                    await client.DisposeAsync().ConfigureAwait(false);
+                    await services.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
@@ -61,6 +69,11 @@ public sealed class GrpcLedgerTransactionTreeParityTests : LedgerTransactionTree
         }
         catch
         {
+            if (services is not null)
+            {
+                await services.DisposeAsync().ConfigureAwait(false);
+            }
+
             await fixture.DisposeAsync().ConfigureAwait(false);
             throw;
         }

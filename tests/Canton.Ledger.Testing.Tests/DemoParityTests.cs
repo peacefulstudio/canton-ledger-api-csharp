@@ -22,10 +22,12 @@ public class DemoParityTests
             .WithActiveContracts(
                 LedgerEvents.Created(
                     new ContractId<DemoAsset>("cid1"),
-                    asset.ToRecord(),
+                    asset,
+                    null,
                     LedgerOffset.At(1),
                     (SynchronizerId)"sync1",
-                    new[] { owner }))
+                    new[] { owner }),
+                LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(2)))
             .Build();
 
         var result = await AssetAcsQuery.QueryForPartyAsync(client, owner, TestContext.Current.CancellationToken);
@@ -41,7 +43,9 @@ public class DemoParityTests
     public async Task QueryForPartyAsync_throws_on_Unclassified_entry()
     {
         var client = FakeLedgerClient.Create()
-            .WithActiveContracts(LedgerEvents.Unclassified<DemoAsset>(LedgerOffset.At(7), "unmapped-template"))
+            .WithActiveContracts(
+                LedgerEvents.Unclassified<DemoAsset>(LedgerOffset.At(7), UnclassifiedKind.Unknown, "unmapped-template"),
+                LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(8)))
             .Build();
 
         var act = () => AssetAcsQuery.QueryForPartyAsync(client, new Party("bob"), TestContext.Current.CancellationToken);
@@ -59,7 +63,8 @@ public class DemoParityTests
             .WithActiveContracts(
                 LedgerEvents.Created(
                     new ContractId<DemoAsset>("cid1"),
-                    asset.ToRecord(),
+                    asset,
+                    null,
                     LedgerOffset.At(1),
                     (SynchronizerId)"sync1",
                     new[] { owner }),
@@ -101,7 +106,7 @@ internal static class AssetAcsQuery
             switch (entry)
             {
                 case AcsSnapshotEntry<DemoAsset>.Created created:
-                    var asset = DemoAsset.FromRecord(created.Payload);
+                    var asset = created.Payload;
                     results.Add(new ProjectedAsset(
                         (string)created.ContractId,
                         (string)asset.Owner,
@@ -112,7 +117,7 @@ internal static class AssetAcsQuery
                     break;
                 case AcsSnapshotEntry<DemoAsset>.Unclassified unclassified:
                     throw new InvalidOperationException(
-                        $"Unclassified ACS snapshot entry at offset {unclassified.Offset.Value}: {unclassified.Kind}");
+                        $"Unclassified ACS snapshot entry at offset {unclassified.Offset?.Value}: {unclassified.RawKind ?? unclassified.Kind.ToString()}");
                 case AcsSnapshotEntry<DemoAsset>.StreamError streamError:
                     throw new InvalidOperationException(
                         $"ACS snapshot stream failed with status {streamError.StatusCode}: {streamError.Message}");

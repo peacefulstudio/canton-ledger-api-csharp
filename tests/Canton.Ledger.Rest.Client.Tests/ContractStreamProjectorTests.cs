@@ -19,6 +19,46 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class ContractStreamProjectorTests
 {
+
+    private sealed record TemplateMarker(DamlRecord Record) : ITemplate, IDamlRecord<TemplateMarker>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
+
+        public static string PackageId => "tmpl-pkg";
+
+        public static string PackageName => "token-impl";
+
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+
+        public DamlRecord ToRecord() => Record;
+
+        public static TemplateMarker FromRecord(DamlRecord record) => new(record);
+    }
+
+    private sealed record CirceMarker(
+        [property: DamlFieldAttribute("owner")] Party Owner,
+        [property: DamlFieldAttribute("amount")] decimal Amount) : ITemplate, IDamlRecord<CirceMarker>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
+
+        public static string PackageId => "tmpl-pkg";
+
+        public static string PackageName => "token-impl";
+
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+
+        public DamlRecord ToRecord() => DamlRecord.Create(
+            DamlField.Create("owner", Owner.ToDamlValue()),
+            DamlField.Create("amount", new DamlNumeric(Amount)));
+
+        public static CirceMarker FromRecord(DamlRecord record) => new(
+            Party.FromDamlValue(record.GetRequiredField("owner").As<DamlParty>()),
+            record.GetRequiredField("amount").As<DamlNumeric>().Value);
+    }
     private static async Task<GetActiveContractsResponse> ActiveContractsResponseFrom(string json)
     {
         var (api, transport) = RestApiFactory.Build<IStateServiceApi>();
@@ -63,7 +103,7 @@ public class ContractStreamProjectorTests
         created.Offset.Value.Should().Be(42L);
         created.SynchronizerId.Should().Be(new SynchronizerId("sync-1"));
         created.WitnessParties.Should().ContainSingle().Which.Should().Be((Party)"alice::ns1");
-        created.Payload.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice::ns1");
+        created.Payload.Record.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice::ns1");
     }
 
     [Fact]
@@ -89,7 +129,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
@@ -115,7 +155,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -134,7 +174,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(0L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(0L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
@@ -153,7 +193,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response, snapshotOffset: LedgerOffset.At(77));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
@@ -222,7 +262,7 @@ public class ContractStreamProjectorTests
         projected.Should().HaveCount(2);
         projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
         var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(50L));
         unclassified.Kind.Should().Be(UnclassifiedKind.MissingSynchronizerId);
     }
 
@@ -236,7 +276,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.CreatedEvent);
     }
 
@@ -254,7 +294,7 @@ public class ContractStreamProjectorTests
         projected.Should().HaveCount(2);
         projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
         var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(50L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
@@ -273,7 +313,7 @@ public class ContractStreamProjectorTests
         projected.Should().HaveCount(2);
         projected[0].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>();
         var unclassified = projected[1].Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(50L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
@@ -287,7 +327,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response, snapshotOffset: LedgerOffset.At(77));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(50L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(50L));
         unclassified.Kind.Should().Be(UnclassifiedKind.Unknown);
     }
 
@@ -346,7 +386,7 @@ public class ContractStreamProjectorTests
             response, loggerFactory.CreateLogger("test"));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(42L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(42L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(record => record.Level == LogLevel.Warning);
     }
@@ -376,6 +416,8 @@ public class ContractStreamProjectorTests
             response, loggerFactory.CreateLogger("test"));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Should().BeNull(
+            "with no snapshot offset to fall back on there is no resume point to report");
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(
             record => record.Level == LogLevel.Warning && record.Message.Contains("not-a-number"));
@@ -406,7 +448,7 @@ public class ContractStreamProjectorTests
             response, loggerFactory.CreateLogger("test"), LedgerOffset.At(77));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(
             record => record.Level == LogLevel.Warning
@@ -425,6 +467,8 @@ public class ContractStreamProjectorTests
             response, loggerFactory.CreateLogger("test"));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
+        unclassified.Offset.Should().BeNull(
+            "with no snapshot offset to fall back on there is no resume point to report");
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(
             record => record.Level == LogLevel.Warning && record.Message.Contains("not-a-number"));
@@ -441,7 +485,7 @@ public class ContractStreamProjectorTests
             response, loggerFactory.CreateLogger("test"), LedgerOffset.At(77));
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
-        unclassified.Offset.Value.Should().Be(77L);
+        unclassified.Offset.Should().Be(LedgerOffset.At(77L));
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
         loggerFactory.Records.Should().ContainSingle(
             record => record.Level == LogLevel.Warning
@@ -477,7 +521,7 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("v").Should().BeEquivalentTo(
+        created.Payload.Record.GetRequiredField("v").Should().BeEquivalentTo(
             expected, options => options.PreferringRuntimeMemberTypes());
     }
 
@@ -542,16 +586,17 @@ public class ContractStreamProjectorTests
     }
 
     [Fact]
-    public async Task ProjectActiveContractEntry_decodes_circe_shaped_create_arguments_through_the_daml_json_codec()
+    public async Task ProjectActiveContractEntry_decodes_circe_shaped_create_arguments_against_the_template_type()
     {
         var response = await ActiveContractsResponseWithArguments(
             """{"owner": "alice::ns1", "amount": "10.5"}""");
 
-        var projected = ProjectSingleActiveContractEntry(response);
+        var projected = ContractStreamProjector.ProjectActiveContractEntry<CirceMarker>(response)
+            .Should().ContainSingle().Subject;
 
-        var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        created.Payload.GetRequiredField("owner").As<DamlText>().Value.Should().Be("alice::ns1");
-        created.Payload.GetRequiredField("amount").As<DamlNumeric>().Value.Should().Be(10.5m);
+        var created = projected.Should().BeOfType<ContractStreamEvent<CirceMarker>.Created>().Subject;
+        created.Payload.Owner.Should().Be((Party)"alice::ns1");
+        created.Payload.Amount.Should().Be(10.5m);
     }
 
     [Theory]
@@ -565,6 +610,6 @@ public class ContractStreamProjectorTests
         var projected = ProjectSingleActiveContractEntry(response);
 
         var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
-        created.Payload.Fields.Should().BeEmpty();
+        created.Payload.Record.Fields.Should().BeEmpty();
     }
 }

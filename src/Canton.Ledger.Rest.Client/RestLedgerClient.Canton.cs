@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Streams;
+using Canton.Ledger.Kernel.Wire;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -21,7 +22,7 @@ using WireCompletionStreamResponse = Canton.Ledger.Rest.Client.Raw.CompletionStr
 
 namespace Canton.Ledger.Rest.Client;
 
-public sealed partial class RestLedgerClient
+internal sealed partial class RestLedgerClient
 {
     private const string AsyncSubmitPath = "/v2/commands/async/submit";
     private const string AsyncSubmitReassignmentPath = "/v2/commands/async/submit-reassignment";
@@ -31,9 +32,10 @@ public sealed partial class RestLedgerClient
     private const string UpdateByOffsetPath = "/v2/updates/update-by-offset";
     private const string UpdateByIdPath = "/v2/updates/update-by-id";
     private const string CompletionsPath = "/v2/commands/completions";
-    private const int NoTransportFailureStatusCode = 0;
-    private const string LimitQueryParameter = "limit";
-    private const string StreamIdleTimeoutQueryParameter = "stream_idle_timeout_ms";
+    private const string MissingReassignmentMessage =
+        "Server returned a successful response but no reassignment was present.";
+    private const string MalformedReassignmentBodyPrefix =
+        "Server returned a malformed reassignment response body: ";
 
     /// <inheritdoc />
     /// <remarks>
@@ -41,14 +43,23 @@ public sealed partial class RestLedgerClient
     /// failure or non-success response throws <see cref="LedgerOperationException"/>; the verdict is
     /// observed on the completion stream, not awaited here.
     /// </remarks>
-    public async Task<RuntimeCommands.CommandId> SubmitAsync(
+    public Task<RuntimeCommands.CommandId> SubmitAsync(
         RuntimeCommands.CommandsSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
 
+        return SubmitCoreAsync(submission, timeout, cancellationToken);
+    }
+
+    private async Task<RuntimeCommands.CommandId> SubmitCoreAsync(
+        RuntimeCommands.CommandsSubmission submission,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
         var commands = RestCommandBuilder.BuildCommands(submission, _userId);
-        await FireAsync(AsyncSubmitPath, commands, cancellationToken).ConfigureAwait(false);
+        await FireAsync(AsyncSubmitPath, commands, timeout, cancellationToken).ConfigureAwait(false);
         return (RuntimeCommands.CommandId)commands.CommandId;
     }
 
@@ -59,16 +70,26 @@ public sealed partial class RestLedgerClient
     /// resulting reassignment event is observed on <see cref="SubscribeAsync{T}"/>, not awaited
     /// here.
     /// </remarks>
-    public async Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
+    public Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
         ReassignmentSubmission submission,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
 
+        return SubmitReassignmentCoreAsync(submission, timeout, cancellationToken);
+    }
+
+    private async Task<RuntimeCommands.CommandId> SubmitReassignmentCoreAsync(
+        ReassignmentSubmission submission,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
         var commands = RestCommandBuilder.BuildReassignmentCommands(submission, _userId);
         await FireAsync(
             AsyncSubmitReassignmentPath,
             new Raw.SubmitReassignmentRequest { ReassignmentCommands = commands },
+            timeout,
             cancellationToken).ConfigureAwait(false);
         return (RuntimeCommands.CommandId)commands.CommandId;
     }
@@ -80,106 +101,61 @@ public sealed partial class RestLedgerClient
     /// / <see cref="ContractStreamEvent{T}.Unassigned"/> variant. A structured error maps to a
     /// <see cref="ExerciseOutcome{T}.DamlError"/>; a transport failure, per-call
     /// <paramref name="timeout"/> overrun, or malformed response maps to an
-    /// <see cref="ExerciseOutcome{T}.InfraError"/>, never a thrown exception.
+    /// <see cref="ExerciseOutcome{T}.InfraError"/>, never a thrown exception. Argument validation and
+    /// request construction run before the call is issued, so they throw synchronously to the caller
+    /// rather than through the returned <see cref="Task{TResult}"/>.
     /// </remarks>
-    public async Task<ExerciseOutcome<ContractStreamEvent<T>>> TrySubmitAndWaitForReassignmentAsync<T>(
+    public Task<ExerciseOutcome<ContractStreamEvent<T>>> TrySubmitAndWaitForReassignmentAsync<T>(
         ReassignmentSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(submission);
 
-        var commands = RestCommandBuilder.BuildReassignmentCommands(submission, _userId);
         var submitter = new RuntimeCommands.SubmitterInfo(
             new HashSet<Party> { submission.Submitter }, new HashSet<Party>());
         var request = new Raw.SubmitAndWaitForReassignmentRequest
         {
-            ReassignmentCommands = commands,
+            ReassignmentCommands = RestCommandBuilder.BuildReassignmentCommands(submission, _userId),
             EventFormat = RestSubscribeRequestBuilder.BuildReassignmentEventFormat<T>(submitter),
         };
 
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var timeoutSource = CreateTimeoutSource(timeout, cancellationToken);
-        var requestToken = timeoutSource?.Token ?? cancellationToken;
+        return _calls.TrySendAsync<Raw.SubmitAndWaitForReassignmentResponse, ContractStreamEvent<T>>(
+            new RestCall(
+                HttpMethod.Post, SubmitAndWaitForReassignmentPath, request,
+                MissingReassignmentMessage, MalformedReassignmentBodyPrefix),
+            ProjectReassignmentOutcome<T>,
+            timeout,
+            cancellationToken);
+    }
 
-        HttpResponseMessage response;
+    private ExerciseOutcome<ContractStreamEvent<T>> ProjectReassignmentOutcome<T>(
+        Raw.SubmitAndWaitForReassignmentResponse body)
+        where T : ITemplate, IDamlRecord<T>
+    {
+        if (body.Reassignment is not { } reassignment)
+        {
+            return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
+                (int)HttpStatusCode.InternalServerError, MissingReassignmentMessage);
+        }
+
         try
         {
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, SubmitAndWaitForReassignmentPath)
-            {
-                Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
-            };
-            response = await client.SendAsync(httpRequest, requestToken).ConfigureAwait(false);
+            return new ExerciseOutcome<ContractStreamEvent<T>>.One(ProjectReassignmentResult<T>(reassignment));
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
         {
+            LogReassignmentUndecodable(_logger, decodeFailure);
             return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                (int)HttpStatusCode.RequestTimeout, $"Request exceeded the {DescribeDeadline(timeout)} deadline.");
-        }
-        catch (HttpRequestException transportFailure)
-        {
-            return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                (int)HttpStatusCode.ServiceUnavailable, transportFailure.Message);
-        }
-
-        using (response)
-        {
-            try
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    var parsed = await RestErrorParser.ParseAsync(response, requestToken).ConfigureAwait(false);
-                    return ToOutcome<ContractStreamEvent<T>>(parsed);
-                }
-
-                var body = await response.Content
-                    .ReadFromJsonAsync<Raw.SubmitAndWaitForReassignmentResponse>(
-                        RestRefitSettings.SerializerOptions, requestToken)
-                    .ConfigureAwait(false);
-                if (body?.Reassignment is null)
-                {
-                    return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                        (int)HttpStatusCode.InternalServerError,
-                        "Server returned a successful response but no reassignment was present.");
-                }
-
-                ContractStreamEvent<T> projected;
-                try
-                {
-                    projected = ProjectReassignmentResult<T>(body.Reassignment);
-                }
-                catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
-                {
-                    return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                        (int)HttpStatusCode.InternalServerError,
-                        $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}");
-                }
-
-                return new ExerciseOutcome<ContractStreamEvent<T>>.One(projected);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                    (int)HttpStatusCode.RequestTimeout,
-                    $"Request exceeded the {DescribeDeadline(timeout)} deadline while reading the response body.");
-            }
-            catch (JsonException malformedJson)
-            {
-                return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                    (int)HttpStatusCode.InternalServerError,
-                    $"Server returned a malformed reassignment response body: {malformedJson.Message}");
-            }
-            catch (HttpRequestException transportFailure)
-            {
-                return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                    (int)HttpStatusCode.ServiceUnavailable, transportFailure.Message);
-            }
+                (int)HttpStatusCode.InternalServerError,
+                $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}",
+                SourceException: decodeFailure);
         }
     }
 
     private ContractStreamEvent<T> ProjectReassignmentResult<T>(Raw.Reassignment reassignment)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var projected = ContractStreamProjector.ProjectReassignmentEvents<T>(reassignment, _logger).ToList();
         return projected.FirstOrDefault(e => e is ContractStreamEvent<T>.Assigned or ContractStreamEvent<T>.Unassigned)
@@ -190,25 +166,29 @@ public sealed partial class RestLedgerClient
 
     /// <inheritdoc />
     /// <remarks>
-    /// One blocking <c>POST /v2/commands/completions</c> call whose success body is a JSON array of
-    /// completion-stream responses — the same bounded-window shape <see cref="SubscribeAsync{T}"/>
-    /// reads from <c>POST /v2/updates</c>. The participant closes the window once it has sent
-    /// <see cref="RestLedgerClientOptions.CompletionStreamLimit"/> entries or once no completion has
-    /// arrived for <see cref="RestLedgerClientOptions.CompletionStreamIdleTimeout"/>; leaving either
-    /// unset defers to the participant's own settings. Enumeration therefore ends when the window
-    /// closes rather than running forever — a caller following the stream reopens it from the last
-    /// offset it observed, which the <see cref="CompletionStreamEvent.Checkpoint"/> entries keep
-    /// advancing through quiet periods.
+    /// A live tail over the same pagination loop the offset-range reads use: each
+    /// <c>POST /v2/commands/completions</c> returns one bounded window, closed by the participant
+    /// once it has sent <see cref="RestLedgerClientOptions.StreamWindowLimit"/> entries or once no
+    /// completion has arrived for <see cref="RestLedgerClientOptions.StreamWindowIdleTimeout"/>, and
+    /// the loop re-POSTs the next window from the last offset it observed for as long as the caller
+    /// enumerates. A window that yields nothing is reopened at the same offset, so the enumeration
+    /// does not end on a quiet ledger and a call site cannot tell this stream from the gRPC one.
+    /// <para>
+    /// The <see cref="CompletionStreamEvent.Checkpoint"/> entries are the participant's own offset
+    /// checkpoints, relayed as they arrive; this client manufactures none, so a quiet stream leaves
+    /// the caller's resume offset exactly where it stood.
+    /// </para>
     /// <para>
     /// Fault contract: a non-success response ends the enumeration with a terminal
     /// <see cref="CompletionStreamEvent.StreamError"/> carrying the HTTP status code and the parsed
-    /// participant message, matching the gRPC transport's in-band fault contract for this method
-    /// rather than the throwing contract the bounded reads on this client use. A success body this
+    /// participant message, matching the gRPC transport's in-band fault contract. A success body this
     /// client cannot read — malformed JSON, or a completion whose wire fields will not decode — ends
     /// the enumeration the same way, with a status code of <c>0</c> because the transport itself
-    /// reported no failure. A transport failure that never reaches the participant still throws,
-    /// since the opt-in retry pipeline classifies exceptions. A caller cancelling via
-    /// <paramref name="cancellationToken"/> gets an <see cref="OperationCanceledException"/>, never a
+    /// reported no failure, as does a window whose entries carry no offset the next window could
+    /// resume from, since following it would re-read what was just delivered. A transport failure
+    /// that never reaches the participant still throws, since the opt-in retry pipeline classifies
+    /// exceptions. A caller cancelling via <paramref name="cancellationToken"/> gets an
+    /// <see cref="OperationCanceledException"/>, never a
     /// <see cref="CompletionStreamEvent.StreamError"/>.
     /// </para>
     /// </remarks>
@@ -227,38 +207,24 @@ public sealed partial class RestLedgerClient
         long beginExclusiveOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var request = RestSubscribeRequestBuilder.BuildCompletionStreamRequest(
-            submitter, beginExclusiveOffset, _userId);
+        var windows = ReadWindowsAsync<WireCompletionStreamResponse>(
+            CompletionsPath,
+            beginExclusiveOffset,
+            endInclusive: null,
+            beginExclusive => RestSubscribeRequestBuilder.BuildCompletionStreamRequest(
+                submitter, beginExclusive, _userId),
+            CompletionResumeOffset,
+            cancellationToken);
 
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, BuildCompletionsPath())
+        await foreach (var read in windows.ConfigureAwait(false))
         {
-            Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
-        };
-        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
+            if (read.Fault is { } fault)
+            {
+                yield return ToCompletionStreamError(fault);
+                yield break;
+            }
 
-        if (!response.IsSuccessStatusCode)
-        {
-            var parsed = await RestErrorParser.ParseAsync(response, cancellationToken).ConfigureAwait(false);
-            LogCompletionStreamFailed(_logger, parsed.StatusCode, parsed.Message);
-            yield return new CompletionStreamEvent.StreamError(parsed.StatusCode, parsed.Message);
-            yield break;
-        }
-
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        var (entries, malformedBody) = ReadCompletionEntries(body);
-        if (malformedBody is { } bodyError)
-        {
-            yield return bodyError;
-            yield break;
-        }
-
-        foreach (var entry in entries)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (ProjectCompletionEntry(entry) is not { } projected)
+            if (read.Entry is not { } entry || ProjectCompletionEntry(entry) is not { } projected)
             {
                 continue;
             }
@@ -272,17 +238,12 @@ public sealed partial class RestLedgerClient
         }
     }
 
-    private (IReadOnlyList<WireCompletionStreamResponse> Entries, CompletionStreamEvent.StreamError? MalformedBody)
-        ReadCompletionEntries(string body)
+    private static long? CompletionResumeOffset(WireCompletionStreamResponse response)
     {
-        try
-        {
-            return (RestStreamBodyReader.Parse<WireCompletionStreamResponse>(body), null);
-        }
-        catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
-        {
-            return ([], ToUndecodableBodyStreamError(decodeFailure));
-        }
+        var wireOffset = response.CompletionResponse?.Completion?.Offset
+            ?? response.CompletionResponse?.OffsetCheckpoint?.Offset;
+
+        return RestWireConversions.TryParseOffset(wireOffset, out var offset) ? offset : null;
     }
 
     private CompletionStreamEvent? ProjectCompletionEntry(WireCompletionStreamResponse entry)
@@ -291,19 +252,22 @@ public sealed partial class RestLedgerClient
         {
             return ProjectCompletionResponse(entry.CompletionResponse);
         }
-        catch (Exception decodeFailure) when (StreamEventClassifier.IsDecodeFailure(decodeFailure))
+        catch (Exception decodeFailure) when (StreamEventClassifier.IsNotCancellation(decodeFailure))
         {
-            return ToUndecodableBodyStreamError(decodeFailure);
+            return ToCompletionStreamError(UndecodableBodyFault(decodeFailure));
         }
     }
 
-    private CompletionStreamEvent.StreamError ToUndecodableBodyStreamError(Exception decodeFailure)
+    private StreamFault UndecodableBodyFault(Exception decodeFailure)
     {
         LogCompletionStreamBodyUndecodable(_logger, decodeFailure);
-        return new CompletionStreamEvent.StreamError(
-            NoTransportFailureStatusCode,
-            $"Could not decode the completion stream response body: {decodeFailure.Message}");
+        return StreamFault.FromUndecodableBody(
+            $"Could not decode the completion stream response body: {decodeFailure.Message}",
+            decodeFailure);
     }
+
+    private static CompletionStreamEvent.StreamError ToCompletionStreamError(StreamFault fault) =>
+        new(fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
 
     private CompletionStreamEvent? ProjectCompletionResponse(WireCompletionResponse? completionResponse)
     {
@@ -322,47 +286,34 @@ public sealed partial class RestLedgerClient
         return null;
     }
 
-    private string BuildCompletionsPath()
-    {
-        var query = new List<string>(2);
-        if (_completionStreamLimit is { } limit)
-        {
-            query.Add($"{LimitQueryParameter}={limit.ToString(CultureInfo.InvariantCulture)}");
-        }
-        if (_completionStreamIdleTimeout is { } idleTimeout)
-        {
-            var milliseconds = (long)idleTimeout.TotalMilliseconds;
-            query.Add($"{StreamIdleTimeoutQueryParameter}={milliseconds.ToString(CultureInfo.InvariantCulture)}");
-        }
-
-        return query.Count == 0
-            ? CompletionsPath
-            : $"{CompletionsPath}?{string.Join('&', query)}";
-    }
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Completion stream request failed with status {StatusCode} — surfaced in-band as a terminal StreamError: {Detail}")]
-    private static partial void LogCompletionStreamFailed(ILogger logger, int statusCode, string detail);
-
     [LoggerMessage(Level = LogLevel.Warning, Message = "Completion stream response body could not be decoded — surfaced in-band as a terminal StreamError")]
     private static partial void LogCompletionStreamBodyUndecodable(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Completion stream skipped variant {Variant}")]
     private static partial void LogCompletionStreamVariantSkipped(ILogger logger, string variant);
 
+    [LoggerMessage(Level = LogLevel.Error, Message = "The participant answered successfully, but the reassignment could not be decoded — surfaced as an InfraError outcome")]
+    private static partial void LogReassignmentUndecodable(ILogger logger, Exception exception);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<ConnectedSynchronizer>> GetConnectedSynchronizersAsync(
         Party? party = null,
         string? participantId = null,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
+        var client = _calls.CreateClient();
+
+        using var timeoutSource = RestCallEnvelope.CreateTimeoutSource(timeout, cancellationToken);
+        var requestToken = timeoutSource?.Token ?? cancellationToken;
+
         using var response = await client
-            .GetAsync(BuildConnectedSynchronizersPath(party, participantId), cancellationToken)
+            .GetAsync(BuildConnectedSynchronizersPath(party, participantId), requestToken)
             .ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        await RestCallEnvelope.EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
 
         var body = await response.Content
-            .ReadFromJsonAsync<Raw.GetConnectedSynchronizersResponse>(RestRefitSettings.SerializerOptions, cancellationToken)
+            .ReadFromJsonAsync<Raw.GetConnectedSynchronizersResponse>(RestRefitSettings.SerializerOptions, requestToken)
             .ConfigureAwait(false);
 
         var synchronizers = body?.ConnectedSynchronizers ?? [];
@@ -372,14 +323,20 @@ public sealed partial class RestLedgerClient
     }
 
     /// <inheritdoc />
-    public async Task<string> GetLedgerApiVersionAsync(CancellationToken cancellationToken = default)
+    public async Task<string> GetLedgerApiVersionAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default)
     {
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
-        using var response = await client.GetAsync(LedgerApiVersionPath, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        var client = _calls.CreateClient();
+
+        using var timeoutSource = RestCallEnvelope.CreateTimeoutSource(timeout, cancellationToken);
+        var requestToken = timeoutSource?.Token ?? cancellationToken;
+
+        using var response = await client.GetAsync(LedgerApiVersionPath, requestToken).ConfigureAwait(false);
+        await RestCallEnvelope.EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
 
         var body = await response.Content
-            .ReadFromJsonAsync<Raw.GetLedgerApiVersionResponse>(RestRefitSettings.SerializerOptions, cancellationToken)
+            .ReadFromJsonAsync<Raw.GetLedgerApiVersionResponse>(RestRefitSettings.SerializerOptions, requestToken)
             .ConfigureAwait(false);
 
         return body?.Version
@@ -391,6 +348,7 @@ public sealed partial class RestLedgerClient
     public Task<TransactionResult> GetUpdateByOffsetAsync(
         long offset,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(offset);
@@ -402,13 +360,15 @@ public sealed partial class RestLedgerClient
         };
 
         return GetUpdateAsync(
-            UpdateByOffsetPath, request, $"offset {offset}", RestTransactionResultProjector.Project, cancellationToken);
+            UpdateByOffsetPath, request, $"offset {offset}", RestTransactionResultProjector.Project,
+            timeout, cancellationToken);
     }
 
     /// <inheritdoc />
     public Task<TransactionResult> GetUpdateByIdAsync(
         string updateId,
         RuntimeCommands.SubmitterInfo submitter,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(updateId);
@@ -420,7 +380,8 @@ public sealed partial class RestLedgerClient
         };
 
         return GetUpdateAsync(
-            UpdateByIdPath, request, $"id {updateId}", RestTransactionResultProjector.Project, cancellationToken);
+            UpdateByIdPath, request, $"id {updateId}", RestTransactionResultProjector.Project,
+            timeout, cancellationToken);
     }
 
     private async Task<TProjection> GetUpdateAsync<TProjection>(
@@ -428,18 +389,23 @@ public sealed partial class RestLedgerClient
         object request,
         string lookupDescription,
         Func<Raw.Transaction, TProjection> project,
+        TimeSpan? timeout,
         CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
+        var client = _calls.CreateClient();
+
+        using var timeoutSource = RestCallEnvelope.CreateTimeoutSource(timeout, cancellationToken);
+        var requestToken = timeoutSource?.Token ?? cancellationToken;
+
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, path)
         {
             Content = JsonContent.Create(request, options: RestRefitSettings.SerializerOptions),
         };
-        using var response = await client.SendAsync(httpRequest, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+        using var response = await client.SendAsync(httpRequest, requestToken).ConfigureAwait(false);
+        await RestCallEnvelope.EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
 
         var body = await response.Content
-            .ReadFromJsonAsync<Raw.GetUpdateResponse>(RestRefitSettings.SerializerOptions, cancellationToken)
+            .ReadFromJsonAsync<Raw.GetUpdateResponse>(RestRefitSettings.SerializerOptions, requestToken)
             .ConfigureAwait(false);
         if (body is null)
         {
@@ -450,7 +416,7 @@ public sealed partial class RestLedgerClient
         return ProjectPointRead(body, lookupDescription, project);
     }
 
-    private static TProjection ProjectPointRead<TProjection>(
+    internal static TProjection ProjectPointRead<TProjection>(
         Raw.GetUpdateResponse response,
         string lookupDescription,
         Func<Raw.Transaction, TProjection> project)
@@ -470,21 +436,18 @@ public sealed partial class RestLedgerClient
             return project(transaction);
         }
         catch (Exception decodeFailure) when (
-            decodeFailure is FormatException or JsonException or MalformedTransactionTreeException
-            || RestTransactionResultProjector.IsMalformedResponse(decodeFailure))
+            decodeFailure is JsonException || MalformedResponse.IsWireDecodeFailure(decodeFailure))
         {
-            var detail = decodeFailure.Message.StartsWith(RestTransactionResultProjector.MalformedResponsePrefix, StringComparison.Ordinal)
-                ? decodeFailure.Message[RestTransactionResultProjector.MalformedResponsePrefix.Length..]
-                : decodeFailure.Message;
-            throw new InvalidOperationException(
-                $"{RestTransactionResultProjector.MalformedResponsePrefix}the transaction at {lookupDescription} could not be decoded: {detail}",
-                decodeFailure);
+            throw MalformedResponse.CouldNotDecodeTransaction(lookupDescription, decodeFailure);
         }
     }
 
-    private async Task FireAsync(string path, object body, CancellationToken cancellationToken)
+    private async Task FireAsync(string path, object body, TimeSpan? timeout, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient(ServiceCollectionExtensions.HttpClientName);
+        var client = _calls.CreateClient();
+
+        using var timeoutSource = RestCallEnvelope.CreateTimeoutSource(timeout, cancellationToken);
+        var requestToken = timeoutSource?.Token ?? cancellationToken;
 
         HttpResponseMessage response;
         try
@@ -493,17 +456,19 @@ public sealed partial class RestLedgerClient
             {
                 Content = JsonContent.Create(body, options: RestRefitSettings.SerializerOptions),
             };
-            response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            response = await client.SendAsync(request, requestToken).ConfigureAwait(false);
         }
         catch (HttpRequestException transportFailure)
         {
             throw new LedgerOperationException(
-                transportFailure.Message, (int)HttpStatusCode.ServiceUnavailable, transportFailure);
+                transportFailure.Message,
+                (int)HttpStatusCode.ServiceUnavailable,
+                innerException: transportFailure);
         }
 
         using (response)
         {
-            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+            await RestCallEnvelope.EnsureSuccessAsync(response, requestToken).ConfigureAwait(false);
         }
     }
 

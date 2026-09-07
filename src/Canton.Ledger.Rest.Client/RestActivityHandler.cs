@@ -10,7 +10,7 @@ namespace Canton.Ledger.Rest.Client;
 /// <summary>
 /// Emits an OpenTelemetry HTTP client span for every JSON Ledger API request, following the
 /// kernel's <see cref="LedgerActivitySource"/> naming convention. Register the
-/// source as <c>tracing.AddSource(RestLedgerClient.ActivitySourceName)</c>.
+/// source as <c>tracing.AddSource(LedgerActivitySourceNames.RestLedgerClient)</c>.
 /// Span names and tags follow the OpenTelemetry HTTP semantic conventions.
 /// </summary>
 internal sealed class RestActivityHandler : DelegatingHandler

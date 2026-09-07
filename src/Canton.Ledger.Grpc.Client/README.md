@@ -6,9 +6,10 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 
 | Type | Purpose |
 |------|---------|
-| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `TryExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `TryExerciseForCreatedAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
-| `LedgerClientExtensions` (from `Daml.Ledger.Abstractions`) | Throwing convenience extension methods on `ILedgerClient`: `ExerciseAsync` (wraps `TryExerciseAsync`, throws on non-`One` outcomes) |
-| `LedgerClient` (concrete, gRPC) | Adds the fire-and-forget async submission surface beyond the interface: `SubmitAsync`, `CompletionStreamAsync`, `GetConnectedSynchronizersAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync`, `GetLedgerApiVersionAsync`, and typed interface-view queries via `QueryActiveAsync<TInterface, TView>` |
+| `ICantonLedgerClient` (from `Canton.Ledger.Abstractions`) | **The type to resolve from the container.** Everything on `ILedgerClient` plus the Canton-only participant operations: `SubmitAsync`, `SubmitReassignmentAsync`, `TrySubmitAndWaitForReassignmentAsync`, `TrySubmitAndWaitForTransactionTreeAsync`, `CompletionStreamAsync`, `GetConnectedSynchronizersAsync`, `GetLedgerApiVersionAsync`, `GetUpdateByOffsetAsync`, `GetUpdateByIdAsync`, `EstimateTrafficCostAsync`, and typed interface-view queries via `QueryActiveAsync<TInterface, TView>` |
+| `ILedgerClient` (from `Daml.Ledger.Abstractions`) | Command operations: `TryCreateAsync`, `TryExerciseAsync`, `SubmitAndWaitAsync`, `TrySubmitAndWaitForTransactionAsync`, `SubscribeAsync`, `SubscribeActiveAsync`, `GetLedgerEndAsync` |
+| `Daml.Ledger.Abstractions.Extensions` | Convenience extension methods on the client interfaces: `ThrowingExercise.ExerciseAsync` (wraps `TryExerciseAsync`, throws on non-`One` outcomes), `CreateByExercise` (`TryCreateOneByExerciseAsync`, `TryCreateManyByExerciseAsync` and their throwing forms), `SingleCommandExtensions.TrySubmitSingleAsync`, `StreamerSnapshot.SnapshotAsync` |
+| `LedgerClient` (concrete, gRPC) | The implementation `AddLedgerClient` registers behind `ICantonLedgerClient` — resolve the interface rather than naming this type. Its raw-stub escape hatch is reached through `IGrpcCallInvokerFactory`, and its `ActivitySource` name through `LedgerActivitySourceNames.GrpcLedgerClient` |
 | `IAdminClient` (from `Canton.Ledger.Abstractions`) | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
 | `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout`, `Retry` (opt-in retry pipeline, disabled by default) |
 
@@ -175,22 +176,30 @@ var users = await adminClient.ListUsersAsync();
 
 ### Raw gRPC Stubs (Escape Hatch)
 
-For Ledger API services or overloads the typed surface does not cover, `CreateCallInvoker()` (on
-both `LedgerClient` and `AdminClient`) returns a `Grpc.Core.CallInvoker` bound to the client's
-channel that reuses its authentication, deadline, and retry plumbing — no hand-built
-`GrpcChannel`, Bearer-header `CallOptions`, or deadlines needed:
+For Ledger API services or overloads the typed surface does not cover, opt into
+`IGrpcCallInvokerFactory` (namespace `Canton.Ledger.Grpc.Client.Raw`). Its `CreateCallInvoker()`
+returns a `Grpc.Core.CallInvoker` that reuses the SDK's authentication, deadline, and retry
+plumbing — no hand-built `GrpcChannel`, Bearer-header `CallOptions`, or deadlines needed:
 
 ```csharp
-var stateService = new StateService.StateServiceClient(ledgerClient.CreateCallInvoker());
+services.AddLedgerRawGrpc(configuration.GetSection("Canton:Ledger"));
+```
+
+```csharp
+var stateService = new StateService.StateServiceClient(invokerFactory.CreateCallInvoker());
 var ledgerEnd = await stateService.GetLedgerEndAsync(new GetLedgerEndRequest());
 ```
 
-Bearer tokens come from the configured `ITokenProvider` on every call (`ITokenProvider.None`
+Bearer tokens come from the registered `ITokenProvider` on every call (`ITokenProvider.None`
 sends no `authorization` header); unary calls get the configured `Timeout` as a per-attempt
 deadline and run through the opt-in `Retry` pipeline, while streaming calls attach auth headers
 but no default deadline and are never retried. A caller-supplied `authorization` header or
-deadline in `CallOptions` wins over the SDK's. The invoker is valid until the client that
-created it is disposed.
+deadline in `CallOptions` wins over the SDK's.
+
+The factory builds its own channel from the same `LedgerClientOptions` the clients use, so it
+needs neither client registered and registration order does not matter — at the cost of one extra
+HTTP/2 connection to the same endpoint. The container owns that channel, so the invoker stays
+valid for as long as the provider does: dispose the provider, not the invoker.
 
 ## Dependency Injection
 
@@ -209,15 +218,36 @@ services.AddLedgerClient(
 // Action-based
 services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
 
+// Opt-in raw gRPC escape hatch — registers IGrpcCallInvokerFactory only
+services.AddLedgerRawGrpc(configuration.GetSection("Canton:Ledger"));
+
 // Health check — requires IAdminClient, calls GetParticipantIdAsync to verify connectivity
 services.AddHealthChecks().AddLedgerClient(tags: ["grpc", "ready"]);
 ```
 
-### OpenTelemetry Tracing
+Resolve the transport-neutral interfaces, not the concrete clients — the container owns the gRPC
+channel, so nothing here is disposed by hand:
 
 ```csharp
-tracing.AddSource(LedgerClient.ActivitySourceName);
-tracing.AddSource(AdminClient.ActivitySourceName);
+await using var provider = services.BuildServiceProvider();
+
+var ledgerClient = provider.GetRequiredService<ICantonLedgerClient>();
+var adminClient = provider.GetRequiredService<IAdminClient>();
+```
+
+### OpenTelemetry Tracing
+
+`Canton.Ledger.OpenTelemetry` registers every Canton client source at once:
+
+```csharp
+tracing.AddCantonLedgerInstrumentation();
+```
+
+To register these two sources by hand, take the names from `Canton.Ledger.Kernel` — no reference to this package required:
+
+```csharp
+tracing.AddSource(LedgerActivitySourceNames.GrpcLedgerClient);
+tracing.AddSource(LedgerActivitySourceNames.GrpcAdminClient);
 ```
 
 ## Related Packages

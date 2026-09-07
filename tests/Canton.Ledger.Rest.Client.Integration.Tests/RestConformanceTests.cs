@@ -25,9 +25,17 @@ public class RestConformanceTests
         Assert.False(string.IsNullOrWhiteSpace(response.Version), "GET /v2/version returned an empty version");
         Assert.NotNull(response.Features);
         Assert.NotNull(response.Features.UserManagement);
+        Assert.NotNull(response.Features.PartyManagement);
+        Assert.NotNull(response.Features.PackageFeature);
         Assert.False(
             response.Features.AdditionalProperties.ContainsKey("userManagement"),
             "the camelCase 'userManagement' feature key must bind to the typed property, not AdditionalProperties");
+        Assert.False(
+            response.Features.AdditionalProperties.ContainsKey("partyManagement"),
+            "the camelCase 'partyManagement' feature key must bind to the typed property, not AdditionalProperties");
+        Assert.False(
+            response.Features.AdditionalProperties.ContainsKey("packageFeature"),
+            "the camelCase 'packageFeature' feature key must bind to the typed property, not AdditionalProperties");
     }
 
     [Fact]
@@ -81,11 +89,19 @@ public class RestConformanceTests
         Assert.Equal(HttpStatusCode.OK, wireResponse.StatusCode);
         using var wireBody = JsonDocument.Parse(
             await wireResponse.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-        var wireParties = wireBody.RootElement.GetProperty("partyDetails");
+        var wireRoot = wireBody.RootElement;
+        Assert.True(
+            wireRoot.TryGetProperty("partyDetails", out var wireParties),
+            "GET /v2/parties no longer sends a camelCase 'partyDetails', so this test cannot prove that key binds");
         Assert.Equal(JsonValueKind.Array, wireParties.ValueKind);
         Assert.NotEqual(0, wireParties.GetArrayLength());
-        var wirePartyIds = wireParties.EnumerateArray()
-            .Select(party => party.GetProperty("party").GetString())
+        Assert.True(
+            wireRoot.TryGetProperty("nextPageToken", out var wireNextPageToken),
+            "GET /v2/parties no longer sends a camelCase 'nextPageToken', so this test cannot prove that key binds");
+        Assert.Equal(JsonValueKind.String, wireNextPageToken.ValueKind);
+
+        var partyIdsKnownBeforeTheClientRead = wireParties.EnumerateArray()
+            .Select(party => party.GetProperty("party").GetString()!)
             .ToList();
 
         var response = await lane.Api<IPartyManagementServiceApi>().ListKnownParties(
@@ -96,7 +112,25 @@ public class RestConformanceTests
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(response.PartyDetails);
-        Assert.Equal(wirePartyIds, response.PartyDetails.Select(party => party.Party));
+        Assert.NotNull(response.NextPageToken);
+        Assert.False(
+            response.AdditionalProperties.ContainsKey("partyDetails"),
+            "the camelCase 'partyDetails' key must bind to the typed property, not AdditionalProperties");
+        Assert.False(
+            response.AdditionalProperties.ContainsKey("nextPageToken"),
+            "the camelCase 'nextPageToken' key must bind to the typed property, not AdditionalProperties");
+
+        var partyIdsFromTheClientRead = response.PartyDetails
+            .Select(party => party.Party)
+            .ToHashSet(StringComparer.Ordinal);
+        var partyIdsTheClientReadDropped = partyIdsKnownBeforeTheClientRead
+            .Where(partyId => !partyIdsFromTheClientRead.Contains(partyId))
+            .ToList();
+        Assert.True(
+            partyIdsTheClientReadDropped.Count == 0,
+            "a party the participant already knew must still be listed by the later client read, but "
+            + $"{partyIdsTheClientReadDropped.Count} went missing: "
+            + string.Join(", ", partyIdsTheClientReadDropped));
     }
 
     [Fact]

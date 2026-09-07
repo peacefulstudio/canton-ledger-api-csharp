@@ -2,7 +2,7 @@
 
 The raw, Refit-generated client surface over the Canton JSON Ledger API (`/v2/...`) — one interface per Ledger API service, plus a few hand-authored off-spec endpoints.
 
-> **Experimental.** Every interface in this package is annotated `[Experimental("CANTONREST001")]`. Consuming the raw surface directly requires opting into that diagnostic. Most applications should use the supported, transport-neutral adapter in **`Canton.Ledger.Rest.Client`** (`RestLedgerClient` / `AddRestLedgerClient`) instead — it implements `Daml.Ledger.Abstractions.ILedgerClient` and `Canton.Ledger.Abstractions.ICantonLedgerClient` on top of these interfaces.
+> **Experimental.** Every interface in this package is annotated `[Experimental("CANTONREST001")]`. Consuming the raw surface directly requires opting into that diagnostic. Most applications should use the supported, transport-neutral adapter in **`Canton.Ledger.Rest.Client`** (`AddRestLedgerClient`) instead — it registers an implementation of `Daml.Ledger.Abstractions.ILedgerClient` and `Canton.Ledger.Abstractions.ICantonLedgerClient` built on top of these interfaces.
 
 Reach for this package only when you need an endpoint the adapter does not surface. Register the raw surface with `AddRestLedgerRawApis(...)` from `Canton.Ledger.Rest.Client`.
 

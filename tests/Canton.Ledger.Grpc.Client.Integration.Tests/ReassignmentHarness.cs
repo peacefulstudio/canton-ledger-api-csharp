@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
-using Canton.Ledger.Testing.Localnet;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -12,6 +11,7 @@ using Daml.Runtime.Streams;
 using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Richtypes;
 using Xunit;
 using PeacefulLocalnet = Peaceful.Canton.Localnet.Testing;
@@ -33,9 +33,6 @@ namespace Canton.Ledger.Grpc.Client.Integration.Tests;
 /// </summary>
 internal sealed class ReassignmentHarness : IAsyncDisposable
 {
-    private const string GrpcUrlEnv = "CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL";
-    private const string DefaultGrpcUrl = "http://localhost:11901";
-
     private const string ReassignmentFeatureDisabledSkipMessage =
         "Skipping: the participant rejected the unassign with \"Multi-synchronizer feature flag is not "
         + "enabled\". The --multi-sync LocalNet connects the validator to two synchronizers but does not "
@@ -47,31 +44,29 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
     private readonly PeacefulLocalnet.LocalnetFixture _fixture;
     private readonly ITokenProvider _tokenProvider;
     private readonly string _userId;
-    private readonly LedgerClient _client;
-    private readonly AdminClient _admin;
+    private readonly ServiceProvider _services;
+    private readonly ICantonLedgerClient _client;
+    private readonly IAdminClient _admin;
     private readonly GrpcChannel _channel;
     private readonly ProtoV2.UpdateService.UpdateServiceClient _updates;
     private readonly PackageManagementService.PackageManagementServiceClient _packages;
 
-    private ReassignmentHarness(PeacefulLocalnet.LocalnetFixture fixture, string grpcAddress)
+    private ReassignmentHarness(PeacefulLocalnet.LocalnetFixture fixture)
     {
         _fixture = fixture;
         _userId = fixture.ValidatorUserId;
-        _tokenProvider = new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync);
 
-        var options = new LedgerClientOptions { GrpcAddress = grpcAddress, UserId = _userId };
-        _client = new LedgerClient(options, _tokenProvider);
-        _admin = new AdminClient(options, _tokenProvider);
-        _channel = GrpcChannel.ForAddress(grpcAddress);
+        _services = LocalnetLedgerServices.ForValidator(fixture, _userId);
+        _tokenProvider = _services.GetRequiredService<ITokenProvider>();
+        _client = _services.GetRequiredService<ICantonLedgerClient>();
+        _admin = _services.GetRequiredService<IAdminClient>();
+        _channel = GrpcChannel.ForAddress(LocalnetLedgerServices.GrpcAddress);
         _updates = new ProtoV2.UpdateService.UpdateServiceClient(_channel);
         _packages = new PackageManagementService.PackageManagementServiceClient(_channel);
     }
 
-    public static ReassignmentHarness FromFixture(PeacefulLocalnet.LocalnetFixture fixture)
-    {
-        var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-        return new ReassignmentHarness(fixture, grpcAddress);
-    }
+    public static ReassignmentHarness FromFixture(PeacefulLocalnet.LocalnetFixture fixture) =>
+        new(fixture);
 
     public async Task UploadRichTypesDarAsync(CancellationToken cancellationToken)
     {
@@ -147,7 +142,8 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
             .WithSynchronizerId(new SynchronizerId(synchronizerId))
             .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()));
 
-        var outcome = await _client.TrySubmitAndWaitForTransactionAsync(submission, cancellationToken: cancellationToken);
+        var outcome = await _client.TrySubmitAndWaitForTransactionAsync(
+            submission, issuer, cancellationToken: cancellationToken);
         var result = Assert.IsType<ExerciseOutcome<TransactionResult>.One>(outcome).Result;
         return Assert.Single(result.CreatedContracts).ContractId;
     }
@@ -171,7 +167,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
 
         try
         {
-            await _client.SubmitReassignmentAsync(submission, cancellationToken);
+            await _client.SubmitReassignmentAsync(submission, cancellationToken: cancellationToken);
         }
         catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
         {
@@ -195,7 +191,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
 
         try
         {
-            await _client.SubmitReassignmentAsync(submission, cancellationToken);
+            await _client.SubmitReassignmentAsync(submission, cancellationToken: cancellationToken);
         }
         catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
         {
@@ -312,7 +308,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         string contractId,
         TimeSpan timeout,
         CancellationToken cancellationToken)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linked.CancelAfter(timeout);
@@ -361,14 +357,19 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _client.Dispose();
-        _admin.Dispose();
-        await _channel.ShutdownAsync();
-        _channel.Dispose();
+        try
+        {
+            await _services.DisposeAsync();
+        }
+        finally
+        {
+            await _channel.ShutdownAsync();
+            _channel.Dispose();
+        }
     }
 }
 
 internal sealed record TypedReassignmentObservation<T>(
     ContractStreamEvent<T>.Unassigned? Unassigned,
     ContractStreamEvent<T>.Assigned? Assigned)
-    where T : IDamlType;
+    where T : ITemplate, IDamlRecord<T>;

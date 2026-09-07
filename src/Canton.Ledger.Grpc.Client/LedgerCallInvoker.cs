@@ -84,7 +84,7 @@ internal sealed class LedgerCallInvoker
             cancellationToken,
             configureActivity,
             isExpectedFailure,
-            callerMemberName);
+            callerMemberName: callerMemberName);
 
     /// <summary>
     /// Runs a single unary RPC inside a client span and the retry pipeline, discarding the response.
@@ -116,7 +116,7 @@ internal sealed class LedgerCallInvoker
     /// <paramref name="isExpectedFailure"/> match unrecorded, and records any other
     /// <see cref="RpcException"/> on the span before rethrowing.
     /// </summary>
-    internal async Task<T> ExecuteTracedAsync<TClient, T>(
+    internal Task<T> ExecuteTracedAsync<TClient, T>(
         ActivitySource activitySource,
         ServiceDescriptor service,
         string method,
@@ -124,10 +124,77 @@ internal sealed class LedgerCallInvoker
         CancellationToken cancellationToken,
         Action<Activity?>? configureActivity = null,
         Predicate<RpcException>? isExpectedFailure = null,
-        [CallerMemberName] string callerMemberName = "")
+        ActivityKind activityKind = ActivityKind.Client,
+        [CallerMemberName] string callerMemberName = "") =>
+        ExecuteOutcomeTracedAsync<TClient, T>(
+            activitySource,
+            new ServerCall(service, method),
+            body,
+            RecordNothing,
+            cancellationToken,
+            configureActivity,
+            isExpectedFailure,
+            activityKind,
+            callerMemberName);
+
+    /// <summary>
+    /// The one span seam every traced operation runs through, including
+    /// <see cref="ExecuteTracedAsync{TClient,T}"/>: it opens a span on <paramref name="activitySource"/>
+    /// and runs <paramref name="body"/> inside it, so a multi-call operation (e.g. server-paginated
+    /// reads) shares one span and one error envelope, then runs <paramref name="recordOutcome"/> on the
+    /// returned value so a fault an operation returns rather than throws is recorded where every other
+    /// error is recorded — an operation that records nothing passes
+    /// <see cref="RecordNothing{TOutcome}"/> and says so. Reclassifies a caller cancellation to
+    /// <see cref="OperationCanceledException"/>, rethrows an <paramref name="isExpectedFailure"/> match
+    /// unrecorded, and records any other <see cref="RpcException"/> on the span before rethrowing. An
+    /// operation that composes other traced operations instead of making its own RPC passes a null
+    /// <paramref name="serverCall"/> and its own <paramref name="activityKind"/>, so it carries no
+    /// server-call tags.
+    /// </summary>
+    internal Task<TOutcome> ExecuteOutcomeTracedAsync<TClient, TOutcome>(
+        ActivitySource activitySource,
+        ServerCall? serverCall,
+        Func<Activity?, CancellationToken, Task<TOutcome>> body,
+        Action<Activity?, TOutcome> recordOutcome,
+        CancellationToken cancellationToken,
+        Action<Activity?>? configureActivity = null,
+        Predicate<RpcException>? isExpectedFailure = null,
+        ActivityKind activityKind = ActivityKind.Client,
+        [CallerMemberName] string callerMemberName = "") =>
+        ExecuteCoreAsync<TClient, TOutcome>(
+            activitySource,
+            serverCall,
+            activityKind,
+            async (activity, token) =>
+            {
+                var outcome = await body(activity, token).ConfigureAwait(false);
+                recordOutcome(activity, outcome);
+                return outcome;
+            },
+            configureActivity,
+            isExpectedFailure,
+            callerMemberName,
+            cancellationToken);
+
+    internal static void RecordNothing<TOutcome>(Activity? activity, TOutcome outcome)
     {
-        using var activity = LedgerActivitySource.StartActivity<TClient>(activitySource, callerMemberName: callerMemberName);
-        TagServerCall(activity, service, method);
+    }
+
+    private async Task<T> ExecuteCoreAsync<TClient, T>(
+        ActivitySource activitySource,
+        ServerCall? serverCall,
+        ActivityKind activityKind,
+        Func<Activity?, CancellationToken, Task<T>> body,
+        Action<Activity?>? configureActivity,
+        Predicate<RpcException>? isExpectedFailure,
+        string callerMemberName,
+        CancellationToken cancellationToken)
+    {
+        using var activity = LedgerActivitySource.StartActivity<TClient>(activitySource, activityKind, callerMemberName);
+        if (serverCall is { } call)
+        {
+            TagServerCall(activity, call.Descriptor, call.Method);
+        }
         configureActivity?.Invoke(activity);
 
         try

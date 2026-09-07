@@ -9,7 +9,7 @@ using Daml.Runtime.Data;
 
 namespace Canton.Ledger.Grpc.Client;
 
-public sealed partial class LedgerClient
+internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     public Task<LedgerOffset> GetLedgerEndAsync(
@@ -34,6 +34,7 @@ public sealed partial class LedgerClient
     public Task<IReadOnlyList<ConnectedSynchronizer>> GetConnectedSynchronizersAsync(
         Party? party = null,
         string? participantId = null,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
         var request = new GetConnectedSynchronizersRequest();
@@ -51,6 +52,7 @@ public sealed partial class LedgerClient
                 .Select(s => new ConnectedSynchronizer(s.SynchronizerAlias, s.SynchronizerId, MapPermission(s.Permission)))
                 .ToList(),
             cancellationToken,
+            timeout: timeout,
             configureActivity: activity =>
             {
                 if (party is { } taggedParty)
@@ -70,12 +72,15 @@ public sealed partial class LedgerClient
     };
 
     /// <inheritdoc />
-    public Task<string> GetLedgerApiVersionAsync(CancellationToken cancellationToken = default) =>
+    public Task<string> GetLedgerApiVersionAsync(
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default) =>
         _invoker.InvokeTracedAsync<LedgerClient, GetLedgerApiVersionResponse, string>(
             LedgerCallInvoker.Source,
             VersionService.Descriptor,
             "GetLedgerApiVersion",
             (headers, deadline, token) => _versionService.GetLedgerApiVersionAsync(new GetLedgerApiVersionRequest(), headers, deadline, token),
             response => response.Version,
-            cancellationToken);
+            cancellationToken,
+            timeout: timeout);
 }

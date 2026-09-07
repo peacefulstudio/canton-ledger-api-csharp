@@ -40,7 +40,7 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
 
     public void Dispose() => _factory.Dispose();
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -48,6 +48,9 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient Client() => new(_factory, Options.Create(new RestLedgerClientOptions

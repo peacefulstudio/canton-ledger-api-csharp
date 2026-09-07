@@ -4,6 +4,7 @@
 using System.Globalization;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Commands;
+using Canton.Ledger.Kernel.Wire;
 using RuntimeCommands = Daml.Runtime.Commands;
 using WireCompletion = Canton.Ledger.Rest.Client.Raw.Completion;
 using WireSynchronizerTime = Canton.Ledger.Rest.Client.Raw.SynchronizerTime;
@@ -51,7 +52,7 @@ internal static class RestCompletionProjector
 
     private static RuntimeCommands.CommandId ToRequiredCommandId(WireCompletion completion) =>
         string.IsNullOrEmpty(completion.CommandId)
-            ? throw RestTransactionResultProjector.MalformedResponse(
+            ? throw MalformedResponse.MissingRequiredField(
                 $"the completion at offset '{completion.Offset}' has no commandId")
             : (RuntimeCommands.CommandId)completion.CommandId;
 

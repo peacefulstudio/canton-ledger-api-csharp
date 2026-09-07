@@ -69,6 +69,13 @@ internal static class RestValueEncoder
                     Value = damlOptional.Value is null ? null! : ToWireValue(damlOptional.Value),
                 },
             },
+            DamlOptionalChain damlOptionalChain => new WireValue
+            {
+                Optional = new WireOptional
+                {
+                    Value = damlOptionalChain.Value is null ? null! : ToWireValue(damlOptionalChain.Value),
+                },
+            },
             DamlList damlList => new WireValue
             {
                 List = new WireList { Elements = damlList.Values.Select(ToWireValue).ToList() },

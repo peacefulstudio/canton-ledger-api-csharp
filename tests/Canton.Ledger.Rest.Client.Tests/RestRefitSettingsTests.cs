@@ -29,4 +29,17 @@ public class RestRefitSettingsTests
             .BeFalse("unset optional fields must be omitted on the wire as proto3 JSON does");
         body.RootElement.TryGetProperty("localMetadata", out _).Should().BeFalse();
     }
+
+    [Fact]
+    public void SerializerOptions_decode_a_completionOffset_the_participant_sends_as_a_raw_JSON_number()
+    {
+        var response = JsonSerializer.Deserialize<ExecuteSubmissionAndWaitResponse>(
+            """{"updateId":"u-1","completionOffset":123}""",
+            RestRefitSettings.SerializerOptions);
+
+        response!.CompletionOffset.Should().Be(
+            "123",
+            "the wire-site tables only reach the serializer through the TypeInfoResolver modifiers these "
+            + "settings install, and nothing else asserts that they are still installed");
+    }
 }

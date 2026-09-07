@@ -8,6 +8,8 @@ using Canton.Ledger.Kernel.Streams;
 using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -17,7 +19,7 @@ using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
 
-public sealed partial class LedgerClient
+internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
@@ -59,13 +61,11 @@ public sealed partial class LedgerClient
         while (true)
         {
             var step = await StreamMoveResult.NextAsync(stream, cancellationToken).ConfigureAwait(false);
-            if (step.Faulted is { } fault)
+            if (step.RecordFault(activity) is { } fault)
             {
-                LogCompletionStreamError(_logger, fault.StatusCode, fault.Status.Detail);
-                activity.RecordGrpcError(fault);
+                LogCompletionStreamError(_logger, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new CompletionStreamEvent.StreamError(
-                    (int)fault.StatusCode,
-                    string.IsNullOrEmpty(fault.Status.Detail) ? fault.Message : fault.Status.Detail);
+                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
                 yield break;
             }
 
@@ -77,7 +77,8 @@ public sealed partial class LedgerClient
                     if (!TryProjectCompletion(stream.Current.Completion, out var completion, out var decodeFailure))
                     {
                         LogCompletionStreamDecodeFailed(_logger, stream.Current.Completion.Offset, decodeFailure);
-                        yield return new CompletionStreamEvent.StreamError((int)StatusCode.OK, decodeFailure.Message);
+                        yield return new CompletionStreamEvent.StreamError(
+                            StreamFault.NoTransportFailure, decodeFailure.Message, null, decodeFailure);
                         yield break;
                     }
 
@@ -104,7 +105,7 @@ public sealed partial class LedgerClient
             decodeFailure = null;
             return true;
         }
-        catch (Exception failure) when (StreamEventClassifier.IsDecodeFailure(failure))
+        catch (Exception failure) when (StreamEventClassifier.IsNotCancellation(failure))
         {
             projected = null;
             decodeFailure = failure;
@@ -142,6 +143,14 @@ public sealed partial class LedgerClient
 
     /// <inheritdoc />
     /// <remarks>
+    /// Always <see langword="true"/>: <see cref="SubscribeAsync{T}"/> and
+    /// <see cref="SubscribeLedgerEffectsAsync{T}"/> with <c>toOffset: null</c> open a genuine
+    /// open-ended server stream over gRPC, which ends only on a fault or on caller cancellation.
+    /// </remarks>
+    public bool SupportsUnboundedStreaming => true;
+
+    /// <inheritdoc />
+    /// <remarks>
     /// Fault contract: a mid-stream transport fault is surfaced
     /// in-band as a terminal <see cref="ContractStreamEvent{T}.StreamError"/>,
     /// never thrown, so a caller draining with <c>await foreach</c> decides
@@ -153,7 +162,7 @@ public sealed partial class LedgerClient
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var filterId = MarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeAsyncCore<T>(submitter, filterId, fromOffset?.Value, toOffset?.Value, TransactionShape.AcsDelta, cancellationToken);
@@ -171,7 +180,7 @@ public sealed partial class LedgerClient
         LedgerOffset? fromOffset = null,
         LedgerOffset? toOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var filterId = MarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeAsyncCore<T>(submitter, filterId, fromOffset?.Value, toOffset?.Value, TransactionShape.LedgerEffects, cancellationToken);
@@ -184,7 +193,7 @@ public sealed partial class LedgerClient
         long? toOffset,
         TransactionShape transactionShape,
         [EnumeratorCancellation] CancellationToken cancellationToken)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, UpdateService.Descriptor, "GetUpdates");
@@ -213,13 +222,11 @@ public sealed partial class LedgerClient
         while (true)
         {
             var step = await StreamMoveResult.NextAsync(stream, cancellationToken).ConfigureAwait(false);
-            if (step.Faulted is { } fault)
+            if (step.RecordFault(activity) is { } fault)
             {
-                LogSubscribeStreamError(_logger, typeof(T).Name, fault.StatusCode, fault.Status.Detail);
-                activity.RecordGrpcError(fault);
+                LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new ContractStreamEvent<T>.StreamError(
-                    (int)fault.StatusCode,
-                    string.IsNullOrEmpty(fault.Status.Detail) ? fault.Message : fault.Status.Detail);
+                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
                 yield break;
             }
 
@@ -234,7 +241,7 @@ public sealed partial class LedgerClient
 
     private IEnumerable<ContractStreamEvent<T>> ProjectUpdate<T>(
         GetUpdatesResponse response)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         switch (response.UpdateCase)
         {
@@ -280,7 +287,7 @@ public sealed partial class LedgerClient
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? activeAtOffset = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var templateFilter = MarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeActiveAsyncCore<T>(submitter, templateFilter, activeAtOffset?.Value, cancellationToken);
@@ -291,7 +298,7 @@ public sealed partial class LedgerClient
         ProtoIdentifier templateFilter,
         long? activeAtOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, StateService.Descriptor, "GetActiveContracts");
@@ -320,13 +327,11 @@ public sealed partial class LedgerClient
         while (true)
         {
             var step = await StreamMoveResult.NextAsync(stream, cancellationToken).ConfigureAwait(false);
-            if (step.Faulted is { } fault)
+            if (step.RecordFault(activity) is { } fault)
             {
-                LogSubscribeStreamError(_logger, typeof(T).Name, fault.StatusCode, fault.Status.Detail);
-                activity.RecordGrpcError(fault);
+                LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new AcsSnapshotEntry<T>.StreamError(
-                    (int)fault.StatusCode,
-                    string.IsNullOrEmpty(fault.Status.Detail) ? fault.Message : fault.Status.Detail);
+                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
                 yield break;
             }
 
@@ -342,7 +347,7 @@ public sealed partial class LedgerClient
                 if (projected is ContractStreamEvent<T>.Unclassified unclassified)
                 {
                     LogActiveContractEntryUnclassified(
-                        _logger, typeof(T).Name, stream.Current.ContractEntryCase, unclassified.Kind, unclassified.Offset.Value);
+                        _logger, typeof(T).Name, stream.Current.ContractEntryCase, unclassified.Kind, unclassified.Offset?.Value);
                 }
                 yield return ToAcsSnapshotEntry(projected);
             }
@@ -350,14 +355,14 @@ public sealed partial class LedgerClient
     }
 
     private static AcsSnapshotEntry<T> ToAcsSnapshotEntry<T>(ContractStreamEvent<T> entry)
-        where T : IDamlType => entry switch
+        where T : ITemplate, IDamlRecord<T> => entry switch
     {
         ContractStreamEvent<T>.Created created => new AcsSnapshotEntry<T>.Created(
-            created.ContractId, created.Payload, created.Offset, created.SynchronizerId, created.WitnessParties),
+            created.ContractId, created.Payload, created.Key, created.Offset, created.SynchronizerId, created.WitnessParties),
         ContractStreamEvent<T>.Unassigned unassigned => new AcsSnapshotEntry<T>.Unclassified(
-            unassigned.Offset, UnclassifiedKind.UnassignedEvent.ToString()),
+            unassigned.Offset, UnclassifiedKind.UnassignedEvent),
         ContractStreamEvent<T>.Unclassified unclassified => new AcsSnapshotEntry<T>.Unclassified(
-            unclassified.Offset, unclassified.RawKind ?? unclassified.Kind.ToString()),
+            unclassified.Offset, unclassified.Kind, unclassified.RawKind),
         _ => throw new InvalidOperationException(
             $"Active-contract snapshot produced an unexpected entry variant: {entry.GetType().Name}"),
     };
@@ -380,7 +385,7 @@ public sealed partial class LedgerClient
     private static partial void LogCompletionStreamStarted(ILogger logger, long beginExclusiveOffset);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Completion stream failed: {StatusCode} {Detail}")]
-    private static partial void LogCompletionStreamError(ILogger logger, StatusCode statusCode, string? detail);
+    private static partial void LogCompletionStreamError(ILogger logger, StatusCode statusCode, string detail);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Completion stream skipped variant {Variant}")]
     private static partial void LogCompletionStreamVariantSkipped(ILogger logger, CompletionStreamResponse.CompletionResponseOneofCase variant);
@@ -401,5 +406,5 @@ public sealed partial class LedgerClient
     private static partial void LogStreamVariantSkipped(ILogger logger, string templateType, GetUpdatesResponse.UpdateOneofCase variant);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Active contracts snapshot for {TemplateType} could not classify entry {ContractEntryCase} — surfaced as Unclassified ({Kind}) carrying offset {Offset}")]
-    private static partial void LogActiveContractEntryUnclassified(ILogger logger, string templateType, GetActiveContractsResponse.ContractEntryOneofCase contractEntryCase, UnclassifiedKind kind, long offset);
+    private static partial void LogActiveContractEntryUnclassified(ILogger logger, string templateType, GetActiveContractsResponse.ContractEntryOneofCase contractEntryCase, UnclassifiedKind kind, long? offset);
 }

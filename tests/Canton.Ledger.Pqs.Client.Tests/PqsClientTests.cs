@@ -3,7 +3,11 @@
 
 using Canton.Ledger.Abstractions;
 using System.Text.Json;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using AwesomeAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Xunit;
@@ -25,9 +29,9 @@ public class PqsClientTests
     }
 
     [Fact]
-    public void Constructor_throws_when_PqsClientOptions_is_null()
+    public void Constructor_throws_when_the_configured_options_value_is_null()
     {
-        var act = () => new PqsClient((PqsClientOptions)null!);
+        var act = () => new PqsClient(Options.Create<PqsClientOptions>(null!));
         act.Should().Throw<ArgumentNullException>().WithParameterName("options");
     }
 
@@ -35,13 +39,16 @@ public class PqsClientTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("\t")]
-    public void Constructor_throws_when_ConnectionString_is_empty_or_whitespace(string connectionString)
+    public void AddPqsClient_rejects_an_empty_or_whitespace_ConnectionString(string connectionString)
     {
-        var options = new PqsClientOptions { ConnectionString = connectionString };
+        var services = new ServiceCollection();
+        services.AddPqsClient(o => o.ConnectionString = connectionString);
 
-        var act = () => new PqsClient(options);
+        using var provider = services.BuildServiceProvider();
 
-        act.Should().Throw<ArgumentException>();
+        var act = () => provider.GetRequiredService<IPqsClient>();
+
+        act.Should().Throw<OptionsValidationException>();
     }
 
     [Fact]
@@ -55,24 +62,10 @@ public class PqsClientTests
     }
 
     [Fact]
-    public void Constructor_succeeds_with_valid_options()
-    {
-        var act = () => new PqsClient(ValidOptions());
-        act.Should().NotThrow();
-    }
-
-    [Fact]
     public void Constructor_with_IOptions_succeeds_with_valid_options()
     {
         var act = () => new PqsClient(Options.Create(ValidOptions()));
         act.Should().NotThrow();
-    }
-
-    [Fact]
-    public void ActivitySourceName_matches_full_type_name()
-    {
-        PqsClient.ActivitySourceName.Should().Be(typeof(PqsClient).FullName);
-        PqsClient.ActivitySourceName.Should().Be("Canton.Ledger.Pqs.Client.PqsClient");
     }
 
     [Fact]
@@ -274,7 +267,7 @@ public class PqsClientTests
     [Fact]
     public async Task QueryAsync_with_filter_throws_for_null_filter()
     {
-        var client = new PqsClient(ValidOptions());
+        var client = new PqsClient(Options.Create(ValidOptions()));
 
         var act = () => client.QueryAsync<FilterTests.SampleTemplate>((PqsFilter)null!);
 
@@ -284,11 +277,45 @@ public class PqsClientTests
     [Fact]
     public async Task QueryOneAsync_throws_for_null_filter()
     {
-        var client = new PqsClient(ValidOptions());
+        var client = new PqsClient(Options.Create(ValidOptions()));
 
         var act = () => client.QueryOneAsync<FilterTests.SampleTemplate>(null!);
 
         await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("filter");
+    }
+
+    [Fact]
+    public void DeserializeContract_reads_a_bare_string_ContractId_with_no_hand_registered_converter()
+    {
+        const string payload = """{"owner":"alice","target":"00deadbeef"}""";
+
+        var contract = PqsClient.DeserializeContract<ReferencingTemplate>(
+            "00abc123", payload, PqsClient.DefaultJsonSerializerOptions);
+
+        contract.Data.Target.Value.Should().Be(
+            "00deadbeef",
+            "the emitted JsonConverter makes the consumer-side converter registration unnecessary");
+        contract.Data.Owner.Should().Be("alice");
+    }
+
+    internal sealed record ReferencingTemplate(
+        [property: DamlField("owner")] string Owner,
+        [property: DamlField("target")] ContractId<FilterTests.SampleTemplate> Target) : ITemplate
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg123", "Test.Module", "ReferencingTemplate");
+        public static string PackageId => "pkg123";
+        public static string PackageName => "test-package";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+
+        public DamlRecord ToRecord() => DamlRecord.Create(
+            DamlField.Create("owner", new DamlParty(Owner)),
+            DamlField.Create("target", new DamlContractId(Target.Value)));
+
+        public static ReferencingTemplate FromRecord(DamlRecord record) => new(
+            Owner: record.GetRequiredField("owner").As<DamlParty>().Value,
+            Target: new ContractId<FilterTests.SampleTemplate>(
+                record.GetRequiredField("target").As<DamlContractId>().Value));
     }
 
     private static PostgresException CreatePostgresException(string sqlState, string messageText)

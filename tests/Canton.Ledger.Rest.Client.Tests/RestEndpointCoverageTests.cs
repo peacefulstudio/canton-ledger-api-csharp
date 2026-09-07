@@ -74,7 +74,7 @@ public class RestEndpointCoverageTests
         ["PartyManagementService_AllocateParty"] = "POST /v2/parties",
         ["PartyManagementService_GenerateExternalPartyTopology"] = "POST /v2/parties/external/generate-topology",
         ["PartyManagementService_GetParticipantId"] = "GET /v2/parties/participant-id",
-        ["PartyManagementService_GetParties"] = "GET /v2/parties/{parties}",
+        ["PartyManagementService_GetParties"] = "GET /v2/parties/{party}",
         ["PartyManagementService_ListKnownParties"] = "GET /v2/parties",
         ["PartyManagementService_UpdatePartyDetails"] = "PATCH /v2/parties/{party_details.party}",
         ["StateService_GetActiveContracts"] = "POST /v2/state/active-contracts",

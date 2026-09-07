@@ -49,14 +49,13 @@ internal static class RestSubscribeRequestBuilder
     public static WireGetUpdatesRequest BuildGetUpdatesRequest<T>(
         RuntimeCommands.SubmitterInfo submitter,
         long beginExclusive,
-        long endInclusive,
+        long? endInclusive,
         RestTransactionShape shape)
         where T : IDamlType
     {
-        return new WireGetUpdatesRequest
+        var request = new WireGetUpdatesRequest
         {
             BeginExclusive = FormatOffset(beginExclusive),
-            EndInclusive = FormatOffset(endInclusive),
             UpdateFormat = new WireUpdateFormat
             {
                 IncludeTransactions = new WireTransactionFormat
@@ -69,6 +68,13 @@ internal static class RestSubscribeRequestBuilder
                 IncludeReassignments = BuildReassignmentEventFormat<T>(submitter),
             },
         };
+
+        if (endInclusive is { } end)
+        {
+            request.EndInclusive = FormatOffset(end);
+        }
+
+        return request;
     }
 
     public static WireCompletionStreamRequest BuildCompletionStreamRequest(

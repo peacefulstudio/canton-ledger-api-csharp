@@ -53,20 +53,70 @@ public class RestLedgerClientOptions : IValidatableObject
     public RetryOptions Retry { get; set; } = new();
 
     /// <summary>
-    /// Caps how many entries one <c>CompletionStreamAsync</c> window returns, sent as the
-    /// <c>limit</c> query parameter on <c>POST /v2/commands/completions</c>. Left unset, the
-    /// participant applies its own <c>http-list-max-elements-limit</c>.
+    /// The <see cref="StreamWindowLimit"/> a client applies when a consumer configures none:
+    /// <c>200</c>, the value Canton documents as the default of a participant's
+    /// <c>http-list-max-elements-limit</c>.
     /// </summary>
-    public long? CompletionStreamLimit { get; set; }
+    public const long DefaultStreamWindowLimit = 200L;
 
     /// <summary>
-    /// How long the participant holds a <c>CompletionStreamAsync</c> window open once no further
-    /// completion arrives, sent as the <c>stream_idle_timeout_ms</c> query parameter on
-    /// <c>POST /v2/commands/completions</c> and rounded down to whole milliseconds. Left unset, the
-    /// participant applies its own idle timeout. This bounds how long a single call blocks, so a
-    /// caller following the stream trades window latency against request volume here.
+    /// The <see cref="StreamWindowIdleTimeout"/> a client applies when a consumer configures none:
+    /// two seconds, the <c>http-list-wait-time</c> value Canton's own documentation uses in its
+    /// worked example.
     /// </summary>
-    public TimeSpan? CompletionStreamIdleTimeout { get; set; }
+    public static readonly TimeSpan DefaultStreamWindowIdleTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Caps how many entries one window of a looped read returns, sent as the <c>limit</c> query
+    /// parameter on every window the pagination loop opens — <c>POST /v2/updates</c> and
+    /// <c>POST /v2/commands/completions</c>. Defaults to <see cref="DefaultStreamWindowLimit"/>.
+    /// </summary>
+    /// <remarks>
+    /// Canton documents that an explicit <c>limit</c> at or below the participant's
+    /// <c>http-list-max-elements-limit</c> never produces the <c>413 Content Too Large</c> that an
+    /// unbounded request can, and that the participant's own cap defaults to 200 — so the default
+    /// here rides a default-configured participant without tripping it. A participant configured
+    /// below this value answers the first window with a 413, which reaches the caller as a terminal
+    /// in-band stream error naming this option; lower it to match that participant.
+    /// <para>
+    /// The ACS snapshot is deliberately not bounded by this. It is a single read the client does
+    /// not page, so capping it would hand a caller a short snapshot that looks complete, where
+    /// leaving the participant's own cap to answer makes an oversized snapshot a loud failure.
+    /// </para>
+    /// </remarks>
+    public long StreamWindowLimit { get; set; } = DefaultStreamWindowLimit;
+
+    /// <summary>
+    /// How long the participant holds one window open once no further entry arrives, sent as the
+    /// <c>stream_idle_timeout_ms</c> query parameter on every window the pagination loop opens and
+    /// rounded down to whole milliseconds. Defaults to
+    /// <see cref="DefaultStreamWindowIdleTimeout"/>.
+    /// </summary>
+    /// <remarks>
+    /// Canton's documentation states that a window carrying neither an end offset nor this timeout
+    /// never closes, so the client always sends it; two seconds is the <c>http-list-wait-time</c>
+    /// its worked example uses. This bounds how long a single request blocks on a quiet ledger, so
+    /// a consumer following a stream trades window latency against request volume here.
+    /// <para>
+    /// That trade has a ceiling the participant imposes rather than answers: a LocalNet participant
+    /// running Canton 3.5.11 abandons a request it has held for twenty seconds and replies
+    /// <c>503</c> with a "not able to produce a timely response" body, which reaches the caller as a
+    /// terminal in-band stream error. The number is observed on that participant, not documented by
+    /// Canton and not validated here, so it is a value to measure against the deployment rather than
+    /// a contract to configure against. Raising this option past a participant's own request timeout
+    /// ends the stream instead of holding the window longer.
+    /// </para>
+    /// <para>
+    /// The participant's hold is the whole of a followed stream's pacing. The pagination loop
+    /// reopens a window as soon as the previous one answers, so a participant honouring this
+    /// timeout sets the request rate on its own and the client adds no backoff of its own: one
+    /// would tax every window that legitimately answers fast to defend against a participant
+    /// ignoring a parameter sent on every request. A participant that does ignore it is reported
+    /// rather than absorbed — the loop logs a warning once a hundred consecutive windows come back
+    /// neither advancing the offset nor held, and again at each doubling of that run.
+    /// </para>
+    /// </remarks>
+    public TimeSpan StreamWindowIdleTimeout { get; set; } = DefaultStreamWindowIdleTimeout;
 
     /// <summary>
     /// Recurses into <see cref="Retry"/> so its validation runs under the same
@@ -80,18 +130,18 @@ public class RestLedgerClientOptions : IValidatableObject
         Validator.TryValidateObject(
             Retry, new ValidationContext(Retry), results, validateAllProperties: true);
 
-        if (CompletionStreamLimit is { } limit && limit <= 0)
+        if (StreamWindowLimit <= 0)
         {
             results.Add(new ValidationResult(
-                $"{nameof(CompletionStreamLimit)} must be positive when set, but was {limit}.",
-                [nameof(CompletionStreamLimit)]));
+                $"{nameof(StreamWindowLimit)} must be positive, but was {StreamWindowLimit}.",
+                [nameof(StreamWindowLimit)]));
         }
 
-        if (CompletionStreamIdleTimeout is { } idleTimeout && idleTimeout <= TimeSpan.Zero)
+        if (StreamWindowIdleTimeout <= TimeSpan.Zero)
         {
             results.Add(new ValidationResult(
-                $"{nameof(CompletionStreamIdleTimeout)} must be positive when set, but was {idleTimeout}.",
-                [nameof(CompletionStreamIdleTimeout)]));
+                $"{nameof(StreamWindowIdleTimeout)} must be positive, but was {StreamWindowIdleTimeout}.",
+                [nameof(StreamWindowIdleTimeout)]));
         }
 
         return results;

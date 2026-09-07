@@ -74,7 +74,7 @@ public class ExerciseOutcomeExtensionsTests
     public void OneOrThrow_throws_for_InfraError_carrying_status_code_and_source_exception()
     {
         var source = new TimeoutException("boom");
-        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.InfraError(14, "participant unreachable", source);
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.InfraError(14, "participant unreachable", SourceException: source);
 
         var act = () => outcome.OneOrThrow("Mint");
 

@@ -38,7 +38,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         return factory;
     }
 
-    private sealed record TestTemplate : ITemplate
+    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
         public static string PackageId => "pkg";
@@ -46,6 +46,9 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+
+        public static TestTemplate FromRecord(DamlRecord record) =>
+            new();
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport) =>
@@ -182,7 +185,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, PointReadResponse(TreeShapedEvents));
         var client = ClientWith(transport);
 
-        var tree = await client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var tree = await client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         tree.UpdateId.Should().Be("upd-1");
         tree.RootEvents[0].Should().BeOfType<TreeEvent.Exercised>()
@@ -204,7 +207,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
             PointReadResponse($"{CreatedJson(3, "00late")}, {CreatedJson(1, "00early")}"));
         var client = ClientWith(transport);
 
-        var act = () => client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.Which.Message.Should().Contain("node ids must strictly ascend");
@@ -218,7 +221,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
             HttpStatusCode.OK, """{"update": {"Reassignment": {"value": {"offset": "7", "events": []}}}}""");
         var client = ClientWith(transport);
 
-        var act = () => client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateTreeByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.Which.Message.Should().Contain("Reassignment");
@@ -231,7 +234,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
     {
         var client = ClientWith(new RecordingHttpHandler());
 
-        var act = () => client.GetUpdateTreeByOffsetAsync(offset, AliceSubmitter, TestContext.Current.CancellationToken);
+        var act = () => client.GetUpdateTreeByOffsetAsync(offset, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
@@ -242,7 +245,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, PointReadResponse(TreeShapedEvents));
         var client = ClientWith(transport);
 
-        var result = await client.GetUpdateByOffsetAsync(7L, AliceSubmitter, TestContext.Current.CancellationToken);
+        var result = await client.GetUpdateByOffsetAsync(7L, AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         result.CreatedContracts.Select(c => c.ContractId).Should().Equal("00child", "00sibling");
         result.ExercisedEvents.Select(e => e.ChoiceName).Should().Equal("ExecuteSwap");

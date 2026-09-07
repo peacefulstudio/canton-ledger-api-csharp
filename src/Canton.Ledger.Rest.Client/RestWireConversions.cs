@@ -2,15 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Globalization;
+using Canton.Ledger.Kernel.Wire;
+using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+using WireCreatedEvent = Canton.Ledger.Rest.Client.Raw.CreatedEvent;
 using WireIdentifier = Canton.Ledger.Rest.Client.Raw.Identifier;
 
 namespace Canton.Ledger.Rest.Client;
 
 internal static class RestWireConversions
 {
-    public static IReadOnlyList<Party> ToPartyList(IEnumerable<string>? wireParties)
+    private const long NanosecondsPerTick = 100L;
+
+    public static IReadOnlyList<Party> ToPartyList(IEnumerable<string>? wireParties) =>
+        MalformedResponse.Decoding(wireParties, ToParties);
+
+    private static IReadOnlyList<Party> ToParties(IEnumerable<string>? wireParties)
     {
         var result = new List<Party>();
         if (wireParties is null) return result;
@@ -23,6 +31,41 @@ internal static class RestWireConversions
 
     public static RuntimeIdentifier ToRuntimeIdentifier(WireIdentifier identifier) =>
         new(identifier.PackageId, identifier.ModuleName, identifier.EntityName);
+
+    internal static string? ToKeyHash(string? contractKeyHash) =>
+        string.IsNullOrEmpty(contractKeyHash) ? null : contractKeyHash;
+
+    internal static ContractKey? ContractKeyOf(WireCreatedEvent created, RuntimeIdentifier runtimeTemplateId)
+    {
+        if (created.ContractKey is null)
+        {
+            return null;
+        }
+
+        return new ContractKey(RestValueDecoder.ToDamlValue(created.ContractKey), runtimeTemplateId)
+        {
+            KeyHash = ToKeyHash(created.ContractKeyHash),
+        };
+    }
+
+    /// <remarks>
+    /// The served document constrains a duration to the protobuf JSON encoding
+    /// <c>^-?(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,9})?s$</c> — whole seconds with an optional
+    /// fraction of up to nine digits and no trailing zeros — which no BCL formatter produces.
+    /// </remarks>
+    public static string ToWireDuration(TimeSpan value)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+
+        var seconds = value.Ticks / TimeSpan.TicksPerSecond;
+        var nanoseconds = value.Ticks % TimeSpan.TicksPerSecond * NanosecondsPerTick;
+
+        return nanoseconds == 0
+            ? string.Create(CultureInfo.InvariantCulture, $"{seconds}s")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"{seconds}.{nanoseconds.ToString("D9", CultureInfo.InvariantCulture).TrimEnd('0')}s");
+    }
 
     public static long ParseOffset(string? wireOffset) => ParseNonNegativeInt64(wireOffset, "offset");
 

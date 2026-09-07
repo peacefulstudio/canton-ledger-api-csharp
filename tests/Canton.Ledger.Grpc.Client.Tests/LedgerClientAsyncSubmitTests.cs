@@ -1,10 +1,13 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Telemetry;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Data;
+using Daml.Runtime.Outcomes;
 using AwesomeAssertions;
 using Grpc.Core;
 using Grpc.Net.Client;
@@ -18,7 +21,8 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientAsyncSubmitTests
+[Collection("LedgerClient global ActivitySource")]
+public sealed class LedgerClientAsyncSubmitTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -48,6 +52,8 @@ public class LedgerClientAsyncSubmitTests
         _completionService = Substitute.ForPartsOf<CommandCompletionService.CommandCompletionServiceClient>(callInvoker);
     }
 
+    public void Dispose() => _channel.Dispose();
+
     private LedgerClient CreateClient() => new(
         _options,
         _channel,
@@ -73,7 +79,7 @@ public class LedgerClientAsyncSubmitTests
         StubSubmit(r => captured = r);
 
         var client = CreateClient();
-        _ = await client.SubmitAsync(Create(), TestContext.Current.CancellationToken);
+        _ = await client.SubmitAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         captured!.Commands.Commands_.Should().ContainSingle();
@@ -86,7 +92,7 @@ public class LedgerClientAsyncSubmitTests
         StubSubmit();
 
         var client = CreateClient();
-        var commandId = await client.SubmitAsync(Create("corr-123"), TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(Create("corr-123"), cancellationToken: TestContext.Current.CancellationToken);
 
         commandId.Value.Should().Be("corr-123");
     }
@@ -104,7 +110,7 @@ public class LedgerClientAsyncSubmitTests
             .WithActAs(ActAs);
 
         var client = CreateClient();
-        var commandId = await client.SubmitAsync(submission, TestContext.Current.CancellationToken);
+        var commandId = await client.SubmitAsync(submission, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
         Guid.TryParse(captured!.Commands.CommandId, out _).Should().BeTrue(
@@ -118,7 +124,7 @@ public class LedgerClientAsyncSubmitTests
     {
         var client = CreateClient();
 
-        var act = async () => await client.SubmitAsync(null!, TestContext.Current.CancellationToken);
+        var act = async () => await client.SubmitAsync(null!, cancellationToken: TestContext.Current.CancellationToken);
 
         await act.Should().ThrowAsync<ArgumentNullException>().WithParameterName("submission");
     }
@@ -217,6 +223,69 @@ public class LedgerClientAsyncSubmitTests
     }
 
     [Fact]
+    public async Task CompletionStreamAsync_populates_StreamError_Category_and_SourceException_from_the_transport_fault()
+    {
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "PARTICIPANT_BACKPRESSURE", "the participant is overloaded", "2");
+        StubCompletionStreamFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.Category.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
+        error.SourceException.Should().BeSameAs(rpcException);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_populates_StreamError_ErrorId_from_the_transport_fault()
+    {
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "STALE_STREAM_AUTHORIZATION", "the user's rights changed", "2");
+        StubCompletionStreamFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.ErrorId.Should().Be(
+            "STALE_STREAM_AUTHORIZATION",
+            "the category this fault shares with every other contention condition cannot say which one arrived");
+        error.Category.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_leaves_StreamError_ErrorId_null_when_the_fault_carries_no_structured_error()
+    {
+        StubCompletionStreamFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a transport fault the participant attached no error to reports no code, and none is invented");
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_carries_the_decode_failure_as_SourceException_with_no_category()
+    {
+        StubCompletionStream(CompletionResponse(new Completion { Offset = 7L, UpdateId = "u1" }));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.CompletionStreamAsync(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<CompletionStreamEvent.StreamError>().Subject;
+        error.SourceException.Should().NotBeNull(
+            "the exception that could not decode the completion is the only diagnostic a caller has");
+        error.Category.Should().BeNull("the call itself succeeded, so no participant category was reported");
+    }
+
+    [Fact]
     public async Task CompletionStreamAsync_yields_completions_already_read_before_surfacing_mid_stream_StreamError()
     {
         StubCompletionStreamFailureAfterItems(
@@ -308,6 +377,62 @@ public class LedgerClientAsyncSubmitTests
         thrown.Which.InnerException.Should().BeOfType<RpcException>()
             .Which.StatusCode.Should().Be(StatusCode.Cancelled);
         thrown.Which.CancellationToken.Should().Be(cts.Token);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_surfaces_caller_cancellation_as_OperationCanceledException_carrying_the_RpcException()
+    {
+        using var cts = new CancellationTokenSource();
+        var cancelled = new RpcException(new Status(StatusCode.Cancelled, "call cancelled"));
+        StubSubmitFailure(cancelled, cts);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+        var client = CreateClient();
+
+        var act = async () => await client.SubmitAsync(Create(), cancellationToken: cts.Token);
+
+        var thrown = await act.Should().ThrowAsync<OperationCanceledException>();
+        thrown.Which.InnerException.Should().BeSameAs(cancelled);
+        thrown.Which.CancellationToken.Should().Be(cts.Token);
+        capture.Activities.Should().OnlyContain(activity => activity.Status != ActivityStatusCode.Error);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_records_a_server_side_cancellation_on_the_activity_and_rethrows()
+    {
+        var cancelled = new RpcException(new Status(StatusCode.Cancelled, "server cancelled"));
+        StubSubmitFailure(cancelled, cancelOnCall: null);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+        var client = CreateClient();
+
+        var act = async () => await client.SubmitAsync(Create(), cancellationToken: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<RpcException>()).Which.Should().BeSameAs(cancelled);
+        capture.Activities.Should().Contain(activity => activity.Status == ActivityStatusCode.Error);
+    }
+
+    private static AsyncUnaryCall<TResponse> FailedUnaryCall<TResponse>(RpcException exception) =>
+        new(
+            Task.FromException<TResponse>(exception),
+            Task.FromResult(new Metadata()),
+            () => exception.Status,
+            () => exception.Trailers ?? new Metadata(),
+            () => { });
+
+    private void StubSubmitFailure(RpcException exception, CancellationTokenSource? cancelOnCall)
+    {
+        _submissionService
+            .SubmitAsync(
+                Arg.Any<SubmitRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                cancelOnCall?.Cancel();
+                return FailedUnaryCall<SubmitResponse>(exception);
+            });
     }
 
     private static CompletionStreamResponse CompletionResponse(Completion completion) =>

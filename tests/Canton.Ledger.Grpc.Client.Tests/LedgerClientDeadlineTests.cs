@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Daml.Ledger.Abstractions.Extensions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
@@ -21,7 +22,7 @@ using Status = Grpc.Core.Status;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
-public class LedgerClientDeadlineTests
+public sealed class LedgerClientDeadlineTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
@@ -29,6 +30,10 @@ public class LedgerClientDeadlineTests
     private readonly GrpcChannel _channel;
     private readonly ProtoV2.CommandService.CommandServiceClient _commandService;
     private readonly ProtoV2.StateService.StateServiceClient _stateService;
+    private readonly ProtoV2.UpdateService.UpdateServiceClient _updateService;
+    private readonly ProtoV2.CommandSubmissionService.CommandSubmissionServiceClient _submissionService;
+    private readonly ProtoV2.CommandCompletionService.CommandCompletionServiceClient _completionService;
+    private readonly ProtoV2.VersionService.VersionServiceClient _versionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
     public LedgerClientDeadlineTests()
@@ -44,15 +49,26 @@ public class LedgerClientDeadlineTests
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<ProtoV2.CommandService.CommandServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<ProtoV2.StateService.StateServiceClient>(callInvoker);
+        _updateService = Substitute.ForPartsOf<ProtoV2.UpdateService.UpdateServiceClient>(callInvoker);
+        _submissionService =
+            Substitute.ForPartsOf<ProtoV2.CommandSubmissionService.CommandSubmissionServiceClient>(callInvoker);
+        _completionService =
+            Substitute.ForPartsOf<ProtoV2.CommandCompletionService.CommandCompletionServiceClient>(callInvoker);
+        _versionService = Substitute.ForPartsOf<ProtoV2.VersionService.VersionServiceClient>(callInvoker);
     }
+
+    public void Dispose() => _channel.Dispose();
 
     private LedgerClient CreateClient() => new(
         _options,
         _channel,
         _commandService,
-        new ProtoV2.UpdateService.UpdateServiceClient(_channel),
+        _updateService,
         _stateService,
-        _tokenProvider);
+        _submissionService,
+        _completionService,
+        _tokenProvider,
+        _versionService);
 
     private static RuntimeCommands.CommandsSubmission Create() =>
         RuntimeCommands.CommandsSubmission
@@ -232,7 +248,7 @@ public class LedgerClientDeadlineTests
     }
 
     [Fact]
-    public async Task TryExerciseForCreatedAsync_maps_per_call_timeout_to_call_deadline()
+    public async Task TryCreateOneByExerciseAsync_maps_per_call_timeout_to_call_deadline()
     {
         DateTime? captured = null;
         StubSubmitAndWaitForTransaction(onDeadline: d => captured = d, OkTransaction());
@@ -240,7 +256,7 @@ public class LedgerClientDeadlineTests
 
         var before = DateTime.UtcNow;
         var client = CreateClient();
-        _ = await client.TryExerciseForCreatedAsync<LedgerClientTests.TestTemplate>(
+        _ = await client.TryCreateOneByExerciseAsync<LedgerClientTests.TestTemplate>(
             Exercise(), ActAs, timeout: timeout, cancellationToken: TestContext.Current.CancellationToken);
 
         captured.Should().NotBeNull();
@@ -301,6 +317,186 @@ public class LedgerClientDeadlineTests
         outcome.Should().BeOfType<ExerciseOutcome<ContractStreamEvent<LedgerClientTests.TestTemplate>>.InfraError>()
             .Which.StatusCode.Should().Be((int)StatusCode.Cancelled);
     }
+
+    [Fact]
+    public async Task SubmitAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        _submissionService
+            .SubmitAsync(
+                Arg.Any<ProtoV2.SubmitRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(d => captured = d),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new ProtoV2.SubmitResponse()));
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.SubmitAsync(Create(), timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task SubmitReassignmentAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        _submissionService
+            .SubmitReassignmentAsync(
+                Arg.Any<ProtoV2.SubmitReassignmentRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(d => captured = d),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new ProtoV2.SubmitReassignmentResponse()));
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.SubmitReassignmentAsync(Reassign(), timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetConnectedSynchronizersAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        _stateService
+            .GetConnectedSynchronizersAsync(
+                Arg.Any<ProtoV2.GetConnectedSynchronizersRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(d => captured = d),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new ProtoV2.GetConnectedSynchronizersResponse()));
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetConnectedSynchronizersAsync(
+            timeout: timeout, cancellationToken: TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetLedgerApiVersionAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        _versionService
+            .GetLedgerApiVersionAsync(
+                Arg.Any<ProtoV2.GetLedgerApiVersionRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(d => captured = d),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new ProtoV2.GetLedgerApiVersionResponse { Version = "3.5.9" }));
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetLedgerApiVersionAsync(timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetUpdateByOffsetAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        StubGetUpdateByOffset(d => captured = d);
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetUpdateByOffsetAsync(1L, ActAs, timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetUpdateByIdAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        _updateService
+            .GetUpdateByIdAsync(
+                Arg.Any<ProtoV2.GetUpdateByIdRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(d => captured = d),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(OkUpdate()));
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetUpdateByIdAsync("u-1", ActAs, timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetUpdateByOffsetAsync_falls_back_to_options_timeout_when_per_call_timeout_null()
+    {
+        _options.Timeout = TimeSpan.FromSeconds(30);
+        DateTime? captured = null;
+        StubGetUpdateByOffset(d => captured = d);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetUpdateByOffsetAsync(
+            1L, ActAs, timeout: null, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.AddSeconds(30), TimeSpan.FromSeconds(15));
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_maps_per_call_timeout_to_call_deadline()
+    {
+        DateTime? captured = null;
+        StubGetUpdateByOffset(d => captured = d);
+        var timeout = TimeSpan.FromMinutes(7);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetUpdateTreeByOffsetAsync(1L, ActAs, timeout, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.Add(timeout), TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetUpdateTreeByOffsetAsync_falls_back_to_options_timeout_when_per_call_timeout_null()
+    {
+        _options.Timeout = TimeSpan.FromSeconds(30);
+        DateTime? captured = null;
+        StubGetUpdateByOffset(d => captured = d);
+
+        var before = DateTime.UtcNow;
+        var client = CreateClient();
+        _ = await client.GetUpdateTreeByOffsetAsync(
+            1L, ActAs, timeout: null, TestContext.Current.CancellationToken);
+
+        captured.Should().NotBeNull();
+        captured!.Value.Should().BeCloseTo(before.AddSeconds(30), TimeSpan.FromSeconds(15));
+    }
+
+    private void StubGetUpdateByOffset(Action<DateTime?> onDeadline) =>
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Any<ProtoV2.GetUpdateByOffsetRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Do<DateTime?>(onDeadline),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(OkUpdate()));
+
+    private static ProtoV2.GetUpdateResponse OkUpdate() =>
+        new() { Transaction = new ProtoV2.Transaction { UpdateId = "u-1", Offset = 1L } };
 
     private void StubSubmitAndWaitForReassignment(AsyncUnaryCall<ProtoV2.SubmitAndWaitForReassignmentResponse> call) =>
         _commandService

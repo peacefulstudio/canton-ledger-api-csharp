@@ -12,6 +12,7 @@ using ProtoCreatedEvent = Com.Daml.Ledger.Api.V2.CreatedEvent;
 using ProtoExercisedEvent = Com.Daml.Ledger.Api.V2.ExercisedEvent;
 using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
 using ProtoRecord = Com.Daml.Ledger.Api.V2.Record;
+using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 
@@ -205,6 +206,24 @@ public class GrpcTransactionResultProjectorTests
     }
 
     [Fact]
+    public void Project_leaves_the_projected_key_hash_null_when_the_wire_carries_no_contract_key_hash()
+    {
+        var created = new ProtoCreatedEvent
+        {
+            ContractId = "00keyedWithoutHash",
+            TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+            CreateArguments = new ProtoRecord(),
+            ContractKey = new ProtoValue { Text = "the-key" },
+        };
+
+        var result = GrpcTransactionResultProjector.Project(ResponseWith(created));
+
+        var contract = result.CreatedContracts.Should().ContainSingle().Subject;
+        contract.ContractKey.Should().NotBeNull();
+        contract.ContractKey!.KeyHash.Should().BeNull();
+    }
+
+    [Fact]
     public void Project_still_accepts_a_transaction_the_wire_carried_no_command_id_on()
     {
         var transaction = new Transaction { UpdateId = "update-1", Offset = 42L };
@@ -215,7 +234,7 @@ public class GrpcTransactionResultProjectorTests
         act.Should().NotThrow(
                 "Transaction.command_id is optional on the wire and is absent for everyone except the "
                 + "submitting party, so the transaction path must keep tolerating its absence")
-            .Which.CommandId.Should().Be(default(RuntimeCommands.CommandId));
+            .Which.CommandId.Should().BeNull();
     }
 
     internal sealed record IHolding : IDamlInterface

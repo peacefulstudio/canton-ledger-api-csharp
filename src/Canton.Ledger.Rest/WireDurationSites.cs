@@ -14,10 +14,17 @@ namespace Canton.Ledger.Rest.Client;
 /// <see cref="WireDurationJsonConverter"/> away from the Daml <c>Text</c> values inside a contract
 /// payload.
 /// <para>
-/// <c>Commands.minLedgerTimeRel</c> is the whole table. The interactive-submission path carries its
-/// bound in a <c>MinLedgerTime</c> wrapper the served document nests one level deeper still, under a
-/// <c>time</c> <c>oneOf</c> whose selected arm wraps the duration in a <c>value</c> key; reshaping the
-/// duration alone would not make that envelope bind, so that type is deliberately absent here.
+/// The participant serves both entries as the same <c>Duration</c> schema: a submitted
+/// <c>Commands.minLedgerTimeRel</c> bound the participant otherwise accepts and discards, and an
+/// <c>OffsetCheckpointFeature.maxOffsetCheckpointEmissionDelay</c> the version response carries as
+/// the object form, which without the reshape makes the whole <c>GET /v2/version</c> body fail to
+/// decode rather than just that one field.
+/// </para>
+/// <para>
+/// The interactive-submission path carries its bound in a <c>MinLedgerTime</c> wrapper the served
+/// document nests one level deeper still, under a <c>time</c> <c>oneOf</c> whose selected arm wraps
+/// the duration in a <c>value</c> key; reshaping the duration alone would not make that envelope
+/// bind, so that type is deliberately absent here.
 /// </para>
 /// </summary>
 /// <remarks>
@@ -29,6 +36,7 @@ internal static class WireDurationSites
         new Dictionary<Type, string[]>
         {
             [typeof(Commands)] = ["minLedgerTimeRel"],
+            [typeof(OffsetCheckpointFeature)] = ["maxOffsetCheckpointEmissionDelay"],
         }.ToFrozenDictionary(entry => entry.Key, entry => entry.Value.ToFrozenSet());
 
     /// <summary>

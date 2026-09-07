@@ -11,7 +11,7 @@
  option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
  option java_outer_classname = "PartyManagementServiceOuterClass";
  option java_package = "com.daml.ledger.api.v2.admin";
-@@ -39,16 +41,28 @@ service PartyManagementService {
+@@ -39,16 +41,29 @@ service PartyManagementService {
    // All horizontally scaled replicas should return the same id.
    // daml-on-kv-ledger: returns an identifier supplied on command line at launch time
    // canton: returns globally unique identifier of the participant
@@ -22,12 +22,15 @@
 +    };
 +  }
  
-   // Get the party details of the given parties. Only known parties will be
-   // returned in the list.
+-  // Get the party details of the given parties. Only known parties will be
+-  // returned in the list.
 -  rpc GetParties(GetPartiesRequest) returns (GetPartiesResponse);
++  // Get the party details of the given party. The party is returned only when
++  // the participant knows it, so an unknown party answers with an empty list
++  // rather than an error.
 +  rpc GetParties(GetPartiesRequest) returns (GetPartiesResponse) {
 +    option (google.api.http) = {
-+      get: "/v2/parties/{parties}"
++      get: "/v2/parties/{party}"
 +    };
 +  }
  
@@ -43,7 +46,7 @@
  
    // Allocates a new party on a ledger and adds it to the set managed by the participant.
    // Caller specifies a party identifier suggestion, the actual identifier
-@@ -67,7 +81,12 @@ service PartyManagementService {
+@@ -67,7 +82,12 @@ service PartyManagementService {
    // is richer than the surface protocol, the arguments take implicit values
    // The party identifier suggestion must be a valid party name. Party names are required to be non-empty US-ASCII strings built from letters, digits, space,
    // colon, minus and underscore limited to 255 chars
@@ -57,7 +60,7 @@
  
    // The external party must be hosted (at least) on this node with either confirmation or observation permissions
    // It can optionally be hosted on other nodes (then called a multi-hosted party).
-@@ -78,11 +97,21 @@ service PartyManagementService {
+@@ -78,11 +98,21 @@ service PartyManagementService {
    // In the simple case of a non-multi hosted, non-decentralized party, the RPC will return once the party is
    // effectively allocated and ready to use, similarly to the AllocateParty behavior.
    // For more complex scenarios applications may need to query the party status explicitly (only through the admin API as of now).
@@ -81,7 +84,7 @@
  
    // Update the assignment of a party from one IDP to another.
    rpc UpdatePartyIdentityProviderId(UpdatePartyIdentityProviderIdRequest) returns (UpdatePartyIdentityProviderIdResponse);
-@@ -93,7 +122,12 @@ service PartyManagementService {
+@@ -93,7 +123,12 @@ service PartyManagementService {
    // Note that this request will create a normal namespace using the same key for the
    // identity as for signing. More elaborate schemes such as multi-signature
    // or decentralized parties require you to construct the topology transactions yourself.
@@ -95,3 +98,18 @@
  }
  
  // Required authorization: ``HasRight(ParticipantAdmin)``
+@@ -109,11 +144,11 @@ message GetParticipantIdResponse {
+ 
+ // Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``
+ message GetPartiesRequest {
+-  // The stable, unique identifier of the Daml parties.
+-  // Must be valid PartyIdStrings (as described in ``value.proto``).
++  // The stable, unique identifier of the Daml party.
++  // Must be a valid PartyIdString (as described in ``value.proto``).
+   //
+   // Required: must be non-empty
+-  repeated string parties = 1;
++  string party = 1;
+ 
+   // The id of the ``Identity Provider`` whose parties should be retrieved.
+   // If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Daml.Ledger.Abstractions;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
@@ -11,10 +12,10 @@ namespace Canton.Ledger.Abstractions;
 internal static class InterfaceViewSnapshot
 {
     public static async Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> DrainAsync<TInterface, TView>(
-        IAsyncEnumerable<AcsSnapshotEntry<TInterface>> snapshot,
+        IAsyncEnumerable<InterfaceAcsSnapshotEntry<TInterface, TView>> snapshot,
         CancellationToken cancellationToken)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
+        where TView : IDamlRecord<TView>
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -23,34 +24,35 @@ internal static class InterfaceViewSnapshot
 
         await foreach (var entry in snapshot.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            if (entry is AcsSnapshotEntry<TInterface>.Created created)
+            if (entry is InterfaceAcsSnapshotEntry<TInterface, TView>.Created created)
             {
-                contracts.Add(new InterfaceContract<TInterface, TView>(created.ContractId, Decode<TInterface, TView>(created)));
+                contracts.Add(new InterfaceContract<TInterface, TView>(created.ContractId, created.Payload));
                 continue;
             }
 
-            if (entry is AcsSnapshotEntry<TInterface>.Checkpoint)
+            if (entry is InterfaceAcsSnapshotEntry<TInterface, TView>.Checkpoint)
             {
                 reachedCheckpoint = true;
                 break;
             }
 
-            if (entry is AcsSnapshotEntry<TInterface>.StreamError error)
+            if (entry is InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError error)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 throw new LedgerOperationException(
                     $"The active-contract-set snapshot for {typeof(TInterface).Name} faulted after {contracts.Count} "
-                    + $"interface view(s): {error.Message}. Use SubscribeActiveAsync<{typeof(TInterface).Name}> for "
+                    + $"interface view(s): {error.Message}. Use {ValueShapedAlternative<TInterface>()} for "
                     + "value-shaped fault handling.",
                     error.StatusCode);
             }
 
-            if (entry is AcsSnapshotEntry<TInterface>.Unclassified unclassified)
+            if (entry is InterfaceAcsSnapshotEntry<TInterface, TView>.Unclassified unclassified)
             {
                 throw new LedgerOperationException(
                     $"The active-contract-set snapshot for {typeof(TInterface).Name} carried an unclassified row "
-                    + $"({unclassified.Kind}) at offset {unclassified.Offset.Value}, so the returned views would be "
-                    + $"incomplete. Use SubscribeActiveAsync<{typeof(TInterface).Name}> to handle it as a value.");
+                    + $"({DescribeKind(unclassified)}) at {DescribeOffset(unclassified.Offset)}, so the returned "
+                    + $"views would be incomplete. Use {ValueShapedAlternative<TInterface>()} to handle it as a "
+                    + "value.");
             }
 
             throw new LedgerOperationException(
@@ -68,26 +70,17 @@ internal static class InterfaceViewSnapshot
         return contracts;
     }
 
-    private static TView Decode<TInterface, TView>(AcsSnapshotEntry<TInterface>.Created created)
-        where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord
-    {
-        try
-        {
-            return InterfaceViewDecoder<TView>.FromRecord(created.Payload);
-        }
-        catch (Exception cause) when (cause is not OperationCanceledException and not LedgerOperationException)
-        {
-            throw Undecodable<TInterface, TView>(created, cause);
-        }
-    }
+    private static string ValueShapedAlternative<TInterface>() =>
+        $"SubscribeActiveAsync({typeof(TInterface).Name}.View, ...)";
 
-    private static LedgerOperationException Undecodable<TInterface, TView>(
-        AcsSnapshotEntry<TInterface>.Created created,
-        Exception cause)
+    private static string DescribeKind<TInterface, TView>(
+        InterfaceAcsSnapshotEntry<TInterface, TView>.Unclassified unclassified)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord =>
-        new($"The active-contract-set snapshot for {typeof(TInterface).Name} carried a row at offset "
-            + $"{created.Offset.Value} whose interface view did not decode into {typeof(TView).Name}: {cause.Message}",
-            cause);
+        where TView : IDamlRecord<TView> =>
+        unclassified.RawKind is { Length: > 0 } rawKind
+            ? $"{unclassified.Kind}: {rawKind}"
+            : unclassified.Kind.ToString();
+
+    private static string DescribeOffset(LedgerOffset? offset) =>
+        offset is { } present ? $"offset {present.Value}" : "an unreported offset";
 }

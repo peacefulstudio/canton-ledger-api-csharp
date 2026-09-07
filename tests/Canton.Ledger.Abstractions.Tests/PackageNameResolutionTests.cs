@@ -124,6 +124,21 @@ public class PackageNameResolutionTests
     public void Constructor_rejects_a_null_admin_client() =>
         ((Action)(() => _ = new PackageIdResolver(null!))).Should().Throw<ArgumentNullException>();
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ResolvePackageIdAsync_rejects_a_blank_package_name(string? packageName)
+    {
+        var resolver = ResolverOver(Package("00holding", HoldingPackageName, "1.0.0"));
+
+        var resolving = async () => await resolver.ResolvePackageIdAsync(
+            packageName!, TestContext.Current.CancellationToken);
+
+        (await resolving.Should().ThrowAsync<ArgumentException>())
+            .Which.ParamName.Should().Be("packageName");
+    }
+
     private static PackageDetails Package(string packageId, string name, string version) =>
         new(packageId, name, version, PackageSize: 1024, KnownSince: DateTimeOffset.UnixEpoch);
 

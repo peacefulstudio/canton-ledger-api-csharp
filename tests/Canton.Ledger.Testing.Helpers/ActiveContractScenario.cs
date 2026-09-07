@@ -71,6 +71,12 @@ public sealed record ActiveContractScenario
     /// <summary>The field both the create argument and the interface view carry, with different values.</summary>
     public const string PayloadFieldName = "amount";
 
+    /// <summary>The party field <see cref="TemplateMarker"/> decodes itself from.</summary>
+    public const string OwnerFieldName = "owner";
+
+    /// <summary>The party the create argument's owner field carries.</summary>
+    public const string OwnerParty = "alice::ns1";
+
     /// <summary>The value the implementing template's create argument carries.</summary>
     public const string CreateArgumentValue = "create-argument-value";
 
@@ -115,4 +121,10 @@ public sealed record ActiveContractScenario
 
     /// <summary>The interface view the created event carries — the lever the interface-marker lane turns.</summary>
     public InterfaceViewRendering InterfaceView { get; init; } = InterfaceViewRendering.None;
+
+    /// <summary>
+    /// Renders an <see cref="ActiveContractEntry.IncompleteUnassigned"/> entry whose unassigned event
+    /// carries no contract id, which the contract-id decoder rejects.
+    /// </summary>
+    public bool OmitUnassignedContractId { get; init; }
 }

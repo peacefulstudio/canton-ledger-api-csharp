@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Canton.Ledger.Grpc.Client;
 
@@ -15,17 +17,19 @@ namespace Canton.Ledger.Grpc.Client;
 /// calls attach auth headers but, mirroring the typed streaming paths, carry no default
 /// deadline and are never retried.
 /// </summary>
-internal sealed class AuthenticatedCallInvoker : CallInvoker
+internal sealed partial class AuthenticatedCallInvoker : CallInvoker
 {
     private const string StartFailedMessage = "Unable to read the call result before the call has started.";
 
     private readonly CallInvoker _inner;
     private readonly LedgerCallInvoker _context;
+    private readonly ILogger _logger;
 
-    internal AuthenticatedCallInvoker(CallInvoker inner, LedgerCallInvoker context)
+    internal AuthenticatedCallInvoker(CallInvoker inner, LedgerCallInvoker context, ILogger? logger = null)
     {
         _inner = inner;
         _context = context;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     public override TResponse BlockingUnaryCall<TRequest, TResponse>(
@@ -182,9 +186,9 @@ internal sealed class AuthenticatedCallInvoker : CallInvoker
     private static T Started<T>(T? call) where T : class =>
         call ?? throw new InvalidOperationException(StartFailedMessage);
 
-    private static void DisposeWhenStarted<T>(Task<T> callTask) where T : IDisposable =>
+    private void DisposeWhenStarted<T>(Task<T> callTask) where T : IDisposable =>
         _ = callTask.ContinueWith(
-            static task =>
+            static (task, state) =>
             {
                 if (task.IsCompletedSuccessfully)
                 {
@@ -192,8 +196,9 @@ internal sealed class AuthenticatedCallInvoker : CallInvoker
                     {
                         task.Result.Dispose();
                     }
-                    catch (Exception)
+                    catch (Exception disposeFailure)
                     {
+                        LogAbandonedCallDisposeFailed((ILogger)state!, disposeFailure);
                     }
                 }
                 else
@@ -201,9 +206,15 @@ internal sealed class AuthenticatedCallInvoker : CallInvoker
                     _ = task.Exception;
                 }
             },
+            _logger,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
+
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Disposing an abandoned gRPC call failed")]
+    private static partial void LogAbandonedCallDisposeFailed(ILogger logger, Exception disposeFailure);
 
     private sealed class DeferredStreamReader<TResponse>(Task<IAsyncStreamReader<TResponse>> readerTask)
         : IAsyncStreamReader<TResponse>

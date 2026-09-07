@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.CodeDom.Compiler;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Reflection;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Telemetry;
 using Canton.Ledger.Rest.Client.Raw;
 using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -183,7 +185,7 @@ public class ServiceCollectionExtensionsTests
         using var listener = new System.Diagnostics.ActivityListener
         {
             ShouldListenTo = source =>
-                source.Name == RestLedgerClient.ActivitySourceName,
+                source.Name == LedgerActivitySourceNames.RestLedgerClient,
             Sample = (ref System.Diagnostics.ActivityCreationOptions<System.Diagnostics.ActivityContext> _) =>
                 System.Diagnostics.ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity =>
@@ -312,5 +314,47 @@ public class ServiceCollectionExtensionsTests
         var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
 
         act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(typeof(ILedgerReader))]
+    [InlineData(typeof(ILedgerWriter))]
+    [InlineData(typeof(ILedgerStreamer))]
+    [InlineData(typeof(ILedgerClient))]
+    [InlineData(typeof(ICantonLedgerClient))]
+    public void AddRestLedgerClient_registers_the_transport_neutral_surface_as_transient(Type serviceType)
+    {
+        var services = new ServiceCollection();
+        services.AddRestLedgerClient(options => options.HttpAddress = "http://ledger.example:7575");
+
+        services.Should().ContainSingle(descriptor => descriptor.ServiceType == serviceType)
+            .Which.Lifetime.Should().Be(ServiceLifetime.Transient);
+    }
+
+    [Theory]
+    [InlineData(typeof(ILedgerReader))]
+    [InlineData(typeof(ILedgerWriter))]
+    [InlineData(typeof(ILedgerStreamer))]
+    [InlineData(typeof(ILedgerClient))]
+    [InlineData(typeof(ICantonLedgerClient))]
+    public void AddRestLedgerClient_resolves_the_transport_neutral_surface_as_the_RestLedgerClient_adapter(Type serviceType)
+    {
+        var services = new ServiceCollection();
+        services.AddRestLedgerClient(options => options.HttpAddress = "http://ledger.example:7575");
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService(serviceType).Should().BeOfType<RestLedgerClient>();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_keeps_a_consumer_registration_made_before_it()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ILedgerReader>(static _ => throw new UnreachableException());
+
+        services.AddRestLedgerClient(options => options.HttpAddress = "http://ledger.example:7575");
+
+        services.Should().ContainSingle(descriptor => descriptor.ServiceType == typeof(ILedgerReader))
+            .Which.Lifetime.Should().Be(ServiceLifetime.Singleton);
     }
 }

@@ -13,7 +13,7 @@ namespace Canton.Ledger.Rest.Client;
 /// Applies the kernel's opt-in retry pipeline to every JSON Ledger API request, mirroring the gRPC
 /// client's <c>LedgerCallInvoker</c>. Registered outermost in the handler chain, so each attempt
 /// resolves a fresh bearer token and emits its own client span. Register the source as
-/// <c>tracing.AddSource(RestLedgerClient.ActivitySourceName)</c> to see the retry spans.
+/// <c>tracing.AddSource(LedgerActivitySourceNames.RestLedgerClient)</c> to see the retry spans.
 /// </summary>
 internal sealed class RestRetryHandler : DelegatingHandler
 {

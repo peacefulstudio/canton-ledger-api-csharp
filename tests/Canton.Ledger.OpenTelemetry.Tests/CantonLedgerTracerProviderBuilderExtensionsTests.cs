@@ -3,9 +3,7 @@
 
 using System.Diagnostics;
 using AwesomeAssertions;
-using Canton.Ledger.Grpc.Client;
-using Canton.Ledger.Pqs.Client;
-using Canton.Ledger.Rest.Client;
+using Canton.Ledger.Kernel.Telemetry;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Xunit;
@@ -43,7 +41,7 @@ public class CantonLedgerTracerProviderBuilderExtensionsTests
             .AddInMemoryExporter(exportedItems)
             .Build();
 
-        using var source = new ActivitySource(LedgerClient.ActivitySourceName);
+        using var source = new ActivitySource(LedgerActivitySourceNames.GrpcLedgerClient);
         using (source.StartActivity("test-ledger-client"))
         {
         }
@@ -61,7 +59,7 @@ public class CantonLedgerTracerProviderBuilderExtensionsTests
             .AddInMemoryExporter(exportedItems)
             .Build();
 
-        using var source = new ActivitySource(AdminClient.ActivitySourceName);
+        using var source = new ActivitySource(LedgerActivitySourceNames.GrpcAdminClient);
         using (source.StartActivity("test-admin-client"))
         {
         }
@@ -79,7 +77,7 @@ public class CantonLedgerTracerProviderBuilderExtensionsTests
             .AddInMemoryExporter(exportedItems)
             .Build();
 
-        using var source = new ActivitySource(PqsClient.ActivitySourceName);
+        using var source = new ActivitySource(LedgerActivitySourceNames.PqsClient);
         using (source.StartActivity("test-pqs-client"))
         {
         }
@@ -97,7 +95,7 @@ public class CantonLedgerTracerProviderBuilderExtensionsTests
             .AddInMemoryExporter(exportedItems)
             .Build();
 
-        using var source = new ActivitySource(RestLedgerClient.ActivitySourceName);
+        using var source = new ActivitySource(LedgerActivitySourceNames.RestLedgerClient);
         using (source.StartActivity("test-rest-ledger-client"))
         {
         }

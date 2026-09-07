@@ -9,6 +9,7 @@ using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Grpc;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
@@ -52,174 +53,164 @@ internal sealed partial class SubmissionClient
         _treePointReadByOffset = treePointReadByOffset;
     }
 
-    internal async Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
+    internal Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWaitForTransaction");
-        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteOutcomeTracedAsync<SubmissionClient, ExerciseOutcome<TResult>>(
+            LedgerCallInvoker.Source,
+            new ServerCall(CommandService.Descriptor, "SubmitAndWaitForTransaction"),
+            async (activity, token) =>
+            {
+                var submission = NewExerciseSubmission(activity, command, submitter, workflowId, commandId);
 
-        var transactionFormat = SubscribeRequestBuilder.BuildTransactionFormat(submitter);
+                var transactionFormat = SubscribeRequestBuilder.BuildTransactionFormat(submitter);
 
-        var commands = _commandBuilder.BuildCommands(submission);
-        var outcome = await TrySubmitCoreAsync(
-            commands, transactionFormat, submitter, GrpcTransactionResultProjector.Project, _pointReadByOffset,
-            timeout, cancellationToken).ConfigureAwait(false);
+                var commands = _commandBuilder.BuildCommands(submission);
+                var outcome = await TrySubmitCoreAsync(
+                    commands, transactionFormat, submitter, GrpcTransactionResultProjector.Project, _pointReadByOffset,
+                    timeout, token).ConfigureAwait(false);
 
-        switch (outcome)
-        {
-            case ExerciseOutcome<TransactionResult>.One success:
-                LogChoiceExercised(_logger, command.Choice, command.ContractId);
-                var choiceResult = success.Result.ExerciseResult<TResult>(command.Choice);
-                return choiceResult is null
-                    ? new ExerciseOutcome<TResult>.None()
-                    : new ExerciseOutcome<TResult>.One(choiceResult);
-            case ExerciseOutcome<TransactionResult>.DamlError damlError:
-                LogChoiceExerciseFailed(_logger, command.Choice, command.ContractId);
-                activity.RecordDamlError(damlError.ErrorId);
-                return new ExerciseOutcome<TResult>.DamlError(
-                    damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata);
-            case ExerciseOutcome<TransactionResult>.InfraError infraError:
-                LogChoiceExerciseFailed(_logger, command.Choice, command.ContractId);
-                activity.RecordInfraError(infraError.StatusCode, infraError.Message);
-                return new ExerciseOutcome<TResult>.InfraError(infraError.StatusCode, infraError.Message);
-            default:
-                throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}");
-        }
-    }
+                LogChoiceExerciseOutcome(outcome, command);
 
-    internal async Task<SubmitAndWaitResult> SubmitAndWaitAsync(
+                return GrpcTransactionResultProjector.ProjectChoiceResult<TResult>(outcome, command.Choice);
+            },
+            RecordOutcome,
+            cancellationToken);
+
+    internal Task<SubmitAndWaitResult> SubmitAndWaitAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWait");
-        var commands = _commandBuilder.BuildCommands(submission);
-        try
-        {
-            var response = await SubmitAndWaitCoreAsync(commands, timeout, cancellationToken).ConfigureAwait(false);
-            return new SubmitAndWaitResult(
-                (RuntimeCommands.CommandId)commands.CommandId,
-                response.UpdateId,
-                LedgerOffset.At(response.CompletionOffset));
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
-    }
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteTracedAsync<SubmissionClient, SubmitAndWaitResult>(
+            LedgerCallInvoker.Source,
+            CommandService.Descriptor,
+            "SubmitAndWait",
+            async (_, token) =>
+            {
+                var commands = _commandBuilder.BuildCommands(submission);
+                var response = await SubmitAndWaitCoreAsync(commands, timeout, token).ConfigureAwait(false);
+                return new SubmitAndWaitResult(
+                    (RuntimeCommands.CommandId)commands.CommandId,
+                    response.UpdateId,
+                    LedgerOffset.At(response.CompletionOffset));
+            },
+            cancellationToken);
 
-    internal async Task<RuntimeCommands.CommandId> SubmitAsync(
+    internal Task<RuntimeCommands.CommandId> SubmitAsync(
         RuntimeCommands.CommandsSubmission submission,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandSubmissionService.Descriptor, "Submit");
-        var commands = _commandBuilder.BuildCommands(submission);
-        LogFireSubmit(_logger, commands.CommandId, submission.Commands.Count);
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteTracedAsync<SubmissionClient, RuntimeCommands.CommandId>(
+            LedgerCallInvoker.Source,
+            CommandSubmissionService.Descriptor,
+            "Submit",
+            async (_, token) =>
+            {
+                var commands = _commandBuilder.BuildCommands(submission);
+                LogFireSubmit(_logger, commands.CommandId, submission.Commands.Count);
 
-        var request = new SubmitRequest { Commands = commands };
-        try
-        {
-            await _invoker.InvokeAsync(
-                (headers, deadline, token) => _commandSubmissionService.SubmitAsync(request, headers, deadline, token),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+                var request = new SubmitRequest { Commands = commands };
+                await _invoker.InvokeAsync(
+                    (headers, deadline, callToken) =>
+                        _commandSubmissionService.SubmitAsync(request, headers, deadline, callToken),
+                    token,
+                    timeout).ConfigureAwait(false);
 
-        return (RuntimeCommands.CommandId)commands.CommandId;
-    }
+                return (RuntimeCommands.CommandId)commands.CommandId;
+            },
+            cancellationToken);
 
-    internal async Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
+    internal Task<RuntimeCommands.CommandId> SubmitReassignmentAsync(
         ReassignmentSubmission submission,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandSubmissionService.Descriptor, "SubmitReassignment");
-        var commands = _commandBuilder.BuildReassignmentCommands(submission);
-        LogFireReassignment(_logger, commands.CommandId, submission.Command.GetType().Name);
+        TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteTracedAsync<SubmissionClient, RuntimeCommands.CommandId>(
+            LedgerCallInvoker.Source,
+            CommandSubmissionService.Descriptor,
+            "SubmitReassignment",
+            async (_, token) =>
+            {
+                var commands = _commandBuilder.BuildReassignmentCommands(submission);
+                LogFireReassignment(_logger, commands.CommandId, submission.Command.GetType().Name);
 
-        var request = new SubmitReassignmentRequest { ReassignmentCommands = commands };
-        try
-        {
-            await _invoker.InvokeAsync(
-                (headers, deadline, token) => _commandSubmissionService.SubmitReassignmentAsync(request, headers, deadline, token),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (RpcException ex)
-        {
-            activity.RecordGrpcError(ex);
-            throw;
-        }
+                var request = new SubmitReassignmentRequest { ReassignmentCommands = commands };
+                await _invoker.InvokeAsync(
+                    (headers, deadline, callToken) =>
+                        _commandSubmissionService.SubmitReassignmentAsync(request, headers, deadline, callToken),
+                    token,
+                    timeout).ConfigureAwait(false);
 
-        return (RuntimeCommands.CommandId)commands.CommandId;
-    }
+                return (RuntimeCommands.CommandId)commands.CommandId;
+            },
+            cancellationToken);
 
-    internal async Task<ExerciseOutcome<ContractStreamEvent<T>>> TrySubmitAndWaitForReassignmentAsync<T>(
+    internal Task<ExerciseOutcome<ContractStreamEvent<T>>> TrySubmitAndWaitForReassignmentAsync<T>(
         ReassignmentSubmission submission,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where T : IDamlType
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWaitForReassignment");
-        var commands = _commandBuilder.BuildReassignmentCommands(submission);
-        LogAwaitReassignment(_logger, commands.CommandId, submission.Command.GetType().Name);
-
-        var submitter = new RuntimeCommands.SubmitterInfo(
-            new HashSet<Daml.Runtime.Data.Party> { submission.Submitter }, new HashSet<Daml.Runtime.Data.Party>());
-        var eventFormat = SubscribeRequestBuilder.BuildReassignmentEventFormat(
-            submitter, MarkerMatcher<T>.StreamFilterIdentifier(), MarkerMatcher<T>.IsInterface);
-
-        var request = new SubmitAndWaitForReassignmentRequest
-        {
-            ReassignmentCommands = commands,
-            EventFormat = eventFormat,
-        };
-
-        try
-        {
-            var response = await _invoker.InvokeAsync(
-                (headers, deadline, token) => _commandService.SubmitAndWaitForReassignmentAsync(request, headers, deadline, token),
-                cancellationToken,
-                timeout).ConfigureAwait(false);
-
-            ContractStreamEvent<T> projected;
-            try
+        where T : ITemplate, IDamlRecord<T> =>
+        _invoker.ExecuteOutcomeTracedAsync<SubmissionClient, ExerciseOutcome<ContractStreamEvent<T>>>(
+            LedgerCallInvoker.Source,
+            new ServerCall(CommandService.Descriptor, "SubmitAndWaitForReassignment"),
+            async (_, token) =>
             {
-                projected = ProjectReassignmentResult<T>(response);
-            }
-            catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
-            {
-                LogReassignmentResponseUndecodable(_logger, decodeFailure);
-                return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                    (int)StatusCode.Internal,
-                    $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}");
-            }
+                var commands = _commandBuilder.BuildReassignmentCommands(submission);
+                LogAwaitReassignment(_logger, commands.CommandId, submission.Command.GetType().Name);
 
-            return new ExerciseOutcome<ContractStreamEvent<T>>.One(projected);
-        }
-        catch (RpcException ex)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
+                var submitter = new RuntimeCommands.SubmitterInfo(
+                    new HashSet<Daml.Runtime.Data.Party> { submission.Submitter }, new HashSet<Daml.Runtime.Data.Party>());
+                var eventFormat = SubscribeRequestBuilder.BuildReassignmentEventFormat(
+                    submitter, MarkerMatcher<T>.StreamFilterIdentifier(), MarkerMatcher<T>.IsInterface);
 
-            LogSubmitFailed(_logger, ex.StatusCode, ex.Status.Detail);
-            return ToFailureOutcome<ContractStreamEvent<T>>(activity, ex);
-        }
-    }
+                var request = new SubmitAndWaitForReassignmentRequest
+                {
+                    ReassignmentCommands = commands,
+                    EventFormat = eventFormat,
+                };
+
+                try
+                {
+                    var response = await _invoker.InvokeAsync(
+                        (headers, deadline, callToken) =>
+                            _commandService.SubmitAndWaitForReassignmentAsync(request, headers, deadline, callToken),
+                        token,
+                        timeout).ConfigureAwait(false);
+
+                    ContractStreamEvent<T> projected;
+                    try
+                    {
+                        projected = ProjectReassignmentResult<T>(response);
+                    }
+                    catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
+                    {
+                        LogReassignmentResponseUndecodable(_logger, decodeFailure);
+                        return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
+                            (int)StatusCode.Internal,
+                            $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}",
+                            SourceException: decodeFailure);
+                    }
+
+                    return new ExerciseOutcome<ContractStreamEvent<T>>.One(projected);
+                }
+                catch (RpcException ex) when (CallerCancellation.Signals(ex, token))
+                {
+                    throw CallerCancellation.AsOperationCanceled(ex, token);
+                }
+                catch (RpcException ex)
+                {
+                    LogSubmitFailed(_logger, ex.StatusCode, ex.Status.Detail);
+                    return ToFailureOutcome<ContractStreamEvent<T>>(ex);
+                }
+            },
+            RecordOutcome,
+            cancellationToken);
 
     private static ContractStreamEvent<T> ProjectReassignmentResult<T>(SubmitAndWaitForReassignmentResponse response)
-        where T : IDamlType
+        where T : ITemplate, IDamlRecord<T>
     {
         var projected = ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment).ToList();
         return projected.FirstOrDefault(e => e is ContractStreamEvent<T>.Assigned or ContractStreamEvent<T>.Unassigned)
@@ -228,104 +219,81 @@ internal sealed partial class SubmissionClient
                 LedgerOffset.At(response.Reassignment.Offset), UnclassifiedKind.EmptyReassignment);
     }
 
-    internal async Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
+    internal Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWaitForTransaction");
-        LogSubmittingCommands(_logger, submission.Commands.Count);
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteOutcomeTracedAsync<SubmissionClient, ExerciseOutcome<TransactionResult>>(
+            LedgerCallInvoker.Source,
+            new ServerCall(CommandService.Descriptor, "SubmitAndWaitForTransaction"),
+            (_, token) =>
+            {
+                LogSubmittingCommands(_logger, submission.Commands.Count);
 
-        var commands = _commandBuilder.BuildCommands(submission);
-        var outcome = await TrySubmitCoreAsync(
-            commands, transactionFormat: null, SubmitterFrom(submission), GrpcTransactionResultProjector.Project,
-            _pointReadByOffset, timeout, cancellationToken).ConfigureAwait(false);
+                var commands = _commandBuilder.BuildCommands(submission);
+                return TrySubmitCoreAsync(
+                    commands, transactionFormat: null, SubmitterFrom(submission), GrpcTransactionResultProjector.Project,
+                    _pointReadByOffset, timeout, token);
+            },
+            RecordOutcome,
+            cancellationToken);
 
-        switch (outcome)
-        {
-            case ExerciseOutcome<TransactionResult>.DamlError damlError:
-                activity.RecordDamlError(damlError.ErrorId);
-                break;
-            case ExerciseOutcome<TransactionResult>.InfraError infraError:
-                activity.RecordInfraError(infraError.StatusCode, infraError.Message);
-                break;
-        }
-
-        return outcome;
-    }
-
-    internal async Task<ExerciseOutcome<TransactionTree>> TrySubmitAndWaitForTransactionTreeAsync(
+    internal Task<ExerciseOutcome<TransactionTree>> TrySubmitAndWaitForTransactionTreeAsync(
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source);
-        _invoker.TagServerCall(activity, CommandService.Descriptor, "SubmitAndWaitForTransaction");
-        activity.SetSubmitterTags(submitter);
-        LogSubmittingCommands(_logger, submission.Commands.Count);
+        CancellationToken cancellationToken = default) =>
+        _invoker.ExecuteOutcomeTracedAsync<SubmissionClient, ExerciseOutcome<TransactionTree>>(
+            LedgerCallInvoker.Source,
+            new ServerCall(CommandService.Descriptor, "SubmitAndWaitForTransaction"),
+            (_, token) =>
+            {
+                LogSubmittingCommands(_logger, submission.Commands.Count);
 
-        var commands = _commandBuilder.BuildCommands(submission.WithSubmitter(submitter));
-        var outcome = await TrySubmitCoreAsync(
-            commands,
-            SubscribeRequestBuilder.BuildTransactionFormat(submitter),
-            submitter,
-            GrpcTransactionTreeProjector.Project,
-            _treePointReadByOffset,
-            timeout,
-            cancellationToken).ConfigureAwait(false);
+                var commands = _commandBuilder.BuildCommands(submission.WithSubmitter(submitter));
+                return TrySubmitCoreAsync(
+                    commands,
+                    SubscribeRequestBuilder.BuildTransactionFormat(submitter),
+                    submitter,
+                    GrpcTransactionTreeProjector.Project,
+                    _treePointReadByOffset,
+                    timeout,
+                    token);
+            },
+            RecordOutcome,
+            cancellationToken,
+            configureActivity: activity => activity.SetSubmitterTags(submitter));
 
-        switch (outcome)
-        {
-            case ExerciseOutcome<TransactionTree>.DamlError damlError:
-                activity.RecordDamlError(damlError.ErrorId);
-                break;
-            case ExerciseOutcome<TransactionTree>.InfraError infraError:
-                activity.RecordInfraError(infraError.StatusCode, infraError.Message);
-                break;
-        }
-
-        return outcome;
-    }
-
-    internal async Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
+    internal Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,
         string? workflowId = null,
+        RuntimeCommands.CommandId? commandId = null,
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
-        where TTemplate : ITemplate
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source, ActivityKind.Internal);
-        activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TTemplate).Name);
-        activity.SetSubmitterTags(submitter);
+        where TTemplate : ITemplate =>
+        _invoker.ExecuteOutcomeTracedAsync<SubmissionClient, ExerciseOutcome<ContractId<TTemplate>>>(
+            LedgerCallInvoker.Source,
+            serverCall: null,
+            async (_, token) =>
+            {
+                var createCommand = RuntimeCommands.CreateCommand.For(payload);
+                var submission = NewSubmission(
+                    createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}", commandId);
 
-        var createCommand = RuntimeCommands.CreateCommand.For(payload);
-        var submission = NewSubmission(
-            createCommand, submitter, workflowId ?? $"create-{typeof(TTemplate).Name.ToLowerInvariant()}");
+                LogCreatingContract(_logger, typeof(TTemplate).Name);
 
-        LogCreatingContract(_logger, typeof(TTemplate).Name);
-
-        var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken).ConfigureAwait(false);
-        return GrpcTransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
-    }
-
-    internal async Task<ExerciseOutcome<ContractId<TMarker>>> TryExerciseForCreatedAsync<TMarker>(
-        RuntimeCommands.ExerciseCommand command,
-        RuntimeCommands.SubmitterInfo submitter,
-        string? workflowId = null,
-        TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
-        where TMarker : IDamlType
-    {
-        using var activity = LedgerActivitySource.StartActivity<SubmissionClient>(LedgerCallInvoker.Source, ActivityKind.Internal);
-        activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TMarker).Name);
-        var submission = NewExerciseSubmission(activity, command, submitter, workflowId);
-
-        var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, cancellationToken).ConfigureAwait(false);
-        return GrpcTransactionResultProjector.ProjectToContractId<TMarker>(outcome);
-    }
+                var outcome = await TrySubmitAndWaitForTransactionAsync(submission, timeout, token).ConfigureAwait(false);
+                return GrpcTransactionResultProjector.ProjectToContractId<TTemplate>(outcome);
+            },
+            LedgerCallInvoker.RecordNothing,
+            cancellationToken,
+            configureActivity: activity =>
+            {
+                activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TTemplate).Name);
+                activity.SetSubmitterTags(submitter);
+            },
+            activityKind: ActivityKind.Internal);
 
     private async Task<ExerciseOutcome<TProjection>> TrySubmitCoreAsync<TProjection>(
         Commands commands,
@@ -368,7 +336,8 @@ internal sealed partial class SubmissionClient
                 LogTransactionResponseUndecodable(_logger, decodeFailure);
                 return new ExerciseOutcome<TProjection>.InfraError(
                     (int)StatusCode.Internal,
-                    $"Could not decode the transaction in the ledger response: {decodeFailure.Message}");
+                    $"Could not decode the transaction in the ledger response: {decodeFailure.Message}",
+                    SourceException: decodeFailure);
             }
 
             if (_logger.IsEnabled(LogLevel.Information))
@@ -378,12 +347,14 @@ internal sealed partial class SubmissionClient
             }
             return new ExerciseOutcome<TProjection>.One(projected);
         }
+        catch (RpcException ex) when (CallerCancellation.Signals(ex, cancellationToken))
+        {
+            throw CallerCancellation.AsOperationCanceled(ex, cancellationToken);
+        }
         catch (RpcException ex)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
             LogSubmitFailed(_logger, ex.StatusCode, ex.Status.Detail);
-            var outcome = ToFailureOutcome<TProjection>(activity: null, ex);
+            var outcome = ToFailureOutcome<TProjection>(ex);
             if (attemptCount > 1
                 && outcome is ExerciseOutcome<TProjection>.DamlError { ErrorId: DuplicateCommandErrorId } duplicate)
             {
@@ -420,18 +391,47 @@ internal sealed partial class SubmissionClient
         _ => false,
     };
 
-    private static ExerciseOutcome<T> ToFailureOutcome<T>(Activity? activity, RpcException exception)
+    private void LogChoiceExerciseOutcome(
+        ExerciseOutcome<TransactionResult> outcome, RuntimeCommands.ExerciseCommand command)
     {
-        var parsed = DamlErrorParser.Parse(exception);
-        if (parsed.ErrorId.Length > 0)
+        if (outcome is ExerciseOutcome<TransactionResult>.One)
         {
-            activity.RecordDamlError(parsed.ErrorId);
-            return new ExerciseOutcome<T>.DamlError(
-                parsed.Category, parsed.ErrorId, parsed.Message, parsed.Metadata);
+            LogChoiceExercised(_logger, command.Choice, command.ContractId);
+            return;
         }
 
-        activity.RecordInfraError((int)exception.StatusCode, exception.Status.Detail ?? exception.Message);
-        return new ExerciseOutcome<T>.InfraError((int)exception.StatusCode, exception.Status.Detail ?? exception.Message);
+        LogChoiceExerciseFailed(_logger, command.Choice, command.ContractId);
+    }
+
+    private static ExerciseOutcome<T> ToFailureOutcome<T>(RpcException exception) =>
+        DamlErrorParser.Parse(exception) switch
+        {
+            ParsedLedgerError.Structured structured => new ExerciseOutcome<T>.DamlError(
+                structured.Category, structured.ErrorId, structured.Message, structured.Metadata),
+            ParsedLedgerError.Unstructured unstructured => new ExerciseOutcome<T>.InfraError(
+                (int)exception.StatusCode,
+                exception.Status.Detail ?? exception.Message,
+                unstructured.Category,
+                exception),
+            var parsed => throw new InvalidOperationException(
+                $"Unhandled parsed ledger error: {parsed.GetType().Name}"),
+        };
+
+    private static void RecordOutcome<T>(Activity? activity, ExerciseOutcome<T> outcome)
+    {
+        switch (outcome)
+        {
+            case ExerciseOutcome<T>.DamlError damlError:
+                activity.RecordDamlError(damlError.ErrorId);
+                break;
+            case ExerciseOutcome<T>.InfraError infraError:
+                activity.RecordInfraError(infraError.StatusCode, infraError.Message);
+                break;
+            case ExerciseOutcome<T>.One:
+            case ExerciseOutcome<T>.None:
+            case ExerciseOutcome<T>.Many:
+                break;
+        }
     }
 
     private async Task<ExerciseOutcome<TProjection>> ResolveRetriedDuplicateAsync<TProjection>(
@@ -489,24 +489,28 @@ internal sealed partial class SubmissionClient
     private static RuntimeCommands.CommandsSubmission NewSubmission(
         RuntimeCommands.ICommand command,
         RuntimeCommands.SubmitterInfo submitter,
-        string workflowId) =>
+        string workflowId,
+        RuntimeCommands.CommandId? commandId) =>
         RuntimeCommands.CommandsSubmission.Single(command)
             .WithSubmitter(submitter)
-            .WithCommandId(new RuntimeCommands.CommandId(Guid.NewGuid().ToString()))
+            .WithCommandId(commandId ?? MintedCommandId())
             .WithWorkflowId(new RuntimeCommands.WorkflowId(workflowId));
+
+    private static RuntimeCommands.CommandId MintedCommandId() => new(Guid.NewGuid().ToString());
 
     private RuntimeCommands.CommandsSubmission NewExerciseSubmission(
         Activity? activity,
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
-        string? workflowId)
+        string? workflowId,
+        RuntimeCommands.CommandId? commandId)
     {
         activity?.SetTag(LedgerClientActivityTags.DamlChoice, command.Choice.Value);
         activity?.SetTag(LedgerClientActivityTags.DamlContractId, command.ContractId.Value);
         activity.SetSubmitterTags(submitter);
         LogExercisingChoice(_logger, command.Choice, command.ContractId);
         return NewSubmission(
-            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}");
+            command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}", commandId);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Creating contract {TemplateType}")]
