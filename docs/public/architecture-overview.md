@@ -138,7 +138,7 @@ Authentication is abstracted behind `ITokenProvider` (`GetTokenAsync` → bearer
 - `StaticTokenProvider` — a pre-provisioned token.
 - `ITokenProvider.None` — unauthenticated participants; no header is sent.
 
-`Kernel.Telemetry.LedgerActivitySource` is the shared `ActivitySource` naming convention every client's spans follow, and `Kernel.Telemetry.LedgerActivitySourceNames` publishes the resulting names so the host-side wiring in `Canton.Ledger.OpenTelemetry` reaches them without referencing a concrete client assembly; `Kernel.Resilience` is the opt-in Polly retry pipeline, disabled by default and wired into both the gRPC and HTTP clients.
+`Kernel.Telemetry.LedgerActivitySource` is the shared `ActivitySource` naming convention every client's spans follow, and `Kernel.Telemetry.LedgerActivitySourceNames` publishes the resulting names so the host-side wiring in `Canton.Ledger.OpenTelemetry` reaches them without referencing a concrete client assembly, and `Kernel.Telemetry.LedgerActivityTagNames` publishes the SDK-owned `daml.*`/`canton.*`/`retry.*` span-attribute names those spans carry so a host names one in a dashboard query, a sampling rule or a redaction filter without hardcoding the string; `Kernel.Resilience` is the opt-in Polly retry pipeline, disabled by default and wired into both the gRPC and HTTP clients.
 
 ### `Canton.Ledger.Pqs.Client` — the read model
 

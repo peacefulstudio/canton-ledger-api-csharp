@@ -17,9 +17,7 @@ namespace Canton.Ledger.Rest.Client;
 /// </summary>
 internal sealed class RestRetryHandler : DelegatingHandler
 {
-    internal const string RetryAttemptActivityName = "RestLedgerClient.RetryAttempt";
-    internal const string RetryAttemptNumberTag = "retry.attempt";
-    internal const string RetryDelayTag = "retry.delay_ms";
+    private const string RetryAttemptActivityName = "RestLedgerClient.RetryAttempt";
 
     private static readonly ActivitySource Source = LedgerActivitySource.Create<RestLedgerClient>();
 
@@ -71,8 +69,8 @@ internal sealed class RestRetryHandler : DelegatingHandler
         using var activity = Source.StartActivity(RetryAttemptActivityName, ActivityKind.Internal);
         if (activity is null) return;
 
-        activity.SetTag(RetryAttemptNumberTag, attempt.AttemptNumber);
-        activity.SetTag(RetryDelayTag, attempt.RetryDelay.TotalMilliseconds);
+        activity.SetTag(LedgerActivityTagNames.RetryAttempt, attempt.AttemptNumber);
+        activity.SetTag(LedgerActivityTagNames.RetryDelayMs, attempt.RetryDelay.TotalMilliseconds);
         if (attempt.Exception is { } exception)
         {
             activity.SetStatus(ActivityStatusCode.Error, exception.Message);

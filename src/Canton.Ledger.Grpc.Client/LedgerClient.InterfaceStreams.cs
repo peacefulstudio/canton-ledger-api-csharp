@@ -120,8 +120,8 @@ internal sealed partial class LedgerClient
     {
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, UpdateService.Descriptor, "GetUpdates");
-        activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TInterface).Name);
-        activity?.SetTag(LedgerClientActivityTags.CantonFromOffset, fromOffset);
+        activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(TInterface).Name);
+        activity?.SetTag(LedgerActivityTagNames.CantonFromOffset, fromOffset);
         activity.SetSubmitterTags(submitter);
 
         var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
@@ -203,7 +203,7 @@ internal sealed partial class LedgerClient
     {
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, StateService.Descriptor, "GetActiveContracts");
-        activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TInterface).Name);
+        activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(TInterface).Name);
         activity.SetSubmitterTags(submitter);
 
         var effectiveOffset = activeAtOffset

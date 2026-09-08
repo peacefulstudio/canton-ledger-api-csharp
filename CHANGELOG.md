@@ -21,7 +21,7 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Security
 
-## [0.5.0-preview.1] - 2026-09-07
+## [0.5.0-preview.1] - 2026-09-08
 
 This is the breaking release of the preview window, and three changes dominate it.
 
@@ -56,7 +56,17 @@ Also new:
 - `MalformedResponseException` is the one type both transports raise when a participant's body cannot be read.
   - It replaces an `InvalidOperationException` whose `"Malformed response from ledger: "` prefix both clients classified by testing.
   - It derives from `InvalidOperationException`, so an existing `catch (InvalidOperationException)` keeps working and the message text is byte-identical; `Detail` drops the leading marker.
+- `PqsClientOptions.CreateDefaultJsonSerializerOptions()` hands the PQS payload defaults back as a fresh, mutable `JsonSerializerOptions` you can add your own converters to.
+  - Setting `PqsClientOptions.JsonSerializerOptions` *replaces* those defaults rather than adding to them, and the loss surfaces as a deserialization failure at query time rather than as a build error.
+  - Seed, augment, assign: `var json = PqsClientOptions.CreateDefaultJsonSerializerOptions(); json.Converters.Add(new MyVariantConverterFactory()); options.JsonSerializerOptions = json;`.
+  - Reach for it whenever a payload holds a type System.Text.Json cannot construct on its own — an abstract Daml variant, say — and needs a converter of yours alongside the client's own three.
+  - Every call returns a new instance, so a converter added to one reaches neither another client nor the read-only options the client still falls back to when `JsonSerializerOptions` is null.
 - `FakeLedgerClient.SubmittedCommandIds` and `.LastSubmittedCommandId` record the command id every submission actually used — the caller's when supplied, the minted one when not — so a test can assert its own id reached the wire verbatim without reaching into the transport.
+- `LedgerActivityTagNames` in `Canton.Ledger.Kernel.Telemetry` publishes the eighteen SDK-owned `daml.*` / `canton.*` / `retry.*` span attribute names the clients emit, which until now were internal to the gRPC, REST and PQS client packages.
+  - Name one — in a dashboard query, a sampling rule, an enrichment processor or a redaction filter — instead of retyping the string and keeping it in sync by eye.
+  - It sits beside `LedgerActivitySourceNames` in the same dependency-free namespace, so naming an attribute pulls in no OpenTelemetry dependency; `LedgerActivityTagNames.All` hands back the whole set.
+  - Nothing emitted changes: every name and value is verbatim what the clients already set, and `daml.template_id` — previously declared by the gRPC and PQS clients separately — is declared once.
+  - Span and attribute names remain revisable in any preview before 1.0.
 
 ### Changed — BREAKING
 
@@ -74,7 +84,7 @@ To migrate, register instead of constructing and inject the interface:
   - Inject `ICantonLedgerClient`, or the narrower `ILedgerReader`, `ILedgerWriter`, `ILedgerStreamer` and `ILedgerClient` that resolve to the same instance, then `IAdminClient` and `IPqsClient`.
   - Drop your own `using`: the container owns the lifetime, and it validates options the deleted constructors did not.
   - Where you downcast to `RestLedgerClient` for `SupportsUnboundedStreaming` or `GetUpdateTreeByOffsetAsync`, use `IUnboundedStreamingCapability` and `ICantonLedgerClient`.
-  - `CreateCallInvoker()` leaves with its types, replaced by `IGrpcCallInvokerFactory`; so does `PqsClient.DefaultJsonSerializerOptions`, which needs no replacement — leave `PqsClientOptions.JsonSerializerOptions` null for exactly those defaults.
+  - `CreateCallInvoker()` leaves with its types, replaced by `IGrpcCallInvokerFactory`; so does `PqsClient.DefaultJsonSerializerOptions`, replaced by `PqsClientOptions.CreateDefaultJsonSerializerOptions()` in the Added section — or leave `PqsClientOptions.JsonSerializerOptions` null for exactly those defaults.
   - REST still registers the five neutral types as `Transient` rather than gRPC's `Singleton`, and `AddHealthChecks().AddRestLedgerClient()` is unaffected.
 
 Streamed and snapshot payloads are typed, and the streaming generics narrow to templates.
@@ -239,6 +249,14 @@ The rest:
   - The hold a participant puts on an idle window — the `StreamWindowIdleTimeout` sent on every request — is the whole of a followed stream's pacing, and the client deliberately adds none of its own.
   - The loop now counts consecutive windows that neither advance the offset nor come back held, logs a warning at a hundred of them naming the path and the offset it is stuck on, and warns again at each doubling of that run.
   - Nothing changes for a participant that honours the timeout, and no signature moves.
+- The raw Refit surface annotates its optional query parameters: eighteen across eight methods gain `= default`, and fifteen of those become nullable.
+  - `GetPreferredPackageVersion`, `ListKnownParties`, `GetParties`, `GetConnectedSynchronizers`, `ListUsers`, `GetUser`, `DeleteUser` and `ListUserRights` carry them.
+  - Existing positional calls bind exactly as they did, so nothing breaks and there is nothing to do.
+  - Passing the `null` these routes accept no longer warns, so drop any `!` you added to silence it — a suppression that only ever failed a build under `TreatWarningsAsErrors`.
+- The `refitter` tool that emits the raw Refit surface moves from `2.1.3` to `2.2.0`, and the generated client is restamped to match.
+  - The header comment and the fourteen `[GeneratedCode("Refitter", "2.2.0.0")]` attributes are the whole of the change; no signature, parameter, attribute or doc comment moved with them.
+  - It is a build-time code generator rather than a package you restore, so no floor consumers inherit moves and there is nothing to do.
+  - The optional-parameter annotations above were emitted under `2.1.3` and are a separate change; this bump did not produce them.
 - The documented client entry points are dependency injection only.
   - Every `new LedgerClient(...)`, `new AdminClient(...)` and `new PqsClient(...)` in the root README and the packaged gRPC and PQS READMEs is replaced by the matching `Add*` registration and a `GetRequiredService<...>()` of the interface.
   - The gRPC key-types table stops implying the Canton-only operations need the concrete class.
@@ -254,6 +272,11 @@ The rest:
   - These extend `ILedgerWriter`, so they resolve without a downcast — and REST callers gain the capability here for the first time.
   - One difference does not show up in the outcome and will not fail a build: the removed method opened a span named `SubmissionClient.TryExerciseForCreatedAsync`, and the upstream extension opens none.
   - The submission itself is traced exactly as before, as the `SubmissionClient.TrySubmitAndWaitForTransactionAsync` span it has always nested inside, but a dashboard, alert or sampling rule matching the old name goes quiet rather than erroring — grep your telemetry config for it before upgrading.
+- `Daml.Ledger.Abstractions.Extensions.PartyOverloads` is deleted upstream, taking its six single-`Party` shorthands with it.
+  - They were `TryCreateAsync<T>`, `TryExerciseAsync<T>`, both `SubscribeAsync<T>` overloads, `SubscribeActiveAsync<T>` and `SubscribeLedgerEffectsAsync<T>`.
+  - A positional call is unaffected and needs no edit: `SubmitterInfo` converts implicitly from `Party`, and C# reaches for an extension method only when no instance member applies, so these calls bound to the interface member all along.
+  - A call that named the argument `actAs:` stops compiling with `CS1739` or `CS1740` — the surviving parameter is `submitter`, so rename it or drop the name.
+  - Recompiling is mandatory either way: an assembly already built against one of the six throws `MissingMethodException` at run time.
 - `ActivitySourceName` is gone from all four clients; the four static properties only forwarded to names `LedgerActivitySourceNames` already publishes.
   - Take them from `Canton.Ledger.Kernel.Telemetry.LedgerActivitySourceNames`, which carries `GrpcLedgerClient`, `GrpcAdminClient`, `PqsClient`, `RestLedgerClient` and an `All` over the four.
   - `tracing.AddSource(LedgerClient.ActivitySourceName)` becomes `tracing.AddCantonLedgerInstrumentation()`, or `tracing.AddSource(LedgerActivitySourceNames.RestLedgerClient)` for one transport.

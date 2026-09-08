@@ -4,7 +4,6 @@
 using System.Data.Common;
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime;
@@ -24,24 +23,11 @@ internal sealed partial class PqsClient : IPqsClient
 {
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<PqsClient>();
 
-    /// <summary>
-    /// Default <see cref="JsonSerializerOptions"/> used for deserializing PQS contract payloads.
-    /// PQS payloads use camelCase keys while generated C# records use PascalCase properties,
-    /// so <see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> is enabled to handle the case mismatch.
-    /// Daml Numeric values are stored as JSON strings ("1.0000000000") requiring AllowReadingFromString.
-    /// Daml enum values are stored as plain strings ("Active", "Sell") requiring JsonStringEnumConverter.
-    /// This instance is read-only and cannot be modified.
-    /// </summary>
-    public static readonly JsonSerializerOptions DefaultJsonSerializerOptions = CreateDefaultJsonOptions();
+    internal static readonly JsonSerializerOptions DefaultJsonSerializerOptions = CreateSharedDefaultJsonOptions();
 
-    private static JsonSerializerOptions CreateDefaultJsonOptions()
+    private static JsonSerializerOptions CreateSharedDefaultJsonOptions()
     {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString,
-        };
-        options.Converters.Add(new JsonStringEnumConverter());
+        var options = PqsClientOptions.CreateDefaultJsonSerializerOptions();
         options.MakeReadOnly(populateMissingResolver: true);
         return options;
     }
@@ -310,7 +296,7 @@ internal sealed partial class PqsClient : IPqsClient
                     }
 
                     LogQueryResult(_logger, items.Count, identifier);
-                    activity?.SetTag(PqsClientActivityTags.CantonPqsResultCount, items.Count);
+                    activity?.SetTag(LedgerActivityTagNames.CantonPqsResultCount, items.Count);
                     return items;
                 }
             },
@@ -360,7 +346,7 @@ internal sealed partial class PqsClient : IPqsClient
         CancellationToken cancellationToken)
     {
         using var activity = ActivitySource.StartActivity(activityName);
-        activity?.SetTag(PqsClientActivityTags.DamlTemplateId, typeId);
+        activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeId);
 
         LogQueryStart(_logger, typeId);
 

@@ -36,7 +36,7 @@ internal sealed partial class LedgerClient
             timeout: timeout,
             configureActivity: activity =>
             {
-                activity?.SetTag(LedgerClientActivityTags.CantonOffset, offset);
+                activity?.SetTag(LedgerActivityTagNames.CantonOffset, offset);
                 activity.SetSubmitterTags(submitter);
             });
     }
@@ -66,7 +66,7 @@ internal sealed partial class LedgerClient
             timeout: timeout,
             configureActivity: activity =>
             {
-                activity?.SetTag(LedgerClientActivityTags.CantonUpdateId, updateId);
+                activity?.SetTag(LedgerActivityTagNames.CantonUpdateId, updateId);
                 activity.SetSubmitterTags(submitter);
             });
     }
@@ -96,7 +96,7 @@ internal sealed partial class LedgerClient
             timeout: timeout,
             configureActivity: activity =>
             {
-                activity?.SetTag(LedgerClientActivityTags.CantonOffset, offset);
+                activity?.SetTag(LedgerActivityTagNames.CantonOffset, offset);
                 activity.SetSubmitterTags(submitter);
             });
     }

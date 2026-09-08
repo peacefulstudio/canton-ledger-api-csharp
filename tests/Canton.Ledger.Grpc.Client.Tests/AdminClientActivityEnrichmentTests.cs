@@ -76,7 +76,7 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonPartyIdHint) as string == partyIdHint)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonPartyIdHint) as string == partyIdHint)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
@@ -111,7 +111,7 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         await act.Should().ThrowAsync<RpcException>();
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonPartyIdHint) as string == partyIdHint)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonPartyIdHint) as string == partyIdHint)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.AlreadyExists.ToString());
@@ -147,7 +147,7 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         await client.GetPackageAsync(packageId, TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlPackageId) as string == packageId)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlPackageId) as string == packageId)
             .Subject;
         activity.GetTagItem(ActivityHelper.RpcService).Should().Be("com.daml.ledger.api.v2.PackageService");
         activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("GetPackage");

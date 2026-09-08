@@ -12,6 +12,7 @@ The transport-neutral client kernel for Canton participant nodes: the `Authentic
 | `ClientCredentialsOptions` | Config: `Domain`, `ClientId`, `ClientSecret`, `Audience`, `TokenEndpoint`, `SafetyMargin`, `AllowInsecureTokenEndpoint` |
 | `Telemetry.LedgerActivitySource` | Shared `ActivitySource` naming convention — `NameFor<T>()`, `Create<T>()`, `StartActivity<T>()` |
 | `Telemetry.LedgerActivitySourceNames` | The well-known source names of every Canton client (`All` plus one constant each), so a host can register the whole set without referencing a concrete client assembly |
+| `Telemetry.LedgerActivityTagNames` | The SDK-owned `daml.*` / `canton.*` / `retry.*` span attribute names the clients emit (`All` plus one constant each), so a dashboard query, sampling rule or redaction filter can name one without hardcoding the string |
 | `Resilience.RetryOptions` | Config for the opt-in retry pipeline. `Enabled` defaults to `false` |
 | `Resilience.RetryPipelineFactory` | Builds a Polly `ResiliencePipeline` from `RetryOptions` — `ResiliencePipeline.Empty` (a genuine no-op) when disabled |
 
