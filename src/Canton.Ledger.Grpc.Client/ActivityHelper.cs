@@ -71,10 +71,10 @@ internal static class ActivityHelper
     {
         if (activity is null) return;
 
-        activity.SetTag(LedgerClientActivityTags.CantonSubmitterActAs, string.Join(",", submitter.ActAs.Select(p => p.Id)));
+        activity.SetTag(LedgerActivityTagNames.CantonSubmitterActAs, string.Join(",", submitter.ActAs.Select(p => p.Id)));
         if (submitter.ReadAs.Count > 0)
         {
-            activity.SetTag(LedgerClientActivityTags.CantonSubmitterReadAs, string.Join(",", submitter.ReadAs.Select(p => p.Id)));
+            activity.SetTag(LedgerActivityTagNames.CantonSubmitterReadAs, string.Join(",", submitter.ReadAs.Select(p => p.Id)));
         }
     }
 

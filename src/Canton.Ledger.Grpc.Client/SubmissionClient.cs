@@ -290,7 +290,7 @@ internal sealed partial class SubmissionClient
             cancellationToken,
             configureActivity: activity =>
             {
-                activity?.SetTag(LedgerClientActivityTags.DamlTemplateId, typeof(TTemplate).Name);
+                activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(TTemplate).Name);
                 activity.SetSubmitterTags(submitter);
             },
             activityKind: ActivityKind.Internal);
@@ -505,8 +505,8 @@ internal sealed partial class SubmissionClient
         string? workflowId,
         RuntimeCommands.CommandId? commandId)
     {
-        activity?.SetTag(LedgerClientActivityTags.DamlChoice, command.Choice.Value);
-        activity?.SetTag(LedgerClientActivityTags.DamlContractId, command.ContractId.Value);
+        activity?.SetTag(LedgerActivityTagNames.DamlChoice, command.Choice.Value);
+        activity?.SetTag(LedgerActivityTagNames.DamlContractId, command.ContractId.Value);
         activity.SetSubmitterTags(submitter);
         LogExercisingChoice(_logger, command.Choice, command.ContractId);
         return NewSubmission(

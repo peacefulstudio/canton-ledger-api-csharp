@@ -179,7 +179,7 @@ public class RestRetryHandlerTests
         await client.GetAsync("/v2/state/ledger-end", TestContext.Current.CancellationToken);
 
         var retryActivity = capture.Activities.Should().ContainSingle(a => a.OperationName == "RestLedgerClient.RetryAttempt").Subject;
-        retryActivity.GetTagItem("retry.attempt").Should().Be(0);
+        retryActivity.GetTagItem(LedgerActivityTagNames.RetryAttempt).Should().Be(0);
         retryActivity.Status.Should().Be(ActivityStatusCode.Error);
     }
 

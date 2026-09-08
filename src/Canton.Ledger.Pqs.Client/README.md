@@ -112,15 +112,27 @@ tracing.AddSource(LedgerActivitySourceNames.PqsClient);
 
 ### Custom JSON Serialization
 
-Override the default `JsonSerializerOptions` for contract payload deserialization using the action-based overload:
+`PqsClientOptions.JsonSerializerOptions` *replaces* the client's payload defaults rather than adding to
+them, so start from `PqsClientOptions.CreateDefaultJsonSerializerOptions()` whenever you need a converter
+of your own alongside them — a variant factory for an abstract Daml type `System.Text.Json` cannot
+construct, say. It returns a fresh, mutable instance on every call:
 
 ```csharp
 services.AddPqsClient(options =>
 {
     options.ConnectionString = "Host=localhost;Database=pqs";
-    options.JsonSerializerOptions = new JsonSerializerOptions { /* ... */ };
+
+    var jsonOptions = PqsClientOptions.CreateDefaultJsonSerializerOptions();
+    jsonOptions.Converters.Add(new MyVariantConverterFactory());
+    options.JsonSerializerOptions = jsonOptions;
 });
 ```
+
+The defaults it carries are case-insensitive property matching for PQS's camelCase keys,
+`JsonNumberHandling.AllowReadingFromString` for Daml `Numeric`, and a `JsonStringEnumConverter` for Daml
+enums. Rebuilding them by hand and missing one fails at query time rather than at build time. To replace
+them outright instead, assign a `new JsonSerializerOptions { /* ... */ }`; to keep exactly the defaults,
+leave the property `null`.
 
 ## Related Packages
 

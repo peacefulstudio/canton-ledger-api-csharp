@@ -121,7 +121,7 @@ internal sealed partial class AdminClient : IAdminClient
             (headers, deadline, token) => _partyService.AllocatePartyAsync(request, headers, deadline, token),
             response => new PartyDetails(response.PartyDetails.Party, response.PartyDetails.IsLocal),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonPartyIdHint, partyIdHint)).ConfigureAwait(false);
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonPartyIdHint, partyIdHint)).ConfigureAwait(false);
 
         LogPartyAllocated(_logger, details.Party);
         return details;
@@ -211,7 +211,7 @@ internal sealed partial class AdminClient : IAdminClient
             (headers, deadline, token) => _userService.CreateUserAsync(request, headers, deadline, token),
             response => FromProtoUser(response.User),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonUserId, userId)).ConfigureAwait(false);
 
         LogUserCreated(_logger, userId);
         return details;
@@ -278,7 +278,7 @@ internal sealed partial class AdminClient : IAdminClient
             "GrantUserRights",
             (headers, deadline, token) => _userService.GrantUserRightsAsync(request, headers, deadline, token),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonUserId, userId)).ConfigureAwait(false);
 
         LogRightsGranted(_logger, userId);
     }
@@ -312,7 +312,7 @@ internal sealed partial class AdminClient : IAdminClient
             "RevokeUserRights",
             (headers, deadline, token) => _userService.RevokeUserRightsAsync(request, headers, deadline, token),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId)).ConfigureAwait(false);
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonUserId, userId)).ConfigureAwait(false);
 
         LogRightsRevoked(_logger, userId);
     }
@@ -343,7 +343,7 @@ internal sealed partial class AdminClient : IAdminClient
                 (headers, deadline, token) => _userService.ListUserRightsAsync(new ListUserRightsRequest { UserId = userId }, headers, deadline, token),
                 response => response.Rights.Select(FromProtoRight).ToList(),
                 cancellationToken,
-                configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonUserId, userId),
+                configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonUserId, userId),
                 isExpectedFailure: IsNotFound).ConfigureAwait(false);
         }
         catch (RpcException ex) when (IsNotFound(ex))
@@ -417,7 +417,7 @@ internal sealed partial class AdminClient : IAdminClient
                 response.Hash,
                 MapHashFunction(response.HashFunction)),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.DamlPackageId, packageId));
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.DamlPackageId, packageId));
     }
 
     private static HashFunction MapHashFunction(WireHashFunction hashFunction) => hashFunction switch
@@ -533,7 +533,7 @@ internal sealed partial class AdminClient : IAdminClient
             "UploadDarFile",
             (headers, deadline, token) => _packageManagementService.UploadDarFileAsync(request, headers, deadline, token),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerClientActivityTags.CantonSubmissionId, submissionId)).ConfigureAwait(false);
+            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonSubmissionId, submissionId)).ConfigureAwait(false);
 
         LogDarUploaded(_logger, darFile.Length);
     }

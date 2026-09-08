@@ -109,7 +109,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
@@ -117,8 +117,8 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
         activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("SubmitAndWaitForTransaction");
         activity.GetTagItem(ActivityHelper.ServerAddress).Should().Be("localhost");
         activity.GetTagItem(ActivityHelper.ServerPort).Should().Be(5001);
-        activity.GetTagItem(LedgerClientActivityTags.DamlChoice).Should().Be("Archive");
-        activity.GetTagItem(LedgerClientActivityTags.CantonSubmitterActAs).Should().Be("party::alice");
+        activity.GetTagItem(LedgerActivityTagNames.DamlChoice).Should().Be("Archive");
+        activity.GetTagItem(LedgerActivityTagNames.CantonSubmitterActAs).Should().Be("party::alice");
     }
 
     [Fact]
@@ -137,7 +137,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(errorId);
@@ -157,7 +157,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
@@ -187,7 +187,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
         await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonOffset) as long? == offset)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonOffset) as long? == offset)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
@@ -325,7 +325,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerClientActivityTags.CantonTrafficCostBytes) as long? == totalCost)
+            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonTrafficCostBytes) as long? == totalCost)
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");

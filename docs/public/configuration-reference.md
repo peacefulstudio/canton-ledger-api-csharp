@@ -95,7 +95,7 @@ OAuth2 client-credentials token acquisition, with thread-safe TTL caching and au
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `ConnectionString` | `string` | — (required) | PostgreSQL connection string for the PQS database. Required even when an `NpgsqlDataSource` is registered (it is still validated at startup); when a data source *is* registered in the container, connections are opened from it instead. |
-| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | **Code-only** — not bindable from configuration. Serializer options for contract payloads; `null` means the client's defaults. Set via the delegate overload or `PostConfigure` (below). Generated template types carry their own `ContractId<T>` converter, so a payload with a contract-id field deserializes under the defaults with nothing to register. |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | **Code-only** — not bindable from configuration. Serializer options for contract payloads; `null` means the client's defaults. Set via the delegate overload or `PostConfigure` (below). Setting it *replaces* those defaults rather than adding to them, so to keep them and add a converter, seed from `PqsClientOptions.CreateDefaultJsonSerializerOptions()` — a fresh, mutable instance per call — and add to what it returns. Generated template types carry their own `ContractId<T>` converter, so a payload with a contract-id field deserializes under the defaults with nothing to register. |
 
 ## `RestLedgerClientOptions` (`Canton:Rest`)
 

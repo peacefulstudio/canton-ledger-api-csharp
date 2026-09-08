@@ -33,6 +33,8 @@ W3C trace-context propagation needs no extra code: the BCL `SocketsHttpHandler` 
 
 ## Attributes
 
-Client spans carry OpenTelemetry semantic-convention attributes (`rpc.system`, `rpc.service`, `rpc.method`, `server.address`, `server.port`, `error.type`) plus two custom buckets: `daml.*` for Daml-LF source concepts (`daml.template_id`, `daml.choice`, `daml.contract_id`, `daml.package_id`) and `canton.*` for Ledger-API/operational concepts (`canton.offset`, `canton.from_offset`, `canton.submitter.act_as`/`read_as`, `canton.party_id`, `canton.party_id_hint`, `canton.user_id`, `canton.submission_id`, `canton.update_id`, `canton.pqs.result_count`).
+Client spans carry OpenTelemetry semantic-convention attributes (`rpc.system`, `rpc.service`, `rpc.method`, `server.address`, `server.port`, `error.type`) plus three custom buckets: `daml.*` for Daml-LF source concepts (`daml.template_id`, `daml.choice`, `daml.contract_id`, `daml.package_id`) and `canton.*` for Ledger-API/operational concepts (`canton.offset`, `canton.from_offset`, `canton.submitter.act_as`/`read_as`, `canton.party_id`, `canton.participant_id`, `canton.party_id_hint`, `canton.user_id`, `canton.submission_id`, `canton.update_id`, `canton.traffic_cost_bytes`, `canton.pqs.result_count`), and `retry.*` on the retry pipeline's own spans (`retry.attempt`, `retry.delay_ms`).
+
+Every one of those custom names is a constant on `Canton.Ledger.Kernel.Telemetry.LedgerActivityTagNames`, with `All` over the whole set — name one from there rather than retyping it into a dashboard query, a sampling rule or a redaction filter.
 
 Telemetry shape is pre-1.0 and may change in any preview release.

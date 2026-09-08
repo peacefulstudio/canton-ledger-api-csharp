@@ -17,8 +17,6 @@ internal sealed class LedgerCallInvoker
     internal static readonly ActivitySource Source = LedgerActivitySource.Create<LedgerClient>();
 
     private const string RetryAttemptActivityName = "LedgerClient.RetryAttempt";
-    private const string RetryAttemptNumberTag = "retry.attempt";
-    private const string RetryDelayTag = "retry.delay_ms";
 
     private readonly ResiliencePipeline _retryPipeline;
     private readonly ITokenProvider? _tokenProvider;
@@ -233,8 +231,8 @@ internal sealed class LedgerCallInvoker
         using var activity = Source.StartActivity(RetryAttemptActivityName, ActivityKind.Internal);
         if (activity is null) return;
 
-        activity.SetTag(RetryAttemptNumberTag, attempt.AttemptNumber);
-        activity.SetTag(RetryDelayTag, attempt.RetryDelay.TotalMilliseconds);
+        activity.SetTag(LedgerActivityTagNames.RetryAttempt, attempt.AttemptNumber);
+        activity.SetTag(LedgerActivityTagNames.RetryDelayMs, attempt.RetryDelay.TotalMilliseconds);
         if (attempt.Exception is RpcException rpcException)
         {
             activity.SetStatus(ActivityStatusCode.Error, rpcException.Status.Detail);

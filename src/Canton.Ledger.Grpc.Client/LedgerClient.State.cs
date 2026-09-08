@@ -25,7 +25,7 @@ internal sealed partial class LedgerClient
                     (headers, deadline, callToken) => _stateService.GetLedgerEndAsync(new GetLedgerEndRequest(), headers, deadline, callToken),
                     token,
                     timeout).ConfigureAwait(false);
-                activity?.SetTag(LedgerClientActivityTags.CantonOffset, response.Offset);
+                activity?.SetTag(LedgerActivityTagNames.CantonOffset, response.Offset);
                 return LedgerOffset.At(response.Offset);
             },
             cancellationToken);
@@ -56,9 +56,9 @@ internal sealed partial class LedgerClient
             configureActivity: activity =>
             {
                 if (party is { } taggedParty)
-                    activity?.SetTag(LedgerClientActivityTags.CantonPartyId, taggedParty.Id);
+                    activity?.SetTag(LedgerActivityTagNames.CantonPartyId, taggedParty.Id);
                 if (participantId is not null)
-                    activity?.SetTag(LedgerClientActivityTags.CantonParticipantId, participantId);
+                    activity?.SetTag(LedgerActivityTagNames.CantonParticipantId, participantId);
             });
     }
 

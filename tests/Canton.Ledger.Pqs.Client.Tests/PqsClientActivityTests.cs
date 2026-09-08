@@ -29,7 +29,7 @@ public class PqsClientActivityTests
         await act.Should().ThrowAsync<ArgumentException>();
 
         var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
-        activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
+        activity.GetTagItem(LedgerActivityTagNames.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
@@ -47,7 +47,7 @@ public class PqsClientActivityTests
         await act.Should().ThrowAsync<ArgumentException>();
 
         var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsQuery").Subject;
-        activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
+        activity.GetTagItem(LedgerActivityTagNames.DamlTemplateId).Should().Be(
             PqsClient.GetDamlTypeId<ISampleInterface>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
@@ -66,7 +66,7 @@ public class PqsClientActivityTests
         await act.Should().ThrowAsync<ArgumentException>();
 
         var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsQueryOne").Subject;
-        activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
+        activity.GetTagItem(LedgerActivityTagNames.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);
@@ -84,7 +84,7 @@ public class PqsClientActivityTests
         await act.Should().ThrowAsync<ArgumentException>();
 
         var activity = capture.Activities.Should().ContainSingle(a => a.OperationName == "PqsExists").Subject;
-        activity.GetTagItem(PqsClientActivityTags.DamlTemplateId).Should().Be(
+        activity.GetTagItem(LedgerActivityTagNames.DamlTemplateId).Should().Be(
             TemplateExtensions.GetTemplateId<FilterTests.SampleTemplate>());
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityExtensions.ErrorType).Should().Be(typeof(ArgumentException).FullName);

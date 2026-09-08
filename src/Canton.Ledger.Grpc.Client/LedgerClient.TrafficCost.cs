@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Kernel.Telemetry;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
 using Interactive = Com.Daml.Ledger.Api.V2.Interactive;
@@ -46,7 +47,7 @@ internal sealed partial class LedgerClient
                 var estimate = ProjectTrafficCostEstimate(response.CostEstimation);
                 if (estimate is not null)
                 {
-                    activity?.SetTag(LedgerClientActivityTags.CantonTrafficCostBytes, estimate.TotalCost);
+                    activity?.SetTag(LedgerActivityTagNames.CantonTrafficCostBytes, estimate.TotalCost);
                 }
 
                 return estimate;
