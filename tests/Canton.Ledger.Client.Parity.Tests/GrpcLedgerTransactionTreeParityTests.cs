@@ -34,15 +34,14 @@ public sealed class GrpcLedgerTransactionTreeParityTests : LedgerTransactionTree
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         ServiceProvider? services = null;
         try
         {
             await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
             var party = await fixture.AllocatePartyAsync(
                 "grpc-tree-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
-            await fixture.GrantUserRightsAsync(
-                fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
 
             var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
             services = new ServiceCollection()
@@ -63,18 +62,14 @@ public sealed class GrpcLedgerTransactionTreeParityTests : LedgerTransactionTree
                 }
                 finally
                 {
-                    await fixture.DisposeAsync().ConfigureAwait(false);
+                    await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
                 }
             });
         }
-        catch
+        catch (Exception openFailure)
         {
-            if (services is not null)
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await fixture.DisposeAsync().ConfigureAwait(false);
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
             throw;
         }
     }

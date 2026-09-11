@@ -68,7 +68,7 @@ public sealed partial class FakeLedgerClient
         SubmitterInfo submitter,
         long beginExclusiveOffset = 0L,
         CancellationToken cancellationToken = default) =>
-        Replay(StagedCompletions(), cancellationToken);
+        Replay(After(StagedCompletions(), beginExclusiveOffset), cancellationToken);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<ConnectedSynchronizer>> GetConnectedSynchronizersAsync(

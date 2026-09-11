@@ -108,7 +108,7 @@ internal sealed partial class RestLedgerClient
         if (window.Fault is { } fault)
         {
             yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
             yield break;
         }
 
@@ -139,7 +139,7 @@ internal sealed partial class RestLedgerClient
             if (read.Fault is { } fault)
             {
                 yield return new InterfaceStreamEvent<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 

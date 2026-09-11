@@ -24,20 +24,6 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
         + "(canton-localnet up && canton-localnet wait-ready) to run this parity test.";
 
-    private const string ExerciseResultQuarantineMessage =
-        "Quarantined on the exercise response, not on the submission: the participant accepts the "
-        + "exercise and commits it. The client now requests the ledger-effects transaction shape on "
-        + "submit-and-wait-for-transaction, so the transaction does surface an ExercisedEvent, whose "
-        + "choiceArgument and exerciseResult then both arrive as {}, an untyped wire Value with no "
-        + "sum case set that the decoder cannot resolve without knowing the Daml type. That cause "
-        + "was measured against a live participant. The create and fire-and-forget bodies of this "
-        + "suite decode no choice result and run on this lane. The quarantine lifts when the decode "
-        + "fix lands; the interim participant behavior is pinned by RestExerciseQuarantinePinTests "
-        + "in Canton.Ledger.Rest.Client.Tests.";
-
-    /// <inheritdoc />
-    protected override string? ExerciseResultDecodeQuarantine => ExerciseResultQuarantineMessage;
-
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
@@ -50,6 +36,7 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         ServiceProvider? services = null;
         try
         {
@@ -65,9 +52,7 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
             await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
             var party = await fixture.AllocatePartyAsync(
                 "rest-writer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
-            await fixture.GrantUserRightsAsync(
-                fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
 
             var writer = services.GetRequiredService<ILedgerWriter>();
             var client = services.GetRequiredService<ICantonLedgerClient>();
@@ -75,18 +60,20 @@ public sealed class RestLedgerWriterParityTests : LedgerWriterParityTests
                 (writer, client, new Party(party.PartyId)),
                 async () =>
                 {
-                    await services.DisposeAsync().ConfigureAwait(false);
-                    await fixture.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await services.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
+                    }
                 });
         }
-        catch
+        catch (Exception openFailure)
         {
-            if (services is not null)
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await fixture.DisposeAsync().ConfigureAwait(false);
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
             throw;
         }
     }

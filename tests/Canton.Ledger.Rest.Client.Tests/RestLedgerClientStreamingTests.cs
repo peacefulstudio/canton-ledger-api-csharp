@@ -230,6 +230,54 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
+    public async Task SubscribeActiveAsync_populates_StreamError_ErrorId_from_the_parsed_participant_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.Conflict,
+            """
+            {
+              "code": 9,
+              "message": "the user's rights changed",
+              "details": [
+                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "STALE_STREAM_AUTHORIZATION", "metadata": {}}
+              ]
+            }
+            """);
+        var client = ClientWith(transport);
+
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
+        {
+            entries.Add(entry);
+        }
+
+        entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_leaves_StreamError_ErrorId_null_when_the_body_carries_no_structured_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.ServiceUnavailable, "");
+        var client = ClientWith(transport);
+
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
+        {
+            entries.Add(entry);
+        }
+
+        entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a failure the participant attached no structured error to has no code to hand on, and none is invented");
+    }
+
+    [Fact]
     public async Task SubscribeAsync_posts_to_v2_updates_with_begin_exclusive_and_end_inclusive()
     {
         var transport = new RecordingHttpHandler().WithResponse(
@@ -279,6 +327,53 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             "a consumer folding the stream into a resume point has to be able to skip this event");
         events[1].Should().BeOfType<ContractStreamEvent<TestTemplate>.Checkpoint>()
             .Subject.Offset.Value.Should().Be(11L);
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_populates_StreamError_ErrorId_from_the_parsed_participant_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.Conflict,
+            """
+            {
+              "code": 9,
+              "message": "the user's rights changed",
+              "details": [
+                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "STALE_STREAM_AUTHORIZATION", "metadata": {}}
+              ]
+            }
+            """);
+        var client = ClientWith(transport);
+
+        var events = new List<ContractStreamEvent<TestTemplate>>();
+        await foreach (var evt in client.SubscribeAsync<TestTemplate>(
+            Alice, LedgerOffset.At(5), LedgerOffset.At(11), TestContext.Current.CancellationToken))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_leaves_StreamError_ErrorId_null_when_the_body_carries_no_structured_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.ServiceUnavailable, "");
+        var client = ClientWith(transport);
+
+        var events = new List<ContractStreamEvent<TestTemplate>>();
+        await foreach (var evt in client.SubscribeAsync<TestTemplate>(
+            Alice, LedgerOffset.At(5), LedgerOffset.At(11), TestContext.Current.CancellationToken))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a failure the participant attached no structured error to has no code to hand on, and none is invented");
     }
 
     [Fact]

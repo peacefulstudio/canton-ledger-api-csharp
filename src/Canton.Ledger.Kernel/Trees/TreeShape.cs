@@ -9,7 +9,7 @@ namespace Canton.Ledger.Kernel.Trees;
 
 internal static class TreeShape
 {
-    internal static IReadOnlyList<TreeEvent> Assemble(IEnumerable<TreeNode> nodes)
+    internal static EquatableArray<TreeEvent> Assemble(IEnumerable<TreeNode> nodes)
     {
         var roots = new List<TreeEvent>();
         var openExercises = new Stack<OpenSubtree>();
@@ -49,7 +49,7 @@ internal static class TreeShape
             Emit(Close(openExercises.Pop()), openExercises, roots);
         }
 
-        return roots;
+        return EquatableArray.Create(roots);
     }
 
     internal static string EventIdOf(int nodeId) => nodeId.ToString(CultureInfo.InvariantCulture);
@@ -91,7 +91,7 @@ internal static class TreeShape
         }
     }
 
-    private static TreeEvent Close(OpenSubtree open) => open.Close(open.Children);
+    private static TreeEvent Close(OpenSubtree open) => open.Close(EquatableArray.Create(open.Children));
 
     private sealed class OpenSubtree(CloseSubtree close, int nodeId, int lastDescendantNodeId)
     {

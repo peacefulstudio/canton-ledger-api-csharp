@@ -318,6 +318,19 @@ public sealed partial class FakeLedgerClient : ICantonLedgerClient, IUnboundedSt
             && (toOffset is not { } endInclusive || at.Value <= endInclusive.Value);
     }
 
+    private static IReadOnlyList<CompletionStreamEvent> After(
+        IReadOnlyList<CompletionStreamEvent> events,
+        long beginExclusiveOffset) =>
+        events.Where(streamEvent => OffsetOf(streamEvent) is not { } at || at > beginExclusiveOffset).ToArray();
+
+    private static long? OffsetOf(CompletionStreamEvent streamEvent) => streamEvent switch
+    {
+        CompletionStreamEvent.CommandAccepted accepted => accepted.Completion.Offset,
+        CompletionStreamEvent.CommandRejected rejected => rejected.Completion.Offset,
+        CompletionStreamEvent.Checkpoint checkpoint => checkpoint.Offset,
+        _ => null,
+    };
+
     private static LedgerOffset? OffsetOf<T>(AcsSnapshotEntry<T> entry)
         where T : ITemplate, IDamlRecord<T> => entry switch
     {

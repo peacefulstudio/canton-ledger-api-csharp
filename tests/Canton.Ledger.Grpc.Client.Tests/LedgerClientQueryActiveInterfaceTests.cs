@@ -7,6 +7,7 @@ using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Testing.Helpers;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Ledger.Abstractions;
+using Daml.Runtime;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
 using Grpc.Core;
@@ -78,17 +79,21 @@ public sealed class LedgerClientQueryActiveInterfaceTests : IDisposable
         StubGetLedgerEnd(offset: 10L);
         StubGetActiveContracts(
             MakeActiveContractWithView("00impl", amount: 42.5m),
-            MakeActiveContractWithView("00impl2", amount: 7m));
+            MakeActiveContractWithView("00impl2", amount: 7m, offset: 42L));
 
         var client = CreateClient();
         var holdings = await client.QueryActiveAsync<IViewedInterfaceMarker, ViewedInterfaceView>(
             ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         holdings.Should().HaveCount(2);
-        holdings[0].Id.Value.Should().Be("00impl");
-        holdings[0].View.Amount.Should().Be(42.5m);
-        holdings[1].Id.Value.Should().Be("00impl2");
-        holdings[1].View.Amount.Should().Be(7m);
+        holdings[0].Contract.Id.Value.Should().Be("00impl");
+        holdings[0].Contract.View.Amount.Should().Be(42.5m);
+        holdings[0].LastUpdateOffset.Should().Be(LedgerOffset.At(41));
+        holdings[0].SynchronizerId.Should().Be((SynchronizerId)"sync-1");
+        holdings[1].Contract.Id.Value.Should().Be("00impl2");
+        holdings[1].Contract.View.Amount.Should().Be(7m);
+        holdings[1].LastUpdateOffset.Should().Be(LedgerOffset.At(42));
+        holdings[1].SynchronizerId.Should().Be((SynchronizerId)"sync-1");
     }
 
     [Fact]
@@ -124,7 +129,7 @@ public sealed class LedgerClientQueryActiveInterfaceTests : IDisposable
         var holdings = await client.QueryActiveAsync<IViewedInterfaceMarker, ViewedInterfaceView>(
             ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        holdings.Should().ContainSingle().Which.View.Amount.Should().Be(42.5m);
+        holdings.Should().ContainSingle().Which.Contract.View.Amount.Should().Be(42.5m);
     }
 
     [Fact]
@@ -221,9 +226,12 @@ public sealed class LedgerClientQueryActiveInterfaceTests : IDisposable
             },
         };
 
-    private static GetActiveContractsResponse MakeActiveContractWithView(string contractId, decimal amount)
+    private static GetActiveContractsResponse MakeActiveContractWithView(
+        string contractId,
+        decimal amount,
+        long offset = 41L)
     {
-        var response = MakeActiveContract(contractId);
+        var response = MakeActiveContract(contractId, offset);
         response.ActiveContract.CreatedEvent.InterfaceViews.Add(new InterfaceView
         {
             InterfaceId = ViewedInterface,

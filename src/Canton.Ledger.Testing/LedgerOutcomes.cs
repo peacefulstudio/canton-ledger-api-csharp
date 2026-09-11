@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Contracts;
 using Daml.Runtime.Outcomes;
 
 namespace Canton.Ledger.Testing;
@@ -27,8 +28,11 @@ public static class LedgerOutcomes
     /// <summary>Builds a <see cref="ExerciseOutcome{T}.Many"/> outcome.</summary>
     /// <typeparam name="T">The result type the outcome is for.</typeparam>
     /// <returns>The multiple-result outcome.</returns>
-    public static ExerciseOutcome<T> Many<T>(int count, IReadOnlyList<string> contractIds) =>
-        new ExerciseOutcome<T>.Many(count, contractIds);
+    /// <exception cref="ArgumentException"><paramref name="contractIds"/> has fewer than two
+    /// entries — <c>Many</c> exists to report more than one match; use <see cref="One{T}"/> or
+    /// <see cref="None{T}"/> for zero or one.</exception>
+    public static ExerciseOutcome<T> Many<T>(EquatableArray<string> contractIds) =>
+        new ExerciseOutcome<T>.Many(contractIds);
 
     /// <summary>Builds a structured <see cref="ExerciseOutcome{T}.DamlError"/> outcome.</summary>
     /// <typeparam name="T">The result type the failed outcome is for.</typeparam>

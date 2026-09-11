@@ -26,7 +26,7 @@ public static class ContractEvents
         ContractKey? key,
         LedgerOffset offset,
         SynchronizerId synchronizerId,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new ContractStreamEvent<T>.Created(contractId, payload, key, offset, synchronizerId, witnessParties);
 
@@ -37,7 +37,7 @@ public static class ContractEvents
         ContractId<T> contractId,
         LedgerOffset offset,
         SynchronizerId synchronizerId,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new ContractStreamEvent<T>.Archived(contractId, offset, synchronizerId, witnessParties);
 
@@ -52,7 +52,7 @@ public static class ContractEvents
         bool consuming,
         LedgerOffset offset,
         SynchronizerId synchronizerId,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new ContractStreamEvent<T>.Exercised(
             contractId, choiceName, choiceArgument, exerciseResult, consuming, offset, synchronizerId, witnessParties);
@@ -69,7 +69,7 @@ public static class ContractEvents
         SynchronizerId target,
         string reassignmentId,
         long reassignmentCounter,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new ContractStreamEvent<T>.Assigned(
             contractId, payload, key, offset, source, target, reassignmentId, reassignmentCounter, witnessParties);
@@ -84,7 +84,7 @@ public static class ContractEvents
         SynchronizerId target,
         string reassignmentId,
         long reassignmentCounter,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new ContractStreamEvent<T>.Unassigned(
             contractId, offset, source, target, reassignmentId, reassignmentCounter, witnessParties);
@@ -102,6 +102,8 @@ public static class ContractEvents
     /// <param name="message">Status detail from the participant or transport.</param>
     /// <param name="category">Classification of the transport failure, or <c>null</c> to stage a
     /// fault the transport could not classify.</param>
+    /// <param name="errorId">The participant's own Canton error code, or <c>null</c> to stage a
+    /// fault that carried no structured error to read one from.</param>
     /// <param name="sourceException">Transport exception that ended the stream, or <c>null</c> to
     /// stage a fault carried in-band rather than thrown.</param>
     /// <returns>The stream-error event.</returns>
@@ -109,9 +111,10 @@ public static class ContractEvents
         int statusCode,
         string message,
         DamlErrorCategory? category = null,
+        string? errorId = null,
         Exception? sourceException = null)
         where T : ITemplate, IDamlRecord<T> =>
-        new ContractStreamEvent<T>.StreamError(statusCode, message, category, sourceException);
+        new ContractStreamEvent<T>.StreamError(statusCode, message, category, errorId, sourceException);
 
     /// <summary>Builds an <see cref="ContractStreamEvent{T}.Unclassified"/> event.</summary>
     /// <typeparam name="T">The Daml template or interface marker the stream is for.</typeparam>

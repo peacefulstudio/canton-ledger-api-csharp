@@ -82,6 +82,26 @@ internal sealed class CommandBuilder
                         ChoiceArgument = DamlValueConverter.ToProtoValue(exercise.ChoiceArgument)
                     }
                 },
+                RuntimeCommands.ExerciseByKeyCommand exerciseByKey => new Command
+                {
+                    ExerciseByKey = new ExerciseByKeyCommand
+                    {
+                        TemplateId = DamlValueConverter.ToProtoIdentifier(exerciseByKey.TemplateId),
+                        ContractKey = DamlValueConverter.ToProtoValue(exerciseByKey.ContractKey),
+                        Choice = exerciseByKey.Choice.Value,
+                        ChoiceArgument = DamlValueConverter.ToProtoValue(exerciseByKey.ChoiceArgument)
+                    }
+                },
+                RuntimeCommands.CreateAndExerciseCommand createAndExercise => new Command
+                {
+                    CreateAndExercise = new CreateAndExerciseCommand
+                    {
+                        TemplateId = DamlValueConverter.ToProtoIdentifier(createAndExercise.TemplateId),
+                        CreateArguments = DamlValueConverter.ToProtoRecord(createAndExercise.CreateArguments),
+                        Choice = createAndExercise.Choice.Value,
+                        ChoiceArgument = DamlValueConverter.ToProtoValue(createAndExercise.ChoiceArgument)
+                    }
+                },
                 _ => throw new NotSupportedException($"Command type {cmd.GetType().Name} is not supported")
             };
 

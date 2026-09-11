@@ -35,30 +35,46 @@ public sealed class GrpcLedgerWriterParityTests : LedgerWriterParityTests
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-
-        await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
-        var party = await fixture.AllocatePartyAsync(
-            "grpc-writer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
-        await fixture.GrantUserRightsAsync(
-            fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        var services = new ServiceCollection()
-            .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
-            .AddLedgerClient(options =>
-            {
-                options.GrpcAddress = grpcAddress;
-                options.UserId = fixture.ValidatorUserId;
-            })
-            .BuildServiceProvider();
-
-        var writer = services.GetRequiredService<ILedgerWriter>();
-        var client = services.GetRequiredService<ICantonLedgerClient>();
-        return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>((writer, client, new Party(party.PartyId)), async () =>
+        ServiceProvider? services = null;
+        try
         {
-            await services.DisposeAsync().ConfigureAwait(false);
-            await fixture.DisposeAsync().ConfigureAwait(false);
-        });
+            await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
+            var party = await fixture.AllocatePartyAsync(
+                "grpc-writer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
+
+            services = new ServiceCollection()
+                .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+                .AddLedgerClient(options =>
+                {
+                    options.GrpcAddress = grpcAddress;
+                    options.UserId = fixture.ValidatorUserId;
+                })
+                .BuildServiceProvider();
+
+            var writer = services.GetRequiredService<ILedgerWriter>();
+            var client = services.GetRequiredService<ICantonLedgerClient>();
+            return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>(
+                (writer, client, new Party(party.PartyId)),
+                async () =>
+                {
+                    try
+                    {
+                        await services.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
+                    }
+                });
+        }
+        catch (Exception openFailure)
+        {
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
+            throw;
+        }
     }
 }

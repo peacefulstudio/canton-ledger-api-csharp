@@ -16,15 +16,12 @@ using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 namespace Canton.Ledger.Rest.Client.Tests;
 
 /// <summary>
-/// Pins the interim behavior of the quarantined REST exercise path: the bytes it submits,
-/// which no live test covers while the quarantine holds; a transaction carrying an
-/// ArchivedEvent and no ExercisedEvent, which the participant returned under the ACS-delta
-/// default the client no longer requests and which must still fail loudly if it ever
-/// arrives; and the ledger-effects transaction measured live, whose choiceArgument and
-/// exerciseResult arrive as an untyped empty wire Value. The quarantined suites are
-/// <c>RestLedgerWriterConformanceTests</c> and <c>RestLedgerWriterParityTests</c>; when the
-/// decode fix lands and either response pin breaks, lift the quarantine and close the
-/// tracking issue.
+/// Pins the REST exercise path's behavior on two shapes a live participant is known to send:
+/// the bytes it submits; a transaction carrying an ArchivedEvent and no ExercisedEvent, which
+/// the participant returned under the ACS-delta default the client no longer requests and
+/// which must still fail loudly if it ever arrives; and a ledger-effects transaction whose
+/// choiceArgument and exerciseResult arrive as an untyped empty wire Value, the idiomatic
+/// Daml-LF JSON encoding of Unit.
 /// </summary>
 public sealed class RestExerciseQuarantinePinTests : IDisposable
 {
@@ -115,7 +112,7 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
     }
 
     [Fact]
-    public async Task TryExerciseAsync_returns_InfraError_when_the_ledger_effects_exerciseResult_arrives_as_an_untyped_empty_Value()
+    public async Task TryExerciseAsync_returns_One_with_Unit_when_the_ledger_effects_exerciseResult_arrives_as_an_untyped_empty_Value()
     {
         _transport.WithResponse(HttpStatusCode.OK, UntypedExerciseResultTransaction);
         var client = Client();
@@ -123,11 +120,8 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
         var outcome = await client.TryExerciseAsync<DamlUnit>(
             ArchiveCommand(), Alice, cancellationToken: TestContext.Current.CancellationToken);
 
-        var infraError = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.InfraError>().Subject;
-        infraError.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
-        infraError.Message.Should().Be(
-            "Server returned a malformed transaction: Malformed response from ledger: "
-            + "Received a wire Value with no recognisable sum case set.");
+        var one = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.One>().Subject;
+        one.Result.Should().Be(DamlUnit.Instance);
     }
 
     [Fact]

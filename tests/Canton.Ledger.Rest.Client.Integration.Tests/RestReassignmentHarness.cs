@@ -9,7 +9,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using AssignCommand = Canton.Ledger.Abstractions.AssignCommand;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -112,8 +112,7 @@ internal sealed class RestReassignmentHarness
         }
 
         var party = new Party(sourceParty);
-        await _lane.Fixture.GrantUserRightsAsync(
-            _lane.Fixture.ValidatorUserId, actAs: [party.Id], cancellationToken: cancellationToken);
+        await _lane.GrantActAsAsync(party.Id, cancellationToken);
 
         var hosted = await _lane.LedgerClient.GetConnectedSynchronizersAsync(party, cancellationToken: cancellationToken);
         if (hosted.Count < 2)

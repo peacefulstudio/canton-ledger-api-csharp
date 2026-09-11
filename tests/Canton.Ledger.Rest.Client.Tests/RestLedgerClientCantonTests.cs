@@ -108,8 +108,10 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         holdings.Should().ContainSingle();
-        holdings[0].Id.Value.Should().Be("00impl");
-        holdings[0].View.Amount.Should().Be(42.5m);
+        holdings[0].Contract.Id.Value.Should().Be("00impl");
+        holdings[0].Contract.View.Amount.Should().Be(42.5m);
+        holdings[0].LastUpdateOffset.Should().Be(LedgerOffset.At(9));
+        holdings[0].SynchronizerId.Should().Be((SynchronizerId)"sync-1");
     }
 
     [Fact]

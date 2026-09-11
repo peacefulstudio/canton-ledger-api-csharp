@@ -8,7 +8,9 @@ using System.Reflection;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Security;
 using Canton.Ledger.Kernel.Telemetry;
 using Canton.Ledger.Rest.Client.Raw;
 using Daml.Ledger.Abstractions;
@@ -55,6 +57,22 @@ public class ServiceCollectionExtensionsTests
 
         provider.GetService<ILedgerStreamer>().Should().BeOfType<RestLedgerClient>();
         provider.GetService<ILedgerClient>().Should().BeOfType<RestLedgerClient>();
+    }
+
+    [Fact]
+    public async Task AddCantonStaticAuth_replaces_unauthenticated_fallback_registered_by_AddRestLedgerClient()
+    {
+        const string httpAddress = "http://ledger.example:7575";
+        const string staticToken = "static-token";
+        var services = new ServiceCollection();
+        services.AddRestLedgerClient(options => options.HttpAddress = httpAddress);
+
+        services.AddCantonStaticAuth(staticToken);
+
+        using var provider = services.BuildServiceProvider();
+        var token = await provider.GetRequiredService<ITokenProvider>()
+            .GetTokenAsync(TestContext.Current.CancellationToken);
+        token.Should().Be(staticToken);
     }
 
     [Fact]
@@ -314,6 +332,159 @@ public class ServiceCollectionExtensionsTests
         var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
 
         act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_fails_at_startup_when_ledger_tls_is_configured_and_auth_tls_is_not()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ClientCredentialsOptions.Tls*");
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_starts_when_ledger_tls_and_auth_tls_are_configured()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "auth-client.pem" };
+        });
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_starts_when_ledger_tls_is_configured_with_static_auth()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonStaticAuth("static-token");
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_options_validation_does_not_resolve_preexisting_scoped_ITokenProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<ITokenProvider>(static _ =>
+            throw new InvalidOperationException("The scoped token provider must not be resolved."));
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_starts_with_ledger_tls_when_preexisting_ITokenProvider_wins_over_AddCantonAuth()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonStaticAuth("static-token");
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<StaticTokenProvider>();
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_starts_when_ledger_tls_and_auth_tls_are_unconfigured()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddRestLedgerClient(options => options.HttpAddress = "https://ledger.example:7575");
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddRestLedgerClient_fails_at_startup_when_ledger_tls_is_configured_and_auth_tls_is_not_reversed_order()
+    {
+        var services = new ServiceCollection();
+        services.AddRestLedgerClient(options =>
+        {
+            options.HttpAddress = "https://ledger.example:7575";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<ClientCredentialsProvider>();
+        var act = () => provider.GetRequiredService<IOptions<RestLedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ClientCredentialsOptions.Tls*");
     }
 
     [Theory]

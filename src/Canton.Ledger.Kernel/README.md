@@ -75,7 +75,7 @@ services.AddCantonAuth(options =>
 
 ### Registration precedence
 
-All methods use `TryAddSingleton` — the first registration wins. Register explicit providers before calling `AddLedgerClient`/`AddAdminClient` to override auto-registration.
+Only unkeyed `ITokenProvider` registrations participate in the default selection; keyed providers remain independent. The unauthenticated gRPC and REST registration paths install the exact `ITokenProvider.None` singleton instance as their fallback. `AddCantonAuth` and `AddCantonStaticAuth` replace that exact unkeyed fallback with their explicit provider, so either may be called before or after those unauthenticated client registrations. Both preserve every pre-existing non-`None` unkeyed provider without resolving or constructing it.
 
 ### Unauthenticated access
 

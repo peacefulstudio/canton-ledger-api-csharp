@@ -29,7 +29,26 @@ namespace Canton.Ledger.Rest.Client;
 /// </summary>
 internal static class RestTransactionResultProjector
 {
-    public static TransactionResult Project(WireTransaction transaction)
+    public static TransactionResult Project(WireTransaction transaction) =>
+        ProjectCore(transaction, DecodeExerciseResultUntyped, DecodeCreateArgumentUntyped, DecodeContractKeyUntyped);
+
+    public static TransactionResult ProjectForChoiceResult<TResult>(
+        WireTransaction transaction, ChoiceName choice) =>
+        ProjectCore(transaction, ExerciseResultDecoderFor<TResult>(choice), DecodeCreateArgumentUntyped, DecodeContractKeyUntyped);
+
+    public static TransactionResult ProjectForCreatedTemplate<TTemplate>(WireTransaction transaction)
+        where TTemplate : ITemplate =>
+        ProjectCore(
+            transaction,
+            DecodeExerciseResultUntyped,
+            CreateArgumentDecoderFor<TTemplate>(),
+            ContractKeyDecoderFor<TTemplate>());
+
+    private static TransactionResult ProjectCore(
+        WireTransaction transaction,
+        Func<WireExercisedEvent, DamlValue> decodeExerciseResult,
+        Func<WireCreatedEvent, DamlRecord> decodeCreateArgument,
+        Func<WireCreatedEvent, RuntimeIdentifier, ContractKey?> decodeContractKey)
     {
         ArgumentNullException.ThrowIfNull(transaction);
 
@@ -41,7 +60,7 @@ internal static class RestTransactionResultProjector
         {
             if (evt?.CreatedEvent is { } created)
             {
-                createdContracts.Add(ToCreatedContract(created));
+                createdContracts.Add(ToCreatedContract(created, decodeCreateArgument, decodeContractKey));
             }
             else if (evt?.ArchivedEvent is { } archived)
             {
@@ -49,20 +68,47 @@ internal static class RestTransactionResultProjector
             }
             else if (evt?.ExercisedEvent is { } exercised)
             {
-                exercisedEvents.Add(ToExercisedEvent(exercised));
+                exercisedEvents.Add(ToExercisedEvent(exercised, decodeExerciseResult));
             }
         }
 
         return new TransactionResult(
             transaction.UpdateId,
             LedgerOffset.At(RestWireConversions.ParseOffset(transaction.Offset)),
-            createdContracts,
-            archivedContractIds,
+            EquatableArray.Create(createdContracts),
+            EquatableArray.Create(archivedContractIds),
             ToCommandId(transaction.CommandId))
         {
-            ExercisedEvents = exercisedEvents,
+            ExercisedEvents = EquatableArray.Create(exercisedEvents),
         };
     }
+
+    private static DamlValue DecodeExerciseResultUntyped(WireExercisedEvent exercised) =>
+        exercised.ExerciseResult is null ? DamlUnit.Instance : RestValueDecoder.ToDamlValue(exercised.ExerciseResult);
+
+    private static DamlRecord DecodeCreateArgumentUntyped(WireCreatedEvent created) =>
+        RestValueDecoder.ToDamlRecord(created.CreateArgument);
+
+    private static ContractKey? DecodeContractKeyUntyped(WireCreatedEvent created, RuntimeIdentifier runtimeTemplateId) =>
+        RestWireConversions.ContractKeyOf(created, runtimeTemplateId);
+
+    private static Func<WireExercisedEvent, DamlValue> ExerciseResultDecoderFor<TResult>(ChoiceName choice) =>
+        exercised => exercised.ExerciseResult is null
+            ? DamlUnit.Instance
+            : string.Equals(exercised.Choice, choice.Value, StringComparison.Ordinal)
+                ? RestValueDecoder.ToDamlValue<TResult>(exercised.ExerciseResult)
+                : RestValueDecoder.ToDamlValue(exercised.ExerciseResult);
+
+    private static Func<WireCreatedEvent, DamlRecord> CreateArgumentDecoderFor<TTemplate>()
+        where TTemplate : ITemplate =>
+        created => MarkerMatcher<TTemplate>.MatchesCreated(created)
+            ? RestValueDecoder.ToDamlRecord<TTemplate>(created.CreateArgument)
+            : RestValueDecoder.ToDamlRecord(created.CreateArgument);
+
+    private static Func<WireCreatedEvent, RuntimeIdentifier, ContractKey?> ContractKeyDecoderFor<TTemplate>()
+        where TTemplate : ITemplate =>
+        (created, runtimeTemplateId) => RestWireConversions.ContractKeyOf(
+            created, runtimeTemplateId, MarkerMatcher<TTemplate>.MatchesCreated(created) ? MarkerMatcher<TTemplate>.KeyType : null);
 
     public static ExerciseOutcome<ContractId<TTemplate>> ProjectToContractId<TTemplate>(
         ExerciseOutcome<TransactionResult> outcome)
@@ -83,7 +129,10 @@ internal static class RestTransactionResultProjector
 
     private static CommandId ToNamedCommandId(string commandId) => (CommandId)commandId;
 
-    private static CreatedContract ToCreatedContract(WireCreatedEvent created)
+    private static CreatedContract ToCreatedContract(
+        WireCreatedEvent created,
+        Func<WireCreatedEvent, DamlRecord> decodeCreateArgument,
+        Func<WireCreatedEvent, RuntimeIdentifier, ContractKey?> decodeContractKey)
     {
         var templateId = created.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
@@ -97,18 +146,18 @@ internal static class RestTransactionResultProjector
             TreeShape.EventIdOf(nodeId),
             created.ContractId,
             runtimeTemplateId,
-            RestValueDecoder.ToDamlRecord(created.CreateArgument),
+            decodeCreateArgument(created),
             RestWireConversions.ToPartyList(created.WitnessParties),
             RestWireConversions.ToPartyList(created.Signatories),
             RestWireConversions.ToPartyList(created.Observers),
-            ContractKey: RestWireConversions.ContractKeyOf(created, runtimeTemplateId),
+            ContractKey: decodeContractKey(created, runtimeTemplateId),
             CreatedAt: created.CreatedAt)
         {
             InterfaceIds = ToInterfaceIds(created),
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
     {
         if (created.InterfaceViews is not { Count: > 0 } views)
         {
@@ -123,10 +172,11 @@ internal static class RestTransactionResultProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interfaceId");
             interfaceIds.Add(ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
-    private static ExercisedEvent ToExercisedEvent(WireExercisedEvent exercised)
+    private static ExercisedEvent ToExercisedEvent(
+        WireExercisedEvent exercised, Func<WireExercisedEvent, DamlValue> decodeExerciseResult)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
@@ -134,9 +184,7 @@ internal static class RestTransactionResultProjector
         var choiceArgument = exercised.ChoiceArgument is null
             ? DamlUnit.Instance
             : RestValueDecoder.ToDamlValue(exercised.ChoiceArgument);
-        var result = exercised.ExerciseResult is null
-            ? DamlUnit.Instance
-            : RestValueDecoder.ToDamlValue(exercised.ExerciseResult);
+        var result = decodeExerciseResult(exercised);
         var interfaceId = exercised.InterfaceId is null ? null : ToRuntimeIdentifier(exercised.InterfaceId);
 
         return new ExercisedEvent(

@@ -21,7 +21,7 @@ public class LedgerBuilderTests
     [Fact]
     public void LedgerEvents_Created_wraps_the_AcsSnapshotEntry_Created_variant()
     {
-        var entry = LedgerEvents.Created(Cid, Payload, null, LedgerOffset.At(1), (SynchronizerId)"sync1", new[] { Bob });
+        var entry = LedgerEvents.Created(Cid, Payload, null, LedgerOffset.At(1), (SynchronizerId)"sync1", [Bob]);
 
         var created = entry.Should().BeOfType<AcsSnapshotEntry<DemoAsset>.Created>().Subject;
         created.ContractId.Should().Be(Cid);
@@ -49,6 +49,15 @@ public class LedgerBuilderTests
     }
 
     [Fact]
+    public void LedgerEvents_StreamError_carries_the_errorId_through_to_the_AcsSnapshotEntry()
+    {
+        var entry = LedgerEvents.StreamError<DemoAsset>(14, "boom", errorId: "STALE_STREAM_AUTHORIZATION");
+
+        entry.Should().BeOfType<AcsSnapshotEntry<DemoAsset>.StreamError>()
+            .Which.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
     public void LedgerEvents_Unclassified_wraps_the_AcsSnapshotEntry_Unclassified_variant()
     {
         var entry = LedgerEvents.Unclassified<DemoAsset>(LedgerOffset.At(7), UnclassifiedKind.Unknown, "unmapped-template");
@@ -62,7 +71,7 @@ public class LedgerBuilderTests
     [Fact]
     public void ContractEvents_wraps_each_stream_variant()
     {
-        var witnesses = new[] { Bob };
+        EquatableArray<Party> witnesses = [Bob];
         ContractEvents.Created(Cid, Payload, null, LedgerOffset.At(1), (SynchronizerId)"s", witnesses)
             .Should().BeOfType<ContractStreamEvent<DemoAsset>.Created>();
         ContractEvents.Archived<DemoAsset>(Cid, LedgerOffset.At(2), (SynchronizerId)"s", witnesses)
@@ -82,14 +91,32 @@ public class LedgerBuilderTests
     }
 
     [Fact]
+    public void ContractEvents_StreamError_carries_the_errorId_through_to_the_ContractStreamEvent()
+    {
+        var entry = ContractEvents.StreamError<DemoAsset>(14, "boom", errorId: "STALE_STREAM_AUTHORIZATION");
+
+        entry.Should().BeOfType<ContractStreamEvent<DemoAsset>.StreamError>()
+            .Which.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
     public void LedgerOutcomes_wraps_each_exercise_outcome_variant()
     {
         LedgerOutcomes.One("x").Should().BeOfType<ExerciseOutcome<string>.One>().Which.Result.Should().Be("x");
         LedgerOutcomes.None<string>().Should().BeOfType<ExerciseOutcome<string>.None>();
-        LedgerOutcomes.Many<string>(2, new[] { "a", "b" }).Should().BeOfType<ExerciseOutcome<string>.Many>().Which.Count.Should().Be(2);
+        LedgerOutcomes.Many<string>(["a", "b"]).Should().BeOfType<ExerciseOutcome<string>.Many>().Which.Count.Should().Be(2);
         LedgerOutcomes.DamlError<string>(DamlErrorCategory.ContentionOnSharedResources, "E1", "conflict", new Dictionary<string, string>())
             .Should().BeOfType<ExerciseOutcome<string>.DamlError>().Which.ErrorId.Should().Be("E1");
         LedgerOutcomes.InfraError<string>(14, "unavailable").Should().BeOfType<ExerciseOutcome<string>.InfraError>().Which.StatusCode.Should().Be(14);
+    }
+
+    [Fact]
+    public void LedgerOutcomes_Many_throws_for_fewer_than_two_contract_ids()
+    {
+        var act = () => LedgerOutcomes.Many<string>(["cid1"]);
+
+        act.Should().Throw<ArgumentException>(
+            "Many exists to report more than one match; a real ledger cannot produce fewer than two candidates for it");
     }
 
     [Fact]
@@ -98,8 +125,8 @@ public class LedgerBuilderTests
         var result = LedgerResults.Transaction(
             "update1",
             LedgerOffset.At(5),
-            new[] { new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null) },
-            new[] { "archived1" },
+            [new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null)],
+            ["archived1"],
             (CommandId)"cmd1");
 
         result.UpdateId.Should().Be("update1");

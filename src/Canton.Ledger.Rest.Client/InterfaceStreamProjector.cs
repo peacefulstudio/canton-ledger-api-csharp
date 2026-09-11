@@ -199,7 +199,7 @@ internal static class InterfaceStreamProjector
             return new InterfaceStreamEvent<TInterface, TView>.Assigned(
                 new ContractId<TInterface>(assignedContractId),
                 view,
-                ContractStreamProjector.ContractKeyOf(created),
+                ContractStreamProjector.ContractKeyOf<TInterface>(created),
                 LedgerOffset.At(createdOffset),
                 scope.Source,
                 scope.Target,
@@ -371,7 +371,7 @@ internal static class InterfaceStreamProjector
         return new InterfaceStreamEvent<TInterface, TView>.Created(
             new ContractId<TInterface>(contractId),
             view,
-            ContractStreamProjector.ContractKeyOf(created),
+            ContractStreamProjector.ContractKeyOf<TInterface>(created),
             LedgerOffset.At(offset),
             synchronizerId,
             RestWireConversions.ToPartyList(created.WitnessParties));

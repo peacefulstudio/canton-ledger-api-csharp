@@ -7,7 +7,7 @@
 
 using Daml.Runtime.Data;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml record Profile

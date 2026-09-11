@@ -123,7 +123,7 @@ public class TreeShapeTests
         new TreeEvent.Created(
             TreeShape.EventIdOf(nodeId), contractId, TemplateId, new DamlRecord(null, []), [], [], [], null, null);
 
-    private static TreeEvent Exercised(int nodeId, string choice, IReadOnlyList<TreeEvent> children) =>
+    private static TreeEvent Exercised(int nodeId, string choice, EquatableArray<TreeEvent> children) =>
         new TreeEvent.Exercised(
             TreeShape.EventIdOf(nodeId),
             $"00{choice}",

@@ -228,7 +228,7 @@ public class TransactionResultExerciseExtensionsTests
             ArchivedContractIds: [],
             CommandId: default)
         {
-            ExercisedEvents = events,
+            ExercisedEvents = EquatableArray.Create(events),
         };
     }
 }

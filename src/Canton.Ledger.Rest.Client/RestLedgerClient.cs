@@ -244,7 +244,7 @@ internal sealed partial class RestLedgerClient
         if (window.Fault is { } fault)
         {
             yield return new AcsSnapshotEntry<T>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
             yield break;
         }
 
@@ -312,7 +312,7 @@ internal sealed partial class RestLedgerClient
             if (read.Fault is { } fault)
             {
                 yield return new ContractStreamEvent<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -562,7 +562,8 @@ internal sealed partial class RestLedgerClient
         var outcome = await TrySubmitAndWaitForTransactionCoreAsync(
                 submission,
                 RestSubscribeRequestBuilder.BuildTransactionFormat(submitter),
-                RestTransactionResultProjector.Project,
+                wireTransaction => RestTransactionResultProjector.ProjectForChoiceResult<TResult>(
+                    wireTransaction, command.Choice),
                 timeout,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -599,7 +600,7 @@ internal sealed partial class RestLedgerClient
         var outcome = await TrySubmitAndWaitForTransactionCoreAsync(
                 submission,
                 transactionFormat: null,
-                RestTransactionResultProjector.Project,
+                RestTransactionResultProjector.ProjectForCreatedTemplate<TTemplate>,
                 timeout,
                 cancellationToken)
             .ConfigureAwait(false);
