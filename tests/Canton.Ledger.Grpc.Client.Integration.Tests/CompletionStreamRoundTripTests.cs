@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 
@@ -61,10 +62,8 @@ public class CompletionStreamRoundTripTests
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
         var userId = fixture.ValidatorUserId;
-        await fixture.GrantUserRightsAsync(
-            userId,
-            actAs: new[] { party.PartyId },
-            cancellationToken: TestContext.Current.CancellationToken);
+        await using var actAsRights = ActAsRightsLease.ForValidator(fixture);
+        await actAsRights.GrantAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
         var client = services.GetRequiredService<ICantonLedgerClient>();

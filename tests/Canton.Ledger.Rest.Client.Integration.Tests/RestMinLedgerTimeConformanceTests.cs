@@ -10,7 +10,7 @@ using AwesomeAssertions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 #pragma warning disable CANTONREST001
@@ -71,8 +71,7 @@ public class RestMinLedgerTimeConformanceTests
 
         var party = await lane.Fixture.AllocatePartyAsync(
             "rest-min-ledger-time", cancellationToken: cancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, cancellationToken);
         return new Party(party.PartyId);
     }
 

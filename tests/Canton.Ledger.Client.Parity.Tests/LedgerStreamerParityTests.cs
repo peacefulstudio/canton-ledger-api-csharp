@@ -9,7 +9,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;
@@ -223,8 +223,11 @@ public abstract class LedgerStreamerParityTests
         var holdings = await client.QueryActiveAsync<IHolding, HoldingView>(
             owner, ledgerEnd, TestContext.Current.CancellationToken);
 
-        holdings.Should().ContainSingle(holding => holding.Id.Value == assetCid.Value)
-            .Which.View.Amount.Should().Be(AssetAmount);
+        var holding = holdings.Should().ContainSingle(
+            holding => holding.Contract.Id.Value == assetCid.Value).Subject;
+        holding.Contract.View.Amount.Should().Be(AssetAmount);
+        holding.LastUpdateOffset.Value.Should().BeGreaterThan(0);
+        holding.SynchronizerId.Should().NotBe(default(SynchronizerId));
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Rest.Client.Integration.Tests;

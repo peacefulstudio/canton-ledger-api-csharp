@@ -92,8 +92,13 @@ if ! grep -rqn 'ViewDescriptor<' "${GEN}"; then
   exit 1
 fi
 
-if ! grep -rqn 'KeyDescriptor<' "${GEN}"; then
-  echo "ERROR: no emitted template carries a KeyDescriptor witness; the keyed template did not reach the emitted tree (a stale DAR, or a keyless RichTypes.daml). Refusing to overwrite ${OUT}." >&2
+# 0.5.0-preview.2 scopes the namespace to the Daml module name (`RichTypes`).
+# 0.5.0-preview.1 fabricated `Richtypes` from the package name, and that
+# output also carries ViewDescriptor, so the guard above cannot catch a
+# stale extraction of the previous emitter. The fixture is deliberately
+# keyless — a KeyDescriptor witness is not a valid pin here.
+if ! grep -rqn '^namespace RichTypes;' "${GEN}"; then
+  echo "ERROR: no emitted file declares namespace RichTypes; the ViewDescriptor guardrail above is satisfied by 0.5.0-preview.1 output too (namespace Richtypes, fabricated from the package name). The codegen bundle that ran predates 0.5.0-preview.2 (likely a stale dpm component reused from cache despite the pinned digest). Refusing to overwrite ${OUT}." >&2
   exit 1
 fi
 

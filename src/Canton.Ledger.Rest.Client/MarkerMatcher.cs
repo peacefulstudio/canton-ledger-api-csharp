@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Collections.Concurrent;
+using System.Reflection;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -16,6 +18,8 @@ namespace Canton.Ledger.Rest.Client;
 internal static class MarkerMatcher<TMarker>
     where TMarker : IDamlType
 {
+    private static readonly ConcurrentDictionary<RuntimeIdentifier, Type> KeyTypesByTemplateId = new();
+
     /// <summary>
     /// The reassignment filter the JSON Ledger API accepts already scopes an interface marker's
     /// <c>Unassigned</c> events server-side — mirrors the gRPC transport's identically-named
@@ -27,7 +31,51 @@ internal static class MarkerMatcher<TMarker>
 
     public static bool IsInterface { get; } = TMarker.DamlTypeId.Kind == DamlTypeKind.Interface;
 
+    /// <summary>
+    /// The marker's contract key type, when it implements <see cref="IHasKey{TSelf,TKey}"/> — the
+    /// <c>TKey</c> a call site can pass to <see cref="RestValueDecoder.ToDamlValue(Raw.Value,Type)"/>
+    /// to decode a wire <c>contractKey</c> against the template's own key shape instead of leaving it
+    /// untyped. <see langword="null"/> for an unkeyed template or an interface marker.
+    /// </summary>
+    public static Type? KeyType { get; } = typeof(TMarker)
+        .GetInterfaces()
+        .FirstOrDefault(candidate => candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IHasKey<,>))
+        ?.GetGenericArguments()[1];
+
     private static readonly RuntimeIdentifier MarkerIdentity = TMarker.DamlTypeId.Identifier;
+
+    public static Type? KeyTypeFor(RuntimeIdentifier templateId)
+    {
+        if (KeyTypesByTemplateId.TryGetValue(templateId, out var cached))
+        {
+            return cached;
+        }
+
+        foreach (var candidate in AppDomain.CurrentDomain.GetAssemblies().SelectMany(LoadableTypes))
+        {
+            var keyContract = candidate.GetInterfaces()
+                .FirstOrDefault(@interface =>
+                    @interface.IsGenericType
+                    && @interface.GetGenericTypeDefinition() == typeof(IHasKey<,>));
+            if (keyContract is null)
+            {
+                continue;
+            }
+
+            var candidateTemplateId = candidate
+                .GetProperty(nameof(ITemplate.TemplateId), BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null) as RuntimeIdentifier;
+            if (!templateId.Equals(candidateTemplateId))
+            {
+                continue;
+            }
+
+            return KeyTypesByTemplateId.GetOrAdd(templateId, keyContract.GetGenericArguments()[1]);
+        }
+
+        KeyTypesByTemplateId.TryAdd(templateId, null!);
+        return null;
+    }
 
     /// <summary>
     /// The wire <see cref="WireIdentifier"/> used to scope a <c>TemplateFilter</c> or
@@ -111,5 +159,17 @@ internal static class MarkerMatcher<TMarker>
             if (RestWireConversions.IsModuleEntityMatch(identifier, MarkerIdentity)) return true;
         }
         return false;
+    }
+
+    private static IEnumerable<Type> LoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException partiallyLoaded)
+        {
+            return partiallyLoaded.Types.OfType<Type>();
+        }
     }
 }

@@ -18,7 +18,7 @@ public class FakeCantonLedgerClientTests
     private static Completion CompletionFor(string commandId, long offset) => new(
         new CommandId(commandId),
         offset,
-        new[] { Alice },
+        [Alice],
         new SynchronizerTime("sync-1", DateTimeOffset.UnixEpoch),
         SubmissionId: null,
         UserId: null,
@@ -73,6 +73,45 @@ public class FakeCantonLedgerClientTests
         var events = await CollectAsync(client.CompletionStreamAsync(Alice, cancellationToken: TestContext.Current.CancellationToken));
 
         events.Should().Equal(accepted, checkpoint, rejected);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_reopening_from_an_observed_offset_omits_the_completions_already_observed()
+    {
+        var accepted = new CompletionStreamEvent.CommandAccepted(CompletionFor("cmd-1", 7), "update-1");
+        var checkpoint = new CompletionStreamEvent.Checkpoint(8);
+        var rejected = new CompletionStreamEvent.CommandRejected(CompletionFor("cmd-2", 9), new CompletionStatus(3, "boom"));
+        var client = FakeLedgerClient.Create().WithCompletionEvents(accepted, checkpoint, rejected).Build();
+
+        var events = await CollectAsync(
+            client.CompletionStreamAsync(Alice, beginExclusiveOffset: 7, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().Equal(checkpoint, rejected);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_a_staged_StreamError_passes_the_offset_filter_regardless_of_beginExclusiveOffset()
+    {
+        var error = new CompletionStreamEvent.StreamError(1, "boom");
+        var client = FakeLedgerClient.Create().WithCompletionEvents(error).Build();
+
+        var events = await CollectAsync(
+            client.CompletionStreamAsync(Alice, beginExclusiveOffset: long.MaxValue, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Which.Should().Be(error);
+    }
+
+    [Fact]
+    public async Task CompletionStreamAsync_opened_past_the_last_staged_offset_yields_nothing()
+    {
+        var accepted = new CompletionStreamEvent.CommandAccepted(CompletionFor("cmd-1", 7), "update-1");
+        var checkpoint = new CompletionStreamEvent.Checkpoint(8);
+        var client = FakeLedgerClient.Create().WithCompletionEvents(accepted, checkpoint).Build();
+
+        var events = await CollectAsync(
+            client.CompletionStreamAsync(Alice, beginExclusiveOffset: 8, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().BeEmpty();
     }
 
     [Fact]
@@ -141,7 +180,7 @@ public class FakeCantonLedgerClientTests
     public async Task TrySubmitAndWaitForReassignmentAsync_returns_the_staged_outcome()
     {
         var unassigned = ContractEvents.Unassigned<DemoAsset>(
-            new ContractId<DemoAsset>("00cid"), LedgerOffset.At(1), (SynchronizerId)"src", (SynchronizerId)"tgt", "reassign-1", 0, new[] { Alice });
+            new ContractId<DemoAsset>("00cid"), LedgerOffset.At(1), (SynchronizerId)"src", (SynchronizerId)"tgt", "reassign-1", 0, [Alice]);
         var outcome = LedgerOutcomes.One(unassigned);
         var client = FakeLedgerClient.Create().WithReassignmentResult(outcome).Build();
         var submission = ReassignmentSubmission.Of(new UnassignCommand("00cid", (SynchronizerId)"src", (SynchronizerId)"tgt"), Alice);
@@ -156,7 +195,7 @@ public class FakeCantonLedgerClientTests
     public async Task GetLedgerEndAsync_advances_by_one_offset_across_a_committed_reassignment()
     {
         var unassigned = ContractEvents.Unassigned<DemoAsset>(
-            new ContractId<DemoAsset>("00cid"), LedgerOffset.At(1), (SynchronizerId)"src", (SynchronizerId)"tgt", "reassign-1", 0, new[] { Alice });
+            new ContractId<DemoAsset>("00cid"), LedgerOffset.At(1), (SynchronizerId)"src", (SynchronizerId)"tgt", "reassign-1", 0, [Alice]);
         var client = FakeLedgerClient.Create()
             .WithLedgerEnd(LedgerOffset.At(42))
             .WithReassignmentResult(LedgerOutcomes.One(unassigned))

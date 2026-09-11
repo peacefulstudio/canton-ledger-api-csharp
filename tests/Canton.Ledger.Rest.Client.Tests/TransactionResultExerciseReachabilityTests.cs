@@ -68,6 +68,6 @@ public class TransactionResultExerciseReachabilityTests
             ArchivedContractIds: [],
             CommandId: default)
         {
-            ExercisedEvents = exercised,
+            ExercisedEvents = EquatableArray.Create(exercised),
         };
 }

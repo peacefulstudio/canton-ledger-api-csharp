@@ -149,7 +149,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(TInterface).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new InterfaceStreamEvent<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -230,7 +230,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(TInterface).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 

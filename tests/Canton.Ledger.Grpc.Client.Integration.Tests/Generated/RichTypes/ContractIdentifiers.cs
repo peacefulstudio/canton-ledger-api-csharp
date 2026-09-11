@@ -8,10 +8,10 @@
 using Daml.Runtime.Contracts;
 using static Daml.Runtime.Contracts.TemplateExtensions;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
-/// Provides fully qualified contract identifiers for all templates in this package.
+/// Provides fully qualified contract identifiers for all templates in this module.
 /// These identifiers can be used for PQS queries.
 /// </summary>
 public static class ContractIdentifiers

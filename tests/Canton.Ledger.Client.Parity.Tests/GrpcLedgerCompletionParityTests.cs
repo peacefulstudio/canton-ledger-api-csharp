@@ -8,7 +8,7 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;
@@ -35,6 +35,7 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         ServiceProvider? services = null;
         try
         {
@@ -46,8 +47,7 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
             var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: cancellationToken);
             var owner = new Party(party.PartyId);
             var userId = fixture.ValidatorUserId;
-            await fixture.GrantUserRightsAsync(
-                userId, actAs: new[] { party.PartyId }, cancellationToken: cancellationToken);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken);
 
             var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
             services = new ServiceCollection()
@@ -77,18 +77,14 @@ public sealed class GrpcLedgerCompletionParityTests : LedgerCompletionParityTest
                 }
                 finally
                 {
-                    await fixture.DisposeAsync().ConfigureAwait(false);
+                    await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
                 }
             });
         }
-        catch
+        catch (Exception openFailure)
         {
-            if (services is not null)
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await fixture.DisposeAsync().ConfigureAwait(false);
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
             throw;
         }
     }

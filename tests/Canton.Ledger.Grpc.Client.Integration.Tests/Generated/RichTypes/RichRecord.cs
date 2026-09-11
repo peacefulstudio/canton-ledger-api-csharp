@@ -18,30 +18,157 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml template RichTypes:RichRecord
 /// </summary>
 public sealed partial record RichRecord(
-    [property: DamlFieldAttribute("owner")] Party Owner,
-    [property: DamlFieldAttribute("count")] long Count,
-    [property: DamlFieldAttribute("amount")] decimal Amount,
-    [property: DamlFieldAttribute("label")] string Label,
-    [property: DamlFieldAttribute("active")] bool Active,
-    [property: DamlFieldAttribute("asOf")] DateOnly AsOf,
-    [property: DamlFieldAttribute("observedAt")] DateTimeOffset ObservedAt,
-    [property: DamlFieldAttribute("note")] string? Note,
-    [property: DamlFieldAttribute("tags")] IReadOnlyList<string> Tags,
-    [property: DamlFieldAttribute("attributes")] IReadOnlyDictionary<string, string> Attributes,
-    [property: DamlFieldAttribute("marker")] ContractId<Marker> Marker,
-    [property: DamlFieldAttribute("holdingCid")] ContractId<IHolding> HoldingCid,
-    [property: DamlFieldAttribute("holdingCids")] IReadOnlyList<ContractId<IHolding>> HoldingCids,
-    [property: DamlFieldAttribute("profile")] Profile Profile,
-    [property: DamlFieldAttribute("outcome")] Outcome Outcome,
-    [property: DamlFieldAttribute("fee")] decimal Fee
+    Party Owner,
+    long Count,
+    decimal Amount,
+    string Label,
+    bool Active,
+    DateOnly AsOf,
+    DateTimeOffset ObservedAt,
+    string? Note,
+    IReadOnlyList<string> Tags,
+    IReadOnlyDictionary<string, string> Attributes,
+    ContractId<Marker> Marker,
+    ContractId<IHolding> HoldingCid,
+    IReadOnlyList<ContractId<IHolding>> HoldingCids,
+    Profile Profile,
+    Outcome Outcome,
+    decimal Fee
 ) : ITemplate, IDamlRecord<RichRecord>
 {
+    /// <summary>The Daml field <c>owner</c>.</summary>
+    [DamlFieldAttribute("owner")]
+    public Party Owner { get; init; } = Owner;
+
+    /// <summary>The Daml field <c>count</c>.</summary>
+    [DamlFieldAttribute("count")]
+    public long Count { get; init; } = Count;
+
+    /// <summary>The Daml field <c>amount</c>.</summary>
+    [DamlFieldAttribute("amount")]
+    public decimal Amount { get; init; } = Amount;
+
+    /// <summary>The Daml field <c>label</c>.</summary>
+    [DamlFieldAttribute("label")]
+    public string Label { get; init; } = Label;
+
+    /// <summary>The Daml field <c>active</c>.</summary>
+    [DamlFieldAttribute("active")]
+    public bool Active { get; init; } = Active;
+
+    /// <summary>The Daml field <c>asOf</c>.</summary>
+    [DamlFieldAttribute("asOf")]
+    public DateOnly AsOf { get; init; } = AsOf;
+
+    /// <summary>The Daml field <c>observedAt</c>.</summary>
+    [DamlFieldAttribute("observedAt")]
+    public DateTimeOffset ObservedAt { get; init; } = ObservedAt;
+
+    /// <summary>The Daml field <c>note</c>.</summary>
+    [DamlFieldAttribute("note")]
+    public string? Note { get; init; } = Note;
+
+    private readonly IReadOnlyList<string> _tags = DamlFieldCollections.Copy(Tags);
+
+    /// <summary>The Daml field <c>tags</c>. Copied when this value is constructed and on <c>init</c>, so a later change to the caller's collection cannot alter this value's equality or hash code.</summary>
+    [DamlFieldAttribute("tags")]
+    public IReadOnlyList<string> Tags
+    {
+        get => _tags;
+        init => _tags = DamlFieldCollections.Copy(value);
+    }
+
+    private readonly IReadOnlyDictionary<string, string> _attributes = DamlFieldCollections.Copy(Attributes);
+
+    /// <summary>The Daml field <c>attributes</c>. Copied when this value is constructed and on <c>init</c>, so a later change to the caller's collection cannot alter this value's equality or hash code.</summary>
+    [DamlFieldAttribute("attributes")]
+    public IReadOnlyDictionary<string, string> Attributes
+    {
+        get => _attributes;
+        init => _attributes = DamlFieldCollections.Copy(value);
+    }
+
+    /// <summary>The Daml field <c>marker</c>.</summary>
+    [DamlFieldAttribute("marker")]
+    public ContractId<Marker> Marker { get; init; } = Marker;
+
+    /// <summary>The Daml field <c>holdingCid</c>.</summary>
+    [DamlFieldAttribute("holdingCid")]
+    public ContractId<IHolding> HoldingCid { get; init; } = HoldingCid;
+
+    private readonly IReadOnlyList<ContractId<IHolding>> _holdingCids = DamlFieldCollections.Copy(HoldingCids);
+
+    /// <summary>The Daml field <c>holdingCids</c>. Copied when this value is constructed and on <c>init</c>, so a later change to the caller's collection cannot alter this value's equality or hash code.</summary>
+    [DamlFieldAttribute("holdingCids")]
+    public IReadOnlyList<ContractId<IHolding>> HoldingCids
+    {
+        get => _holdingCids;
+        init => _holdingCids = DamlFieldCollections.Copy(value);
+    }
+
+    /// <summary>The Daml field <c>profile</c>.</summary>
+    [DamlFieldAttribute("profile")]
+    public Profile Profile { get; init; } = Profile;
+
+    /// <summary>The Daml field <c>outcome</c>.</summary>
+    [DamlFieldAttribute("outcome")]
+    public Outcome Outcome { get; init; } = Outcome;
+
+    /// <summary>The Daml field <c>fee</c>.</summary>
+    [DamlFieldAttribute("fee")]
+    public decimal Fee { get; init; } = Fee;
+
+    /// <summary>Compares by content, reading list members element by element and map members key by key independently of insertion order.</summary>
+    /// <param name="other">The value to compare against.</param>
+    /// <returns><c>true</c> when every member is equal.</returns>
+    public bool Equals(RichRecord? other) =>
+        other is not null
+        && EqualityComparer<Party>.Default.Equals(Owner, other.Owner)
+        && EqualityComparer<long>.Default.Equals(Count, other.Count)
+        && EqualityComparer<decimal>.Default.Equals(Amount, other.Amount)
+        && EqualityComparer<string>.Default.Equals(Label, other.Label)
+        && EqualityComparer<bool>.Default.Equals(Active, other.Active)
+        && EqualityComparer<DateOnly>.Default.Equals(AsOf, other.AsOf)
+        && EqualityComparer<DateTimeOffset>.Default.Equals(ObservedAt, other.ObservedAt)
+        && EqualityComparer<string?>.Default.Equals(Note, other.Note)
+        && DamlFieldCollections.Equal(Tags, other.Tags)
+        && DamlFieldCollections.Equal(Attributes, other.Attributes)
+        && EqualityComparer<ContractId<Marker>>.Default.Equals(Marker, other.Marker)
+        && EqualityComparer<ContractId<IHolding>>.Default.Equals(HoldingCid, other.HoldingCid)
+        && DamlFieldCollections.Equal(HoldingCids, other.HoldingCids)
+        && EqualityComparer<Profile>.Default.Equals(Profile, other.Profile)
+        && EqualityComparer<Outcome>.Default.Equals(Outcome, other.Outcome)
+        && EqualityComparer<decimal>.Default.Equals(Fee, other.Fee);
+
+    /// <inheritdoc />
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Owner);
+        hash.Add(Count);
+        hash.Add(Amount);
+        hash.Add(Label);
+        hash.Add(Active);
+        hash.Add(AsOf);
+        hash.Add(ObservedAt);
+        hash.Add(Note);
+        hash.Add(DamlFieldCollections.Hash(Tags));
+        hash.Add(DamlFieldCollections.Hash(Attributes));
+        hash.Add(Marker);
+        hash.Add(HoldingCid);
+        hash.Add(DamlFieldCollections.Hash(HoldingCids));
+        hash.Add(Profile);
+        hash.Add(Outcome);
+        hash.Add(Fee);
+        return hash.ToHashCode();
+    }
+
     /// <summary>Gets the template identifier.</summary>
     public static Identifier TemplateId { get; } = new("3557ffcb79394ef14eae69bfe5fce7dcd1fe39d0b7ee47f2d6d3d36ad646f0bc", "RichTypes", "RichRecord");
 
@@ -132,7 +259,7 @@ public sealed partial record RichRecord(
     {
         /// <summary>Creates a Contract from a CreatedEvent.</summary>
         public static Contract FromCreatedEvent(CreatedEvent @event) =>
-            new(new ContractId(@event.ContractId), global::Richtypes.RichRecord.FromRecord(@event.CreateArguments));
+            new(new ContractId(@event.ContractId), global::RichTypes.RichRecord.FromRecord(@event.CreateArguments));
     }
 }
 
@@ -161,8 +288,8 @@ public sealed record RelabelResult(
         var templateMatches0 = new List<string>();
         foreach (var item in created)
         {
-            if (string.Equals(item.TemplateId.ModuleName, global::Richtypes.RichRecord.TemplateId.ModuleName, StringComparison.Ordinal)
-                && string.Equals(item.TemplateId.EntityName, global::Richtypes.RichRecord.TemplateId.EntityName, StringComparison.Ordinal))
+            if (string.Equals(item.TemplateId.ModuleName, global::RichTypes.RichRecord.TemplateId.ModuleName, StringComparison.Ordinal)
+                && string.Equals(item.TemplateId.EntityName, global::RichTypes.RichRecord.TemplateId.EntityName, StringComparison.Ordinal))
             {
                 templateMatches0.Add(item.ContractId);
             }
@@ -186,11 +313,11 @@ public sealed record RelabelResult(
         }
         if (matches0.Count > 1)
         {
-            return new ExerciseOutcome<RelabelResult>.Many(matches0.Count, matches0);
+            return new ExerciseOutcome<RelabelResult>.Many(EquatableArray.Create(matches0));
         }
 
         return new ExerciseOutcome<RelabelResult>.One(new RelabelResult(
-            RichRecord: new ContractId<global::Richtypes.RichRecord>(matches0[0])
+            RichRecord: new ContractId<global::RichTypes.RichRecord>(matches0[0])
         ));
     }
 

@@ -26,7 +26,7 @@ public class DemoParityTests
                     null,
                     LedgerOffset.At(1),
                     (SynchronizerId)"sync1",
-                    new[] { owner }),
+                    [owner]),
                 LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(2)))
             .Build();
 
@@ -67,7 +67,7 @@ public class DemoParityTests
                     null,
                     LedgerOffset.At(1),
                     (SynchronizerId)"sync1",
-                    new[] { owner }),
+                    [owner]),
                 LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(2)))
             .Build();
 

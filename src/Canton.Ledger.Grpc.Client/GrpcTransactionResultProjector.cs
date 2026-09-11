@@ -52,11 +52,11 @@ internal static class GrpcTransactionResultProjector
         return new TransactionResult(
             transaction.UpdateId,
             LedgerWireConversions.ToLedgerOffset(transaction.Offset),
-            createdContracts,
-            archivedContractIds,
+            EquatableArray.Create(createdContracts),
+            EquatableArray.Create(archivedContractIds),
             LedgerWireConversions.ToCommandId(transaction.CommandId))
         {
-            ExercisedEvents = exercisedEvents,
+            ExercisedEvents = EquatableArray.Create(exercisedEvents),
         };
     }
 
@@ -97,7 +97,7 @@ internal static class GrpcTransactionResultProjector
             outcome,
             result => TransactionResultFolds.ToChoiceResult<TResult>(result, choice));
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
     {
         if (created.InterfaceViews.Count == 0)
         {
@@ -112,7 +112,7 @@ internal static class GrpcTransactionResultProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
             interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)

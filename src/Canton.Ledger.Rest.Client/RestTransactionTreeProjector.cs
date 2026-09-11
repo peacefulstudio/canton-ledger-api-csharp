@@ -54,7 +54,7 @@ internal static class RestTransactionTreeProjector
             $"the exercise of '{exercised.Choice}' at node id {nodeId} states no last descendant node id, "
             + "so the extent of the subtree it caused is unknowable");
 
-    private static TreeEvent Close(WireExercisedEvent exercised, int nodeId, IReadOnlyList<TreeEvent> children)
+    private static TreeEvent Close(WireExercisedEvent exercised, int nodeId, EquatableArray<TreeEvent> children)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
@@ -106,7 +106,7 @@ internal static class RestTransactionTreeProjector
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
     {
         if (created.InterfaceViews is not { Count: > 0 } views)
         {
@@ -121,7 +121,7 @@ internal static class RestTransactionTreeProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interfaceId");
             interfaceIds.Add(RestWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static int NodeIdOf(WireEvent? evt) =>

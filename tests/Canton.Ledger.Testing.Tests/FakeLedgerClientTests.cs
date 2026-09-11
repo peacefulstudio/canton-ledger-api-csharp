@@ -38,7 +38,7 @@ public class FakeLedgerClientTests
             null,
             LedgerOffset.At(1),
             (SynchronizerId)"sync1",
-            new[] { Alice });
+            [Alice]);
         var checkpoint = LedgerEvents.Checkpoint<DemoAsset>(LedgerOffset.At(2));
         var client = FakeLedgerClient.Create().WithActiveContracts(created, checkpoint).Build();
 
@@ -70,7 +70,7 @@ public class FakeLedgerClientTests
             null,
             LedgerOffset.At(1),
             (SynchronizerId)"sync1",
-            new[] { Alice });
+            [Alice]);
         var client = FakeLedgerClient.Create().WithContractEvents(created).Build();
 
         var entries = await CollectAsync(client.SubscribeAsync<DemoAsset>(Alice, cancellationToken: TestContext.Current.CancellationToken));
@@ -86,7 +86,7 @@ public class FakeLedgerClientTests
             14,
             "contract stream aborted",
             DamlErrorCategory.TransientServerFailure,
-            transportFault);
+            sourceException: transportFault);
         var client = FakeLedgerClient.Create().WithContractEvents(fault).Build();
 
         var entries = await CollectAsync(client.SubscribeAsync<DemoAsset>(Alice, cancellationToken: TestContext.Current.CancellationToken));
@@ -106,7 +106,7 @@ public class FakeLedgerClientTests
             new ContractId<DemoAsset>("cid1"),
             LedgerOffset.At(3),
             (SynchronizerId)"sync1",
-            new[] { Alice });
+            [Alice]);
         var client = FakeLedgerClient.Create().WithLedgerEffects(archived).Build();
 
         var entries = await CollectAsync(client.SubscribeLedgerEffectsAsync<DemoAsset>(Alice, cancellationToken: TestContext.Current.CancellationToken));
@@ -158,8 +158,8 @@ public class FakeLedgerClientTests
         LedgerOutcomes.One(LedgerResults.Transaction(
             "update-1",
             LedgerOffset.At(5),
-            new[] { new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null) },
-            new[] { "archived1" },
+            [new CreatedContract("0", "cid1", DemoAsset.TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null)],
+            ["archived1"],
             (CommandId)"cmd-1")),
         LedgerOutcomes.DamlError<TransactionResult>(
             DamlErrorCategory.InvalidGivenCurrentSystemStateOther,
@@ -186,7 +186,7 @@ public class FakeLedgerClientTests
     public async Task TrySubmitAndWaitForTransactionAsync_with_explicit_submitter_returns_the_staged_outcome()
     {
         var outcome = LedgerOutcomes.One(LedgerResults.Transaction(
-            "update-1", LedgerOffset.At(5), Array.Empty<CreatedContract>(), Array.Empty<string>(), (CommandId)"cmd-1"));
+            "update-1", LedgerOffset.At(5), [], [], (CommandId)"cmd-1"));
         var client = FakeLedgerClient.Create().WithSubmissionOutcome(outcome).Build();
 
         var result = await client.TrySubmitAndWaitForTransactionAsync(
@@ -260,7 +260,7 @@ public class FakeLedgerClientTests
         var client = FakeLedgerClient.Create()
             .WithLedgerEnd(LedgerOffset.At(42))
             .WithSubmissionOutcome(LedgerOutcomes.One(LedgerResults.Transaction(
-                "update-1", LedgerOffset.At(7), Array.Empty<CreatedContract>(), Array.Empty<string>(), (CommandId)"cmd-1")))
+                "update-1", LedgerOffset.At(7), [], [], (CommandId)"cmd-1")))
             .Build();
 
         await client.TrySubmitAndWaitForTransactionAsync(
@@ -291,9 +291,9 @@ public class FakeLedgerClientTests
     public static TheoryData<ExerciseOutcome<TransactionResult>> CommittedSubmissionOutcomes => new()
     {
         LedgerOutcomes.One(LedgerResults.Transaction(
-            "update-1", LedgerOffset.At(7), Array.Empty<CreatedContract>(), Array.Empty<string>(), (CommandId)"cmd-1")),
+            "update-1", LedgerOffset.At(7), [], [], (CommandId)"cmd-1")),
         LedgerOutcomes.None<TransactionResult>(),
-        LedgerOutcomes.Many<TransactionResult>(2, new[] { "cid1", "cid2" }),
+        LedgerOutcomes.Many<TransactionResult>(["cid1", "cid2"]),
     };
 
     [Theory]

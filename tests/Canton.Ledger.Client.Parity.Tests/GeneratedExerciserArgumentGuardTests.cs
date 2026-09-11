@@ -3,7 +3,7 @@
 
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;

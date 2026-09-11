@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
@@ -10,7 +11,7 @@ using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
@@ -35,8 +36,10 @@ public class SubscribeArchivedRoundTripTests
         }
 
         await using var fixture = LocalnetFixture.FromEnvironment();
-        var (services, owner) = await BootstrapAsync(fixture);
-        await using var _ = services;
+        var bootstrap = await BootstrapAsync(fixture);
+        await using var services = bootstrap.Services;
+        await using var actAsRights = bootstrap.ActAsRights;
+        var owner = bootstrap.Owner;
         var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var startOffset = await client.GetLedgerEndAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -61,8 +64,10 @@ public class SubscribeArchivedRoundTripTests
         }
 
         await using var fixture = LocalnetFixture.FromEnvironment();
-        var (services, owner) = await BootstrapAsync(fixture);
-        await using var _ = services;
+        var bootstrap = await BootstrapAsync(fixture);
+        await using var services = bootstrap.Services;
+        await using var actAsRights = bootstrap.ActAsRights;
+        var owner = bootstrap.Owner;
         var client = services.GetRequiredService<ICantonLedgerClient>();
 
         var retainedCid = await CreateMarkerAsync(client, owner);
@@ -103,7 +108,8 @@ public class SubscribeArchivedRoundTripTests
         Assert.DoesNotContain(archivedCid.Value, reconstructed);
     }
 
-    private static async Task<(ServiceProvider Services, Party Owner)> BootstrapAsync(LocalnetFixture fixture)
+    private static async Task<(ServiceProvider Services, ActAsRightsLease ActAsRights, Party Owner)>
+        BootstrapAsync(LocalnetFixture fixture)
     {
         var darOutcome = await fixture.UploadDarAsync(DarPath(), TestContext.Current.CancellationToken);
         Assert.True(
@@ -113,12 +119,17 @@ public class SubscribeArchivedRoundTripTests
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
         var userId = fixture.ValidatorUserId;
-        await fixture.GrantUserRightsAsync(
-            userId,
-            actAs: new[] { party.PartyId },
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        return (LocalnetLedgerServices.ForValidator(fixture, userId), owner);
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
+        try
+        {
+            await actAsRights.GrantAsync(party.PartyId, TestContext.Current.CancellationToken);
+            return (LocalnetLedgerServices.ForValidator(fixture, userId), actAsRights, owner);
+        }
+        catch
+        {
+            await actAsRights.DisposeAsync();
+            throw;
+        }
     }
 
     private static async Task<ContractId<Marker>> CreateMarkerAsync(ICantonLedgerClient client, Party owner)

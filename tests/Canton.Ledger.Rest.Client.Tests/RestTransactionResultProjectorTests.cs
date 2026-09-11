@@ -30,6 +30,25 @@ public class RestTransactionResultProjectorTests
             new();
     }
 
+    private sealed record ScalarKeyedMarker : ITemplate, IDamlRecord<ScalarKeyedMarker>, IHasKey<ScalarKeyedMarker, Party>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
+        public static string PackageId => "tmpl-pkg";
+        public static string PackageName => "token-impl";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+        public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static ScalarKeyedMarker FromRecord(DamlRecord record) => new();
+
+        public static KeyDescriptor<ScalarKeyedMarker, Party> Key { get; } = new()
+        {
+            KeyEncoder = owner => owner.ToDamlValue(),
+            KeyDecoder = value => Party.FromDamlValue(value.As<DamlParty>()),
+        };
+    }
+
+
     private static Raw.Transaction TransactionFrom(string json)
     {
         var response = JsonSerializer.Deserialize<WireTransaction>(json, RestRefitSettings.SerializerOptions);
@@ -377,5 +396,180 @@ public class RestTransactionResultProjectorTests
                 "Transaction.commandId is optional on the wire and is absent for everyone except the "
                 + "submitting party, so the transaction path must keep tolerating its absence")
             .Which.CommandId.Should().BeNull();
+    }
+
+    private const string IdiomaticExerciseResultTransaction =
+        """
+        {
+          "transaction": {
+            "updateId": "upd-1",
+            "offset": "1",
+            "events": [
+              {
+                "ExercisedEvent": {
+                  "offset": "1",
+                  "contractId": "00holding",
+                  "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                  "choice": "Split",
+                  "choiceArgument": {},
+                  "actingParties": ["alice::ns1"],
+                  "consuming": false,
+                  "witnessParties": ["alice::ns1"],
+                  "exerciseResult": {"owner": "alice::ns1", "amount": "10.5"}
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    [Fact]
+    public void Project_still_fails_the_untyped_path_on_an_idiomatic_record_shaped_exerciseResult()
+    {
+        var transaction = TransactionFrom(IdiomaticExerciseResultTransaction);
+
+        var act = () => RestTransactionResultProjector.Project(transaction);
+
+        act.Should().Throw<MalformedResponseException>()
+            .Which.Message.Should().Be(
+                "Malformed response from ledger: Received a wire Value with no recognisable sum case set.");
+    }
+
+    [Fact]
+    public void ProjectForChoiceResult_decodes_the_matching_choices_idiomatic_result_where_the_untyped_path_would_fail()
+    {
+        var transaction = TransactionFrom(IdiomaticExerciseResultTransaction);
+
+        var result = RestTransactionResultProjector.ProjectForChoiceResult<CirceMarker>(
+            transaction, new ChoiceName("Split"));
+
+        var exercised = result.ExercisedEvents.Should().ContainSingle().Subject;
+        var record = exercised.ExerciseResult.Should().BeOfType<DamlRecord>().Subject;
+        record.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice::ns1");
+        record.GetRequiredField("amount").As<DamlNumeric>().Value.Should().Be(10.5m);
+    }
+
+    private const string BareEmptyObjectExerciseResultTransaction =
+        """
+        {
+          "transaction": {
+            "updateId": "upd-1",
+            "offset": "1",
+            "events": [
+              {
+                "ExercisedEvent": {
+                  "offset": "1",
+                  "contractId": "00holding",
+                  "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                  "choice": "Settle",
+                  "choiceArgument": {},
+                  "actingParties": ["alice::ns1"],
+                  "consuming": false,
+                  "witnessParties": ["alice::ns1"],
+                  "exerciseResult": {}
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    [Fact]
+    public void Project_applies_WireUnitEncoding_to_a_bare_empty_object_exerciseResult_on_the_untyped_path()
+    {
+        var transaction = TransactionFrom(BareEmptyObjectExerciseResultTransaction);
+
+        var result = RestTransactionResultProjector.Project(transaction);
+
+        result.ExercisedEvents.Should().ContainSingle()
+            .Which.ExerciseResult.Should().Be(DamlUnit.Instance);
+    }
+
+    [Fact]
+    public void ProjectForChoiceResult_decodes_a_bare_empty_object_exerciseResult_as_the_empty_record_the_choice_returns()
+    {
+        var transaction = TransactionFrom(BareEmptyObjectExerciseResultTransaction);
+
+        var result = RestTransactionResultProjector.ProjectForChoiceResult<CirceReceipt>(
+            transaction, new ChoiceName("Settle"));
+
+        result.ExercisedEvents.Should().ContainSingle()
+            .Which.ExerciseResult.Should().BeOfType<DamlRecord>()
+            .Which.Fields.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ExerciseResult_hands_back_the_empty_record_rather_than_null_for_a_bare_empty_object_result()
+    {
+        var transaction = TransactionFrom(BareEmptyObjectExerciseResultTransaction);
+
+        var result = RestTransactionResultProjector.ProjectForChoiceResult<CirceReceipt>(
+            transaction, new ChoiceName("Settle"));
+
+        result.ExerciseResult<DamlRecord>("Settle").Should().NotBeNull()
+            .And.Subject.As<DamlRecord>().Fields.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ProjectForCreatedTemplate_decodes_the_matching_created_events_argument_against_the_template_type()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "CreatedEvent": {
+                      "offset": "1",
+                      "contractId": "00holding",
+                      "nodeId": 0,
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"owner": "alice::ns1", "amount": "10.5"}
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var result = RestTransactionResultProjector.ProjectForCreatedTemplate<CirceMarker>(transaction);
+
+        var created = result.CreatedContracts.Should().ContainSingle().Subject;
+        created.Payload.GetRequiredField("owner").As<DamlParty>().Value.Should().Be("alice::ns1");
+        created.Payload.GetRequiredField("amount").As<DamlNumeric>().Value.Should().Be(10.5m);
+    }
+
+    [Fact]
+    public void ProjectForCreatedTemplate_decodes_a_bare_scalar_wire_contract_key_against_the_templates_key_type()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "CreatedEvent": {
+                      "offset": "1",
+                      "contractId": "00keyed",
+                      "nodeId": 0,
+                      "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                      "contractKey": "alice::ns1"
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var result = RestTransactionResultProjector.ProjectForCreatedTemplate<ScalarKeyedMarker>(transaction);
+
+        var created = result.CreatedContracts.Should().ContainSingle().Subject;
+        created.ContractKey.Should().NotBeNull();
+        created.ContractKey!.Value.Should().Be(new DamlParty("alice::ns1"));
     }
 }

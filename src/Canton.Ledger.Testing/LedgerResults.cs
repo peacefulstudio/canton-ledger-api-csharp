@@ -19,8 +19,8 @@ public static class LedgerResults
     public static TransactionResult Transaction(
         string updateId,
         LedgerOffset completionOffset,
-        IReadOnlyList<CreatedContract> createdContracts,
-        IReadOnlyList<string> archivedContractIds,
+        EquatableArray<CreatedContract> createdContracts,
+        EquatableArray<string> archivedContractIds,
         CommandId commandId) =>
         new(updateId, completionOffset, createdContracts, archivedContractIds, commandId);
 

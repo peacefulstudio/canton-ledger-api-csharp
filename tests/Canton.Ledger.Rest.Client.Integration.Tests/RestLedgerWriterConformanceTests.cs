@@ -9,7 +9,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Rest.Client.Integration.Tests;
@@ -25,19 +25,6 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class RestLedgerWriterConformanceTests
 {
-    private const string ExerciseResultQuarantineMessage =
-        "Quarantined on the exercise response, not on the submission: the participant accepts the "
-        + "exercise and commits it. One measured cause keeps its result unreadable. The client now "
-        + "requests the ledger-effects transaction shape on submit-and-wait-for-transaction, so the "
-        + "transaction does carry the ExercisedEvent, but its choiceArgument and exerciseResult both "
-        + "arrive as {}, an untyped wire Value with no sum case set, which the decoder cannot "
-        + "resolve without knowing the Daml type the value belongs to. The submitted bytes are "
-        + "covered live by "
-        + nameof(TryCreateAsync_submits_a_create_the_participant_accepts) + ". The quarantine "
-        + "lifts when the decode fix lands; until then the bytes this test would submit and both "
-        + "measured participant replies are pinned by RestExerciseQuarantinePinTests in "
-        + "Canton.Ledger.Rest.Client.Tests.";
-
     private static string DarPath() => Path.Combine(
         AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
 
@@ -49,8 +36,7 @@ public class RestLedgerWriterConformanceTests
             $"Unexpected DAR upload outcome: {darOutcome}");
 
         var party = await lane.Fixture.AllocatePartyAsync("rest-writer", cancellationToken: cancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, cancellationToken);
         return new Party(party.PartyId);
     }
 
@@ -112,7 +98,7 @@ public class RestLedgerWriterConformanceTests
             .Should().Be(owner.Id);
     }
 
-    [Fact(Skip = ExerciseResultQuarantineMessage)]
+    [Fact]
     public async Task TryExerciseAsync_exercises_the_Archive_choice_on_a_real_participant()
     {
         await using var lane = await RestConformanceLane.OpenAsync(TestContext.Current.CancellationToken);

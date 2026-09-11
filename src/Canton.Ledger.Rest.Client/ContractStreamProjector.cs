@@ -191,7 +191,7 @@ internal static partial class ContractStreamProjector
             return new ContractStreamEvent<T>.Assigned(
                 new ContractId<T>(assignedContractId),
                 payload,
-                ContractKeyOf(created),
+                ContractKeyOf<T>(created),
                 LedgerOffset.At(createdOffset),
                 scope.Source,
                 scope.Target,
@@ -356,22 +356,30 @@ internal static partial class ContractStreamProjector
         return new ContractStreamEvent<T>.Created(
             new ContractId<T>(contractId),
             payload,
-            ContractKeyOf(created),
+            ContractKeyOf<T>(created),
             LedgerOffset.At(offset),
             synchronizerId,
             RestWireConversions.ToPartyList(created.WitnessParties));
     }
 
-    internal static ContractKey? ContractKeyOf(WireCreatedEvent created)
+    internal static ContractKey? ContractKeyOf<TMarker>(WireCreatedEvent created)
+        where TMarker : IDamlType
     {
         if (created.ContractKey is null)
         {
             return null;
         }
 
-        return new ContractKey(
-            RestValueDecoder.ToDamlValue(created.ContractKey),
-            created.TemplateId is null ? null : RestWireConversions.ToRuntimeIdentifier(created.TemplateId))
+        var templateId = created.TemplateId is null
+            ? null
+            : RestWireConversions.ToRuntimeIdentifier(created.TemplateId);
+        var keyType = MarkerMatcher<TMarker>.KeyType
+            ?? (templateId is null ? null : MarkerMatcher<TMarker>.KeyTypeFor(templateId));
+        var value = keyType is not null
+            ? RestValueDecoder.ToDamlValue(created.ContractKey, keyType)
+            : RestValueDecoder.ToDamlValue(created.ContractKey);
+
+        return new ContractKey(value, templateId)
         {
             KeyHash = RestWireConversions.ToKeyHash(created.ContractKeyHash),
         };

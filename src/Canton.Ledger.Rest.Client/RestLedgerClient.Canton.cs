@@ -267,7 +267,7 @@ internal sealed partial class RestLedgerClient
     }
 
     private static CompletionStreamEvent.StreamError ToCompletionStreamError(StreamFault fault) =>
-        new(fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
+        new(fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
 
     private CompletionStreamEvent? ProjectCompletionResponse(WireCompletionResponse? completionResponse)
     {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -12,7 +13,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.DependencyInjection;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using PeacefulLocalnet = Peaceful.Canton.Localnet.Testing;
 using ProtoV2 = Com.Daml.Ledger.Api.V2;
@@ -41,7 +42,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         + "on both synchronizers (LocalNet app-synchronizer.sc bootstrap) is required to run "
         + "this conformance spike.";
 
-    private readonly PeacefulLocalnet.LocalnetFixture _fixture;
+    private readonly ActAsRightsLease _actAsRights;
     private readonly ITokenProvider _tokenProvider;
     private readonly string _userId;
     private readonly ServiceProvider _services;
@@ -53,8 +54,8 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
 
     private ReassignmentHarness(PeacefulLocalnet.LocalnetFixture fixture)
     {
-        _fixture = fixture;
         _userId = fixture.ValidatorUserId;
+        _actAsRights = ActAsRightsLease.ForValidator(fixture);
 
         _services = LocalnetLedgerServices.ForValidator(fixture, _userId);
         _tokenProvider = _services.GetRequiredService<ITokenProvider>();
@@ -115,8 +116,7 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         }
 
         var party = new Party(onSource.Party);
-        await _fixture.GrantUserRightsAsync(
-            _userId, actAs: new[] { party.Id }, cancellationToken: cancellationToken);
+        await _actAsRights.GrantAsync(party.Id, cancellationToken);
 
         var hosted = await _client.GetConnectedSynchronizersAsync(party, cancellationToken: cancellationToken);
         if (hosted.Count < 2)
@@ -359,7 +359,14 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
     {
         try
         {
-            await _services.DisposeAsync();
+            try
+            {
+                await _services.DisposeAsync();
+            }
+            finally
+            {
+                await _actAsRights.DisposeAsync();
+            }
         }
         finally
         {

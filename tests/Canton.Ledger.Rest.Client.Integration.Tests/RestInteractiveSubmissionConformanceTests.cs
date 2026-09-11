@@ -26,10 +26,7 @@ public class RestInteractiveSubmissionConformanceTests
         await using var lane = await RestConformanceLane.OpenAsync(TestContext.Current.CancellationToken);
         var party = await lane.Fixture.AllocatePartyAsync(
             "rest-preferred-package", cancellationToken: TestContext.Current.CancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId,
-            actAs: [party.PartyId],
-            cancellationToken: TestContext.Current.CancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, TestContext.Current.CancellationToken);
         var synchronizer = Assert.Single(await lane.Fixture.GetConnectedSynchronizersAsync(
             party.PartyId, TestContext.Current.CancellationToken));
 

@@ -114,7 +114,7 @@ var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 
 ### Authentication
 
-`Canton.Ledger.Kernel` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register a token provider before adding the clients:
+`Canton.Ledger.Kernel` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register an authentication provider explicitly; the built-in providers may be added before or after unauthenticated `AddLedgerClient` or `AddRestLedgerClient` registrations:
 
 ```csharp
 using Canton.Ledger.Kernel.Authentication;

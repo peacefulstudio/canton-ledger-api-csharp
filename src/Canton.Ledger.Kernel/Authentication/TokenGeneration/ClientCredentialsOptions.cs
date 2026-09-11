@@ -3,6 +3,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
+using Canton.Ledger.Kernel.Security;
 
 namespace Canton.Ledger.Kernel.Authentication.TokenGeneration;
 
@@ -80,6 +81,16 @@ public class ClientCredentialsOptions : IValidatableObject
     /// applies to the gRPC call.
     /// </summary>
     public TimeSpan TokenAcquisitionTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The TLS material the token client presents as its own identity and accepts as trust anchors.
+    /// Unconfigured by default, so the client validates the identity provider against the operating
+    /// system trust store and presents no client certificate unless a consumer opts in. Configured
+    /// TLS requires an effective <c>https</c> token endpoint; validation rejects plaintext
+    /// <c>http</c> even when <see cref="AllowInsecureTokenEndpoint"/> is set because TLS identity and
+    /// trust settings cannot apply over plaintext transport.
+    /// </summary>
+    public TlsOptions Tls { get; set; } = new();
 
     /// <summary>
     /// Returns the effective token endpoint, preferring <see cref="TokenEndpoint"/>
@@ -165,6 +176,24 @@ public class ClientCredentialsOptions : IValidatableObject
                 [nameof(TokenEndpoint), nameof(AllowInsecureTokenEndpoint)]);
         }
 
+        var effectiveTokenEndpoint = TokenEndpoint;
+        var effectiveTokenEndpointMemberName = nameof(TokenEndpoint);
+        if (TokenEndpoint is null && TryResolveDomainEndpoint(Domain, out var domainEndpoint))
+        {
+            effectiveTokenEndpoint = domainEndpoint;
+            effectiveTokenEndpointMemberName = nameof(Domain);
+        }
+
+        if (Tls.IsConfigured && effectiveTokenEndpoint?.Scheme == Uri.UriSchemeHttp)
+        {
+            yield return new ValidationResult(
+                $"ClientCredentialsOptions.Tls is configured, but ClientCredentialsOptions.{effectiveTokenEndpointMemberName} "
+                + "resolves to a plaintext http token endpoint. TLS identity "
+                + "and trust settings cannot apply over http. Use an https endpoint or remove "
+                + "ClientCredentialsOptions.Tls configuration.",
+                [nameof(Tls), effectiveTokenEndpointMemberName]);
+        }
+
         if (SafetyMargin < TimeSpan.Zero)
         {
             yield return new ValidationResult(
@@ -178,6 +207,12 @@ public class ClientCredentialsOptions : IValidatableObject
                 "TokenAcquisitionTimeout must be positive.",
                 [nameof(TokenAcquisitionTimeout)]);
         }
+
+        var tlsResults = new List<ValidationResult>();
+        Validator.TryValidateObject(
+            Tls, new ValidationContext(Tls), tlsResults, validateAllProperties: true);
+        foreach (var result in tlsResults)
+            yield return result;
     }
 
     private static bool TryResolveDomainEndpoint(string? domain, [NotNullWhen(true)] out Uri? endpoint)

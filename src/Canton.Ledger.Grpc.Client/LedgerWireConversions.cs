@@ -43,16 +43,16 @@ internal static class LedgerWireConversions
     public static LedgerOffset ToLedgerOffset(long wireOffset) =>
         MalformedResponse.Decoding(wireOffset, LedgerOffset.At);
 
-    public static IReadOnlyList<Party> ToPartyList(IEnumerable<string> wireParties) =>
+    public static EquatableArray<Party> ToPartyList(IEnumerable<string> wireParties) =>
         MalformedResponse.Decoding(wireParties, ToParties);
 
-    private static IReadOnlyList<Party> ToParties(IEnumerable<string> wireParties)
+    private static EquatableArray<Party> ToParties(IEnumerable<string> wireParties)
     {
         var result = new List<Party>();
         foreach (var party in wireParties)
         {
             result.Add((Party)party);
         }
-        return result;
+        return EquatableArray.Create(result);
     }
 }

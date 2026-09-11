@@ -70,7 +70,7 @@ public class TransactionResultFoldsTests
         damlError.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateOther);
         damlError.ErrorId.Should().Be("SOME_ERROR");
         damlError.Message.Should().Be("gone");
-        damlError.Metadata.Should().BeSameAs(metadata);
+        damlError.Metadata.Should().BeEquivalentTo(metadata);
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public class TransactionResultFoldsTests
         new(
             UpdateId: "u1",
             CompletionOffset: LedgerOffset.At(1),
-            CreatedContracts: created,
+            CreatedContracts: EquatableArray.Create(created),
             ArchivedContractIds: [],
             CommandId: default);
 }
