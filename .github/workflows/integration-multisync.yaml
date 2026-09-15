@@ -123,6 +123,7 @@ jobs:
           CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
           CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
           CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
+          CANTON_REASSIGNMENT_REQUIRE_MULTI_SYNC: "1"
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \
@@ -148,6 +149,7 @@ jobs:
           CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
           CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
           CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
+          CANTON_REASSIGNMENT_REQUIRE_MULTI_SYNC: "1"
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \

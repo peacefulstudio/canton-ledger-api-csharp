@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Com.Daml.Ledger.Api.V2.Admin;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -171,6 +172,11 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         }
         catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
         {
+            if (MultiSyncReassignmentGate.Required)
+            {
+                throw;
+            }
+
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
@@ -195,6 +201,11 @@ internal sealed class ReassignmentHarness : IAsyncDisposable
         }
         catch (RpcException ex) when (IsReassignmentFeatureDisabled(ex))
         {
+            if (MultiSyncReassignmentGate.Required)
+            {
+                throw;
+            }
+
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
