@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Rest.Client.Raw;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -39,8 +40,8 @@ internal sealed class RestReassignmentHarness
 {
     private const string ReassignmentFeatureDisabledSignal = "Multi-synchronizer feature flag is not enabled";
 
-    internal const string SingleSyncSkipMessage =
-        "Skipping: the participant reports fewer than two connected synchronizers, so this is the "
+    internal const string SingleSyncMessage =
+        "the participant reports fewer than two connected synchronizers, so this is the "
         + "single-synchronizer lane. Bring up a multi-synchronizer participant to run this "
         + "reassignment conformance test.";
 
@@ -63,7 +64,12 @@ internal sealed class RestReassignmentHarness
             cancellationToken: cancellationToken);
         if (synchronizers.Count < 2)
         {
-            Assert.Skip(SingleSyncSkipMessage);
+            if (MultiSyncReassignmentGate.Required)
+            {
+                Assert.Fail($"Failing (multi-sync required): {SingleSyncMessage}");
+            }
+
+            Assert.Skip($"Skipping: {SingleSyncMessage}");
         }
 
         return new SynchronizerPair(
@@ -163,6 +169,11 @@ internal sealed class RestReassignmentHarness
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {
+            if (MultiSyncReassignmentGate.Required)
+            {
+                throw;
+            }
+
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
@@ -182,6 +193,11 @@ internal sealed class RestReassignmentHarness
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {
+            if (MultiSyncReassignmentGate.Required)
+            {
+                throw;
+            }
+
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
@@ -284,7 +300,8 @@ internal sealed class RestReassignmentHarness
     private static void SkipIfReassignmentFeatureDisabled(ExerciseOutcome<ContractStreamEvent<Asset>> outcome)
     {
         if (outcome is ExerciseOutcome<ContractStreamEvent<Asset>>.DamlError damlError
-            && IsReassignmentFeatureDisabled(damlError.Message))
+            && IsReassignmentFeatureDisabled(damlError.Message)
+            && !MultiSyncReassignmentGate.Required)
         {
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
