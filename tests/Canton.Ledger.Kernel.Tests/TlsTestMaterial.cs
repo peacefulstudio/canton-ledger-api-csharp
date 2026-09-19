@@ -134,6 +134,8 @@ internal sealed class TlsTestMaterial : IDisposable
     private X509Certificate2 Track(X509Certificate2 certificate)
     {
         _certificates.Add(certificate);
+        var kind = certificate.Subject.Contains("Client") ? "client" : certificate.Subject.Contains("Root") ? "ca" : "server-or-other";
+        TlsProbeLog.Issue($"{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this)}", kind, certificate);
         return certificate;
     }
 }

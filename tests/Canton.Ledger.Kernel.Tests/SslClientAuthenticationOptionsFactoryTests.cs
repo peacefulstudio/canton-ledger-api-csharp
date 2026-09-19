@@ -255,7 +255,9 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
     [Fact]
     public async Task Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured()
     {
+        TlsProbeLog.Line($"REAL-TEST store-before {TlsProbeLog.StoreSnapshot()}");
         var presented = await HandshakeAsync(new TlsOptions { CertificateAuthorities = [_certificateAuthority] });
+        TlsProbeLog.Line($"REAL-TEST owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} ownClient={_clientCertificate.Thumbprint} presented={TlsProbeLog.Describe(presented)} store-after {TlsProbeLog.StoreSnapshot()}");
 
         presented.Should().BeNull();
     }
