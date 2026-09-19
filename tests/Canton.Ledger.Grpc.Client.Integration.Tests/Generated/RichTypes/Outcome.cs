@@ -8,7 +8,7 @@
 using Daml.Runtime.Data;
 using System;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml variant Outcome

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Xunit;
@@ -32,6 +33,25 @@ public class RestCommandBuilderTests
             new();
     }
 
+    private interface ITestInterface : IDamlInterface, IHasView<TestInterfaceView>
+    {
+        static Identifier IDamlInterface.InterfaceId => InterfaceId;
+        public static new Identifier InterfaceId { get; } = new("ipkg", "IModule", "IEntity");
+        static string IDamlInterface.PackageId => "ipkg";
+        static string IDamlInterface.PackageName => "interface-package";
+        static Version IDamlInterface.PackageVersion => new(0, 1, 0);
+
+        static DamlTypeDescriptor IDamlType.DamlTypeId =>
+            new(InterfaceId, DamlTypeKind.Interface, "interface-package");
+    }
+
+    private sealed record TestInterfaceView : IDamlRecord, IDamlRecord<TestInterfaceView>
+    {
+        public DamlRecord ToRecord() => DamlRecord.Create();
+
+        public static TestInterfaceView FromRecord(DamlRecord record) => new();
+    }
+
     private static RuntimeCommands.CreateCommand Create() =>
         new(new RuntimeIdentifier("pkg", "Module", "Template"), new DamlRecord(null, []));
 
@@ -41,6 +61,29 @@ public class RestCommandBuilderTests
             new ContractId<TestTemplate>(cid),
             new RuntimeCommands.ChoiceName(choice),
             DamlUnit.Instance);
+
+    private static RuntimeCommands.ExerciseCommand InterfaceExercise(
+        string choice = "Transfer", string cid = "00interfacecontract") =>
+        RuntimeCommands.ExerciseCommand.ForInterface<ITestInterface>(
+            new ContractId<ITestInterface>(cid),
+            new RuntimeCommands.ChoiceName(choice),
+            DamlRecord.Create(DamlField.Create("newOwner", new DamlParty("party::bob"))));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByKey(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByScalarKey(
+        string choice = "Transfer", string steward = "party::steward") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlParty(steward),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
 
     private static readonly DateTimeOffset LedgerTimeBound =
         new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
@@ -206,6 +249,91 @@ public class RestCommandBuilderTests
         wireCommand.ExerciseCommand.Should().NotBeNull();
         wireCommand.ExerciseCommand!.ContractId.Should().Be("00contract123");
         wireCommand.ExerciseCommand.Choice.Should().Be("Archive");
+    }
+
+    [Fact]
+    public void BuildCommands_pins_the_interface_id_on_an_interface_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(InterfaceExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: null);
+
+        var wireCommand = commands.Commands1.Should().ContainSingle().Subject;
+        wireCommand.ExerciseCommand.Should().NotBeNull();
+        wireCommand.ExerciseCommand!.TemplateId.PackageId.Should().Be("ipkg");
+        wireCommand.ExerciseCommand.TemplateId.ModuleName.Should().Be("IModule");
+        wireCommand.ExerciseCommand.TemplateId.EntityName.Should().Be("IEntity");
+        wireCommand.ExerciseCommand.ContractId.Should().Be("00interfacecontract");
+        wireCommand.ExerciseCommand.Choice.Should().Be("Transfer");
+
+        var argumentField = wireCommand.ExerciseCommand.ChoiceArgument.Record.Fields
+            .Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_writes_the_interface_id_as_a_flat_colon_separated_string_on_the_wire()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(InterfaceExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var json = JsonSerializer.Serialize(
+            RestCommandBuilder.BuildCommands(submission, userId: null), RestRefitSettings.SerializerOptions);
+
+        using var document = JsonDocument.Parse(json);
+        var exerciseCommand = document.RootElement.GetProperty("commands")[0].GetProperty("ExerciseCommand");
+        exerciseCommand.GetProperty("templateId").GetString().Should().Be("ipkg:IModule:IEntity");
+    }
+
+    [Fact]
+    public void BuildCommands_adds_an_exercise_by_key_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: null);
+
+        var wireCommand = commands.Commands1.Should().ContainSingle().Subject;
+        wireCommand.ExerciseByKeyCommand.Should().NotBeNull();
+        wireCommand.ExerciseByKeyCommand!.TemplateId.PackageId.Should().Be("pkg");
+        wireCommand.ExerciseByKeyCommand.TemplateId.ModuleName.Should().Be("Module");
+        wireCommand.ExerciseByKeyCommand.TemplateId.EntityName.Should().Be("Template");
+        wireCommand.ExerciseByKeyCommand.Choice.Should().Be("Transfer");
+
+        var keyField = wireCommand.ExerciseByKeyCommand.ContractKey.Record.Fields
+            .Should().ContainSingle().Subject;
+        keyField.Label.Should().Be("owner");
+        keyField.Value.Party.Should().Be("party::alice");
+
+        var argumentField = wireCommand.ExerciseByKeyCommand.ChoiceArgument.Record.Fields
+            .Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+
+        wireCommand.ExerciseCommand.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildCommands_writes_a_bare_scalar_exercise_by_key_key_as_the_scalar_itself()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByScalarKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: null);
+
+        var wireCommand = commands.Commands1.Should().ContainSingle().Subject;
+        wireCommand.ExerciseByKeyCommand.Should().NotBeNull();
+        wireCommand.ExerciseByKeyCommand!.ContractKey.Party.Should().Be(
+            "party::steward",
+            "a template keyed on a bare scalar is emitted with a KeyEncoder that hands the naked "
+            + "DamlValue over, never a single-field record wrapping it");
+        wireCommand.ExerciseByKeyCommand.ContractKey.Record.Should().BeNull();
     }
 
     [Fact]
@@ -404,19 +532,43 @@ public class RestCommandBuilderTests
             .Which.ParamName.Should().Be("assign reassignment id");
     }
 
+    private static RuntimeCommands.CreateAndExerciseCommand CreateAndExercise(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
     [Fact]
-    public void BuildCommands_rejects_an_unsupported_command_type()
+    public void BuildCommands_adds_a_create_and_exercise_command()
     {
-        var submission = RuntimeCommands.CommandsSubmission.Single(
-            new RuntimeCommands.ExerciseByKeyCommand(
-                new RuntimeIdentifier("pkg", "Module", "Template"),
-                new DamlText("key"),
-                new RuntimeCommands.ChoiceName("Archive"),
-                DamlUnit.Instance))
-            .WithActAs(Alice);
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateAndExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
 
-        var act = () => RestCommandBuilder.BuildCommands(submission, userId: null);
+        var commands = RestCommandBuilder.BuildCommands(submission, userId: null);
 
-        act.Should().Throw<NotSupportedException>();
+        var wireCommand = commands.Commands1.Should().ContainSingle().Subject;
+        var createAndExerciseCommand = wireCommand.CreateAndExerciseCommand;
+        createAndExerciseCommand.Should().NotBeNull();
+        createAndExerciseCommand!.TemplateId.PackageId.Should().Be("pkg");
+        createAndExerciseCommand.TemplateId.ModuleName.Should().Be("Module");
+        createAndExerciseCommand.TemplateId.EntityName.Should().Be("Template");
+        createAndExerciseCommand.Choice.Should().Be("Transfer");
+
+        var createArgumentField = createAndExerciseCommand.CreateArguments.Fields
+            .Should().ContainSingle().Subject;
+        createArgumentField.Label.Should().Be("owner");
+        createArgumentField.Value.Party.Should().Be("party::alice");
+
+        var choiceArgumentField = createAndExerciseCommand.ChoiceArgument.Record.Fields
+            .Should().ContainSingle().Subject;
+        choiceArgumentField.Label.Should().Be("newOwner");
+        choiceArgumentField.Value.Party.Should().Be("party::bob");
+
+        wireCommand.CreateCommand.Should().BeNull();
+        wireCommand.ExerciseCommand.Should().BeNull();
+        wireCommand.ExerciseByKeyCommand.Should().BeNull();
     }
 }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Daml.Runtime.Commands;
+using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 
 namespace Canton.Ledger.Abstractions;
@@ -38,7 +39,7 @@ namespace Canton.Ledger.Abstractions;
 public sealed record Completion(
     CommandId CommandId,
     long Offset,
-    IReadOnlyList<Party> ActAs,
+    EquatableArray<Party> ActAs,
     SynchronizerTime SynchronizerTime,
     string? SubmissionId,
     string? UserId,

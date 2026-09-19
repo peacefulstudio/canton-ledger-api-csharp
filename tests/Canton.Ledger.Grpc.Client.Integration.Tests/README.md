@@ -8,6 +8,13 @@ The Daml fixture lives in `testdata/richtypes/` and covers the full surface of t
 
 `Generated/` is committed so CI and local development compile without a JDK or dpm build step. The rich Daml source is in `testdata/richtypes/`.
 
+The contract-key tests use a second fixture, `contractkeys`, which is **not** in this repo. It ships
+prebuilt — DAR and generated C# both — inside the `Daml.Codegen.Testing.Conformance` package, reached
+through `ConformanceCorpus.OpenDar(ConformancePackage.ContractKeys)`. Its only control point here is
+the package pin in `Directory.Packages.props`; bump that to take a new fixture. Neither
+`scripts/regen.sh` nor its emitter-version guard covers it, because there is no local Daml source to
+build and no local `Generated/` to write.
+
 ## Rebuilding the DAR and regenerating C#
 
 ### Prerequisites
@@ -90,3 +97,18 @@ Legacy un-namespaced `CANTON_LOCALNET_*` globals are also accepted as fallbacks.
 ```bash
 dotnet test tests/Canton.Ledger.Grpc.Client.Integration.Tests
 ```
+
+## Party rights on a long-lived LocalNet
+
+Every integration and parity lane allocates a fresh party and grants the validator user `CanActAs`
+on it. A participant caps a user at 1000 rights by default and a party is never deletable, so those
+grants have to be given back: each lane holds them in an `ActAsRightsLease`
+(`tests/Canton.Ledger.Testing.Localnet`) and revokes them when the lane disposes, checking the
+participant's own `newlyRevokedRights` so a revoke that matched nothing fails the run rather than
+passing quietly. Grant through the lease — `lane.GrantActAsAsync(...)` on the REST lane,
+`actAsRights.GrantAsync(...)` elsewhere — rather than calling the fixture's `GrantUserRightsAsync`
+directly, which the fixture gives no revoke for: the right would outlive the run, and a long-lived
+LocalNet would fill up until every new grant failed with `TOO_MANY_USER_RIGHTS`.
+
+A run killed before its teardown still leaves its rights behind, so a long-lived LocalNet can still
+reach the cap. Recovering one is a manual revoke against that participant's validator user.

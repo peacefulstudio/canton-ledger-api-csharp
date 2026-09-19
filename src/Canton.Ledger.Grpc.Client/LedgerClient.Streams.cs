@@ -65,7 +65,7 @@ internal sealed partial class LedgerClient
             {
                 LogCompletionStreamError(_logger, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new CompletionStreamEvent.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -78,7 +78,7 @@ internal sealed partial class LedgerClient
                     {
                         LogCompletionStreamDecodeFailed(_logger, stream.Current.Completion.Offset, decodeFailure);
                         yield return new CompletionStreamEvent.StreamError(
-                            StreamFault.NoTransportFailure, decodeFailure.Message, null, decodeFailure);
+                            StreamFault.NoTransportFailure, decodeFailure.Message, SourceException: decodeFailure);
                         yield break;
                     }
 
@@ -226,7 +226,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new ContractStreamEvent<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -331,7 +331,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new AcsSnapshotEntry<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 

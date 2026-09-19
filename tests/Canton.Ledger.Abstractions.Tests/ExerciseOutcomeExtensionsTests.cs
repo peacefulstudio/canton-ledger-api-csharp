@@ -41,7 +41,7 @@ public class ExerciseOutcomeExtensionsTests
     [Fact]
     public void OneOrThrow_throws_for_Many_reporting_count_and_contract_ids()
     {
-        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.Many(2, ["cid-1", "cid-2"]);
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.Many(["cid-1", "cid-2"]);
 
         var act = () => outcome.OneOrThrow("Mint");
 
@@ -65,7 +65,7 @@ public class ExerciseOutcomeExtensionsTests
         exception.Operation.Should().Be("Transfer");
         exception.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateResourceMissing);
         exception.ErrorId.Should().Be("CONTRACT_NOT_FOUND");
-        exception.Metadata.Should().BeSameAs(SampleMetadata);
+        exception.Metadata.Should().BeEquivalentTo(SampleMetadata);
         exception.Message.Should().Contain("Transfer").And.Contain("CONTRACT_NOT_FOUND")
             .And.Contain("contract abc is not active");
     }
@@ -167,7 +167,7 @@ public class ExerciseOutcomeExtensionsTests
         {
             new ExerciseOutcome<int>.One(1),
             new ExerciseOutcome<int>.None(),
-            new ExerciseOutcome<int>.Many(2, ["cid-1", "cid-2"]),
+            new ExerciseOutcome<int>.Many(["cid-1", "cid-2"]),
         };
 
         foreach (var outcome in outcomes)

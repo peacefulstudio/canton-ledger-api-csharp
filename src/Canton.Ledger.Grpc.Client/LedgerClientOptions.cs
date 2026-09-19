@@ -3,6 +3,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Security;
 using Grpc.Net.Client;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -46,11 +47,24 @@ public class LedgerClientOptions : IValidatableObject
     public TimeSpan KeepAlivePingTimeout { get; set; } = TimeSpan.FromSeconds(20);
 
     /// <summary>
-    /// Optional hook to tune or replace the <see cref="GrpcChannelOptions"/> the client builds — for
-    /// example to swap in a caller-owned <see cref="System.Net.Http.HttpMessageHandler"/> or override
-    /// the default keep-alive <see cref="System.Net.Http.SocketsHttpHandler"/>. It runs after the SDK
-    /// applies its defaults (message sizes and keep-alive), so anything it sets wins over them.
+    /// Optional hook to tune the <see cref="GrpcChannelOptions"/> the client builds — for example to
+    /// adjust the <see cref="System.Net.Http.SocketsHttpHandler"/> it already created, or to set a
+    /// channel option the SDK does not expose. It runs after the SDK applies its defaults (message
+    /// sizes and keep-alive), so anything it sets wins over them, up to and including replacing
+    /// <see cref="GrpcChannelOptions.HttpHandler"/> outright — see the remarks before doing so. That
+    /// includes <see cref="Tls"/>: the typed TLS material is on the handler before this hook runs, so
+    /// a hook that assigns <see cref="System.Net.Http.SocketsHttpHandler.SslOptions"/> replaces it.
     /// </summary>
+    /// <remarks>
+    /// Microsoft's own gRPC client-certificate sample assigns an
+    /// <see cref="System.Net.Http.HttpClientHandler"/> to
+    /// <see cref="GrpcChannelOptions.HttpHandler"/>, replacing the handler this client built rather
+    /// than adjusting it. A hook copied from that sample therefore drops the keep-alive settings
+    /// <see cref="KeepAlivePingDelay"/> and <see cref="KeepAlivePingTimeout"/> configure alongside the
+    /// TLS material, and a silently dropped keep-alive surfaces only as a long-running stream hanging
+    /// on a connection that died behind a NAT. Configure the handler this client built —
+    /// <c>(SocketsHttpHandler)options.HttpHandler!</c> — rather than assigning a new one.
+    /// </remarks>
     public Action<GrpcChannelOptions>? ConfigureChannel { get; set; }
 
     /// <summary>
@@ -87,16 +101,34 @@ public class LedgerClientOptions : IValidatableObject
     public RetryOptions Retry { get; set; } = new();
 
     /// <summary>
-    /// Recurses into <see cref="Retry"/> so its validation runs under the same
+    /// The TLS material this client presents as its own identity and accepts as trust anchors.
+    /// Unconfigured by default, so the channel negotiates TLS exactly as it did before — server
+    /// authentication against the operating system trust store, no client certificate — and nothing
+    /// is applied to the handler at all. Configuring it projects the material onto the
+    /// <see cref="System.Net.Http.SocketsHttpHandler.SslOptions"/> of the handler the client builds,
+    /// which is what a Canton participant demanding mutual TLS requires.
+    /// </summary>
+    /// <remarks>
+    /// This is applied before <see cref="ConfigureChannel"/> runs, so a host that sets
+    /// <see cref="System.Net.Http.SocketsHttpHandler.SslOptions"/> from that hook — or replaces the
+    /// handler outright — overrides everything configured here.
+    /// </remarks>
+    public TlsOptions Tls { get; set; } = new();
+
+    /// <summary>
+    /// Recurses into <see cref="Retry"/> and <see cref="Tls"/> so their validation runs under the same
     /// <c>ValidateDataAnnotations().ValidateOnStart()</c> pipeline as this type — runtime
     /// data-annotation validation does not descend into nested options on its own — surfacing a
-    /// misconfigured retry pipeline at startup rather than at the first RPC.
+    /// misconfigured retry pipeline or an incoherent TLS combination at startup rather than at the
+    /// first RPC or the first handshake.
     /// </summary>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        var retryResults = new List<ValidationResult>();
+        var nestedResults = new List<ValidationResult>();
         Validator.TryValidateObject(
-            Retry, new ValidationContext(Retry), retryResults, validateAllProperties: true);
-        return retryResults;
+            Retry, new ValidationContext(Retry), nestedResults, validateAllProperties: true);
+        Validator.TryValidateObject(
+            Tls, new ValidationContext(Tls), nestedResults, validateAllProperties: true);
+        return nestedResults;
     }
 }

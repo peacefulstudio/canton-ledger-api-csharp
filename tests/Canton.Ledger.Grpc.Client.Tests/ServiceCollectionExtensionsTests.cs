@@ -5,6 +5,7 @@ using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Security;
 using Daml.Ledger.Abstractions;
 using AwesomeAssertions;
 using Microsoft.Extensions.Configuration;
@@ -313,6 +314,22 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public async Task AddCantonStaticAuth_replaces_unauthenticated_fallback_registered_by_AddLedgerClient()
+    {
+        const string grpcAddress = "https://localhost:5001";
+        const string staticToken = "static-token";
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = grpcAddress);
+
+        services.AddCantonStaticAuth(staticToken);
+
+        using var provider = services.BuildServiceProvider();
+        var token = await provider.GetRequiredService<ITokenProvider>()
+            .GetTokenAsync(TestContext.Current.CancellationToken);
+        token.Should().Be(staticToken);
+    }
+
+    [Fact]
     public void AddAdminClient_resolves_with_action_overload_without_auth()
     {
         var services = new ServiceCollection();
@@ -491,7 +508,7 @@ public class ServiceCollectionExtensionsTests
             ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
             ["Canton:Auth:ClientId"] = "my-client",
             ["Canton:Auth:ClientSecret"] = "my-secret",
-            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+            ["Canton:Auth:Domain"] = "auth.example.com"
         }).Build();
 
         services.AddCantonLedger(config);
@@ -502,9 +519,48 @@ public class ServiceCollectionExtensionsTests
         var authOptions = provider.GetRequiredService<IOptions<ClientCredentialsOptions>>().Value;
         authOptions.ClientId.Should().Be("my-client");
         authOptions.ClientSecret.Should().Be("my-secret");
-        authOptions.Domain.Should().Be("dev-peaceful.eu.auth0.com");
+        authOptions.Domain.Should().Be("auth.example.com");
         authOptions.TokenGenerationEndpoint
-            .Should().Be(new Uri("https://dev-peaceful.eu.auth0.com/oauth/token"));
+            .Should().Be(new Uri("https://auth.example.com/oauth/token"));
+    }
+
+    [Fact]
+    public void AddCantonLedger_replaces_unauthenticated_fallback_registered_by_AddLedgerClient()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientId"] = "my-client",
+            ["Canton:Auth:ClientSecret"] = "my-secret",
+            ["Canton:Auth:Domain"] = "auth.example.com"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<ClientCredentialsProvider>();
+    }
+
+    [Fact]
+    public void AddCantonLedger_registers_unkeyed_client_credentials_when_only_keyed_ITokenProvider_exists()
+    {
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton<ITokenProvider>("keyed", ITokenProvider.None);
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
+            ["Canton:Auth:ClientId"] = "my-client",
+            ["Canton:Auth:ClientSecret"] = "my-secret",
+            ["Canton:Auth:Domain"] = "auth.example.com"
+        }).Build();
+
+        services.AddCantonLedger(config);
+
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<ClientCredentialsProvider>();
+        provider.GetRequiredKeyedService<ITokenProvider>("keyed").Should().BeSameAs(ITokenProvider.None);
     }
 
     [Fact]
@@ -546,7 +602,7 @@ public class ServiceCollectionExtensionsTests
         {
             ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
             ["Canton:Auth:ClientSecret"] = "my-secret",
-            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+            ["Canton:Auth:Domain"] = "auth.example.com"
         }).Build();
 
         services.AddCantonLedger(config);
@@ -583,7 +639,7 @@ public class ServiceCollectionExtensionsTests
             ["Canton:Ledger:GrpcAddress"] = "https://localhost:5001",
             ["Canton:Auth:ClientId"] = "my-client",
             ["Canton:Auth:ClientSecret"] = "my-secret",
-            ["Canton:Auth:Domain"] = "dev-peaceful.eu.auth0.com"
+            ["Canton:Auth:Domain"] = "auth.example.com"
         }).Build();
 
         services.AddCantonStaticAuth("explicit-token");
@@ -674,6 +730,159 @@ public class ServiceCollectionExtensionsTests
         var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
 
         act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_fails_at_startup_when_ledger_tls_is_configured_and_auth_tls_is_not()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ClientCredentialsOptions.Tls*");
+    }
+
+    [Fact]
+    public void AddLedgerClient_starts_when_ledger_tls_and_auth_tls_are_configured()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "auth-client.pem" };
+        });
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_starts_when_ledger_tls_is_configured_with_static_auth()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonStaticAuth("static-token");
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_options_validation_does_not_resolve_preexisting_scoped_ITokenProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<ITokenProvider>(static _ =>
+            throw new InvalidOperationException("The scoped token provider must not be resolved."));
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_starts_with_ledger_tls_when_preexisting_ITokenProvider_wins_over_AddCantonAuth()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonStaticAuth("static-token");
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<StaticTokenProvider>();
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_starts_when_ledger_tls_and_auth_tls_are_unconfigured()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        services.AddLedgerClient(options => options.GrpcAddress = "https://localhost:5001");
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void AddLedgerClient_fails_at_startup_when_ledger_tls_is_configured_and_auth_tls_is_not_reversed_order()
+    {
+        var services = new ServiceCollection();
+        services.AddLedgerClient(options =>
+        {
+            options.GrpcAddress = "https://localhost:5001";
+            options.Tls = new TlsOptions { ClientCertificatePemPath = "ledger-client.pem" };
+        });
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "client";
+            options.ClientSecret = "secret";
+            options.Domain = "https://auth.example.com";
+        });
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<ITokenProvider>().Should().BeOfType<ClientCredentialsProvider>();
+        var act = () => provider.GetRequiredService<IOptions<LedgerClientOptions>>().Value;
+
+        act.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ClientCredentialsOptions.Tls*");
     }
 
     [Theory]

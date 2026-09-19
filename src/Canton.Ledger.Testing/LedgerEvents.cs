@@ -26,7 +26,7 @@ public static class LedgerEvents
         ContractKey? key,
         LedgerOffset offset,
         SynchronizerId synchronizerId,
-        IReadOnlyList<Party> witnessParties)
+        EquatableArray<Party> witnessParties)
         where T : ITemplate, IDamlRecord<T> =>
         new AcsSnapshotEntry<T>.Created(contractId, payload, key, offset, synchronizerId, witnessParties);
 
@@ -43,6 +43,8 @@ public static class LedgerEvents
     /// <param name="message">Status detail from the participant or transport.</param>
     /// <param name="category">Classification of the transport failure, or <c>null</c> to stage a
     /// fault the transport could not classify.</param>
+    /// <param name="errorId">The participant's own Canton error code, or <c>null</c> to stage a
+    /// fault that carried no structured error to read one from.</param>
     /// <param name="sourceException">Transport exception that ended the stream, or <c>null</c> to
     /// stage a fault carried in-band rather than thrown.</param>
     /// <returns>The stream-error snapshot entry.</returns>
@@ -50,9 +52,10 @@ public static class LedgerEvents
         int statusCode,
         string message,
         DamlErrorCategory? category = null,
+        string? errorId = null,
         Exception? sourceException = null)
         where T : ITemplate, IDamlRecord<T> =>
-        new AcsSnapshotEntry<T>.StreamError(statusCode, message, category, sourceException);
+        new AcsSnapshotEntry<T>.StreamError(statusCode, message, category, errorId, sourceException);
 
     /// <summary>Builds an <see cref="AcsSnapshotEntry{T}.Unclassified"/> snapshot entry.</summary>
     /// <typeparam name="T">The Daml template or interface marker the snapshot is for.</typeparam>

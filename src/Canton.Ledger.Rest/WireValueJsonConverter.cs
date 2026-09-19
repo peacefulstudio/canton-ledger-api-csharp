@@ -23,8 +23,18 @@ internal sealed class WireValueJsonConverter : JsonConverter<Value>
     public override bool HandleNull => true;
 
     /// <inheritdoc />
-    public override Value Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        WireShapeJsonReader.Read<Value>(ref reader, options)!;
+    public override Value Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.Null)
+        {
+            return WireShapeJsonReader.Read<Value>(ref reader, options)!;
+        }
+
+        using var idiomaticValue = JsonDocument.ParseValue(ref reader);
+        var value = new Value();
+        value.AdditionalProperties[WireValueNames.Idiomatic] = idiomaticValue.RootElement.GetRawText();
+        return value;
+    }
 
     /// <inheritdoc />
     public override void Write(Utf8JsonWriter writer, Value value, JsonSerializerOptions options)

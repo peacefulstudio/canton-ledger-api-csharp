@@ -8,7 +8,7 @@ using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;

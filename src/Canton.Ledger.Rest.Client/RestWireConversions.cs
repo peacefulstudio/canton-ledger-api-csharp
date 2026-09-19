@@ -15,18 +15,18 @@ internal static class RestWireConversions
 {
     private const long NanosecondsPerTick = 100L;
 
-    public static IReadOnlyList<Party> ToPartyList(IEnumerable<string>? wireParties) =>
+    public static EquatableArray<Party> ToPartyList(IEnumerable<string>? wireParties) =>
         MalformedResponse.Decoding(wireParties, ToParties);
 
-    private static IReadOnlyList<Party> ToParties(IEnumerable<string>? wireParties)
+    private static EquatableArray<Party> ToParties(IEnumerable<string>? wireParties)
     {
+        if (wireParties is null) return [];
         var result = new List<Party>();
-        if (wireParties is null) return result;
         foreach (var party in wireParties)
         {
             result.Add((Party)party);
         }
-        return result;
+        return EquatableArray.Create(result);
     }
 
     public static RuntimeIdentifier ToRuntimeIdentifier(WireIdentifier identifier) =>
@@ -35,14 +35,21 @@ internal static class RestWireConversions
     internal static string? ToKeyHash(string? contractKeyHash) =>
         string.IsNullOrEmpty(contractKeyHash) ? null : contractKeyHash;
 
-    internal static ContractKey? ContractKeyOf(WireCreatedEvent created, RuntimeIdentifier runtimeTemplateId)
+    internal static ContractKey? ContractKeyOf(WireCreatedEvent created, RuntimeIdentifier runtimeTemplateId) =>
+        ContractKeyOf(created, runtimeTemplateId, keyType: null);
+
+    internal static ContractKey? ContractKeyOf(WireCreatedEvent created, RuntimeIdentifier runtimeTemplateId, Type? keyType)
     {
         if (created.ContractKey is null)
         {
             return null;
         }
 
-        return new ContractKey(RestValueDecoder.ToDamlValue(created.ContractKey), runtimeTemplateId)
+        var value = keyType is null
+            ? RestValueDecoder.ToDamlValue(created.ContractKey)
+            : RestValueDecoder.ToDamlValue(created.ContractKey, keyType);
+
+        return new ContractKey(value, runtimeTemplateId)
         {
             KeyHash = ToKeyHash(created.ContractKeyHash),
         };

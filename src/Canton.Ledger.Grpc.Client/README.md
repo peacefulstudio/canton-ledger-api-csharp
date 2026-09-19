@@ -11,7 +11,8 @@ High-level gRPC client for the Canton Ledger API with integration to `Daml.Runti
 | `Daml.Ledger.Abstractions.Extensions` | Convenience extension methods on the client interfaces: `ThrowingExercise.ExerciseAsync` (wraps `TryExerciseAsync`, throws on non-`One` outcomes), `CreateByExercise` (`TryCreateOneByExerciseAsync`, `TryCreateManyByExerciseAsync` and their throwing forms), `SingleCommandExtensions.TrySubmitSingleAsync`, `StreamerSnapshot.SnapshotAsync` |
 | `LedgerClient` (concrete, gRPC) | The implementation `AddLedgerClient` registers behind `ICantonLedgerClient` — resolve the interface rather than naming this type. Its raw-stub escape hatch is reached through `IGrpcCallInvokerFactory`, and its `ActivitySource` name through `LedgerActivitySourceNames.GrpcLedgerClient` |
 | `IAdminClient` (from `Canton.Ledger.Abstractions`) | Admin operations: `AllocatePartyAsync`, `CreateUserAsync`, `GrantUserRightsAsync` |
-| `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout`, `Retry` (opt-in retry pipeline, disabled by default) |
+| `LedgerClientOptions` | Config: `GrpcAddress` (required), `UserId`, `MaxMessageSize`, `Timeout`, `Retry` (opt-in retry pipeline, disabled by default), `Tls` (opt-in mTLS material, unconfigured by default) |
+| `TlsOptions` (from `Canton.Ledger.Kernel.Security`) | Nested at `LedgerClientOptions.Tls` and bound from `Canton:Ledger:Tls`. Client identity as `ClientCertificatePemPath` (+ `ClientCertificateKeyPemPath`), `ClientCertificatePkcs12Path` (+ `ClientCertificatePkcs12Password`) or an already-loaded `ClientCertificate`; private-CA trust as `CertificateAuthorityBundlePemPath` or `CertificateAuthorities`, with `RevocationMode`. Left unconfigured the channel is untouched — OS trust store, no client certificate — and it applies to every gRPC registration alike |
 
 ## Authentication
 
@@ -42,7 +43,7 @@ services.AddCantonStaticAuth("eyJ...");
 services.AddLedgerClient(configuration.GetSection("Canton:Ledger"));
 ```
 
-Explicit registrations use `TryAddSingleton`, so they take precedence over auto-registration only when the explicit auth is registered first. Register `AddCantonStaticAuth(...)` (or any other explicit `ITokenProvider`) before `AddCantonLedger(...)` or `AddLedgerClient(...)`.
+`AddCantonStaticAuth(...)` may be called before or after `AddLedgerClient(...)`: it replaces only the exact unkeyed `ITokenProvider.None` fallback installed by the client. Register static auth before `AddCantonLedger(...)` when `Canton:Auth` is configured, because a selected client-credentials provider is a real provider and remains in place. Any other pre-existing unkeyed provider also wins, and keyed registrations remain independent.
 
 ### 4. Unauthenticated — no auth configured
 

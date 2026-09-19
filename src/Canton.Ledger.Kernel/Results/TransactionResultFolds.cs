@@ -47,7 +47,7 @@ internal static class TransactionResultFolds
         {
             0 => new ExerciseOutcome<ContractId<TMarker>>.None(),
             1 => new ExerciseOutcome<ContractId<TMarker>>.One(new ContractId<TMarker>(matches[0])),
-            _ => new ExerciseOutcome<ContractId<TMarker>>.Many(matches.Count, matches),
+            _ => new ExerciseOutcome<ContractId<TMarker>>.Many(EquatableArray.Create(matches)),
         };
     }
 

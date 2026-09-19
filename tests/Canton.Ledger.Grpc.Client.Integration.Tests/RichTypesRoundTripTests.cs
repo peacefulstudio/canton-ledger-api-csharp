@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using Canton.Ledger.Abstractions;
+using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
@@ -10,7 +11,7 @@ using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
@@ -46,10 +47,8 @@ public class RichTypesRoundTripTests
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
         var userId = fixture.ValidatorUserId;
-        await fixture.GrantUserRightsAsync(
-            userId,
-            actAs: new[] { party.PartyId },
-            cancellationToken: TestContext.Current.CancellationToken);
+        await using var actAsRights = ActAsRightsLease.ForValidator(fixture);
+        await actAsRights.GrantAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
         var client = services.GetRequiredService<ICantonLedgerClient>();
@@ -136,10 +135,8 @@ public class RichTypesRoundTripTests
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
         var userId = fixture.ValidatorUserId;
-        await fixture.GrantUserRightsAsync(
-            userId,
-            actAs: new[] { party.PartyId },
-            cancellationToken: TestContext.Current.CancellationToken);
+        await using var actAsRights = ActAsRightsLease.ForValidator(fixture);
+        await actAsRights.GrantAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
         var client = services.GetRequiredService<ICantonLedgerClient>();
@@ -208,10 +205,8 @@ public class RichTypesRoundTripTests
         var party = await fixture.AllocatePartyAsync("cdg", cancellationToken: TestContext.Current.CancellationToken);
         var owner = new Party(party.PartyId);
         var userId = fixture.ValidatorUserId;
-        await fixture.GrantUserRightsAsync(
-            userId,
-            actAs: new[] { party.PartyId },
-            cancellationToken: TestContext.Current.CancellationToken);
+        await using var actAsRights = ActAsRightsLease.ForValidator(fixture);
+        await actAsRights.GrantAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         await using var services = LocalnetLedgerServices.ForValidator(fixture, userId);
         var client = services.GetRequiredService<ICantonLedgerClient>();

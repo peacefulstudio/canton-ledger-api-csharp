@@ -164,14 +164,20 @@ public interface ICantonLedgerClient : ILedgerClient
     /// <see cref="IHasView{TView}"/> constraint ties them.
     /// </para>
     /// <para>
+    /// Each returned element carries the contract's last-update offset and synchronizer id. The
+    /// last-update offset identifies the update that most recently created or assigned that
+    /// contract; it may point at a pruned update and is not a resume offset. To resume after the
+    /// snapshot, use <see cref="ILedgerStreamer.SubscribeActiveAsync{TInterface, TView}"/> and retain
+    /// its terminal checkpoint, which this materializing convenience consumes and discards.
+    /// </para>
+    /// <para>
     /// This is a materializing convenience, not a streaming read: it cannot hand a fault back
     /// in-band, so a snapshot that faults, carries a row the projector could not classify, or ends
     /// without its terminal checkpoint throws <see cref="LedgerOperationException"/> rather than
     /// returning a short list that looks complete. The in-band terminal-<c>StreamError</c>
     /// contract binds the <c>await foreach</c> streaming surfaces; stay on
     /// <see cref="ILedgerStreamer.SubscribeActiveAsync{TInterface, TView}"/> for value-shaped
-    /// fault handling or when the snapshot's resume ticket matters, since the terminal checkpoint
-    /// is consumed and discarded here.
+    /// fault handling.
     /// </para>
     /// <para>
     /// Both shipped transports project the participant-computed view, so both serve this method.
@@ -186,11 +192,14 @@ public interface ICantonLedgerClient : ILedgerClient
     /// <param name="submitter">The submitter authorization whose combined parties scope visibility.</param>
     /// <param name="activeAtOffset">Snapshot offset; <see langword="null"/> means the current ledger end.</param>
     /// <param name="cancellationToken">Cancels the underlying snapshot stream cleanly.</param>
+    /// <returns>
+    /// The active interface contracts, each wrapped with its last-update offset and synchronizer id.
+    /// </returns>
     /// <exception cref="LedgerOperationException">
     /// The snapshot faulted, carried an unclassified row, or ended without its terminal checkpoint.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> QueryActiveAsync<TInterface, TView>(
+    Task<IReadOnlyList<ActiveContract<InterfaceContract<TInterface, TView>>>> QueryActiveAsync<TInterface, TView>(
         RuntimeCommands.SubmitterInfo submitter,
         LedgerOffset? activeAtOffset = null,
         CancellationToken cancellationToken = default)

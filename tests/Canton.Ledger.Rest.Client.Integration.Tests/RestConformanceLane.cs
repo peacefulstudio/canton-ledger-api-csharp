@@ -20,11 +20,13 @@ internal sealed class RestConformanceLane : IAsyncDisposable
         + "(canton-localnet up && canton-localnet wait-ready) to run this conformance test.";
 
     private readonly ServiceProvider _services;
+    private readonly ActAsRightsLease _actAsRights;
 
     private RestConformanceLane(LocalnetFixture fixture, ServiceProvider services)
     {
         Fixture = fixture;
         _services = services;
+        _actAsRights = ActAsRightsLease.ForValidator(fixture);
     }
 
     internal LocalnetFixture Fixture { get; }
@@ -36,6 +38,13 @@ internal sealed class RestConformanceLane : IAsyncDisposable
     internal HttpClient CreateWireLevelClient() =>
         _services.GetRequiredService<IHttpClientFactory>()
             .CreateClient(ServiceCollectionExtensions.HttpClientName);
+
+    /// <summary>
+    /// Authorizes the validator user to act as <paramref name="partyId"/> for as long as this lane
+    /// is open. The right is revoked when the lane disposes.
+    /// </summary>
+    internal Task GrantActAsAsync(string partyId, CancellationToken cancellationToken) =>
+        _actAsRights.GrantAsync(partyId, cancellationToken);
 
     internal static async Task<RestConformanceLane> OpenAsync(
         CancellationToken cancellationToken, RecordingRequestHandler? recordingHandler = null)
@@ -78,7 +87,20 @@ internal sealed class RestConformanceLane : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _services.DisposeAsync();
-        await Fixture.DisposeAsync();
+        try
+        {
+            await _services.DisposeAsync();
+        }
+        finally
+        {
+            try
+            {
+                await _actAsRights.DisposeAsync();
+            }
+            finally
+            {
+                await Fixture.DisposeAsync();
+            }
+        }
     }
 }

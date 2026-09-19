@@ -5,7 +5,7 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Rest.Client.Integration.Tests;
@@ -31,8 +31,7 @@ public class RestLedgerCantonReadsConformanceTests
             $"Unexpected DAR upload outcome: {darOutcome}");
 
         var party = await lane.Fixture.AllocatePartyAsync("rest-canton-reads", cancellationToken: cancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, cancellationToken);
         return new Party(party.PartyId);
     }
 

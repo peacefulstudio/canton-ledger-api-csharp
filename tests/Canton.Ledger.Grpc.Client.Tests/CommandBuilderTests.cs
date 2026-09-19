@@ -3,16 +3,37 @@
 
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
+using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
 
 namespace Canton.Ledger.Grpc.Client.Tests;
 
 public class CommandBuilderTests
 {
+    private interface ITestInterface : IDamlInterface, IHasView<TestInterfaceView>
+    {
+        static Identifier IDamlInterface.InterfaceId => InterfaceId;
+        public static new Identifier InterfaceId { get; } = new("ipkg", "IModule", "IEntity");
+        static string IDamlInterface.PackageId => "ipkg";
+        static string IDamlInterface.PackageName => "interface-package";
+        static Version IDamlInterface.PackageVersion => new(0, 1, 0);
+
+        static DamlTypeDescriptor IDamlType.DamlTypeId =>
+            new(InterfaceId, DamlTypeKind.Interface, "interface-package");
+    }
+
+    private sealed record TestInterfaceView : IDamlRecord, IDamlRecord<TestInterfaceView>
+    {
+        public DamlRecord ToRecord() => DamlRecord.Create();
+
+        public static TestInterfaceView FromRecord(DamlRecord record) => new();
+    }
+
     private static readonly Party Alice = new("party::alice");
     private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
     private static readonly RuntimeIdentifier DisclosedTemplateId = new("disclosed-pkg", "Disclosed", "Contract");
@@ -31,6 +52,29 @@ public class CommandBuilderTests
             new ContractId<LedgerClientTests.TestTemplate>(cid),
             new RuntimeCommands.ChoiceName(choice),
             DamlUnit.Instance);
+
+    private static RuntimeCommands.ExerciseCommand InterfaceExercise(
+        string choice = "Transfer", string cid = "00interfacecontract") =>
+        RuntimeCommands.ExerciseCommand.ForInterface<ITestInterface>(
+            new ContractId<ITestInterface>(cid),
+            new RuntimeCommands.ChoiceName(choice),
+            DamlRecord.Create(DamlField.Create("newOwner", new DamlParty("party::bob"))));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByKey(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByScalarKey(
+        string choice = "Transfer", string steward = "party::steward") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlParty(steward),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
 
     private static readonly DateTimeOffset LedgerTimeBound =
         new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
@@ -135,6 +179,105 @@ public class CommandBuilderTests
         commands.Commands_[0].Exercise.Should().NotBeNull();
         commands.Commands_[0].Exercise.ContractId.Should().Be("00contract123");
         commands.Commands_[0].Exercise.Choice.Should().Be("Archive");
+    }
+
+    [Fact]
+    public void BuildCommands_pins_the_interface_id_on_an_interface_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(InterfaceExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exercise = commands.Commands_.Should().ContainSingle().Subject.Exercise;
+        exercise.Should().NotBeNull();
+        exercise.TemplateId.PackageId.Should().Be("ipkg");
+        exercise.TemplateId.ModuleName.Should().Be("IModule");
+        exercise.TemplateId.EntityName.Should().Be("IEntity");
+        exercise.ContractId.Should().Be("00interfacecontract");
+        exercise.Choice.Should().Be("Transfer");
+
+        var argumentField = exercise.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_adds_exercise_by_key_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exerciseByKey = commands.Commands_.Should().ContainSingle().Subject.ExerciseByKey;
+        exerciseByKey.Should().NotBeNull();
+        exerciseByKey.TemplateId.PackageId.Should().Be("pkg");
+        exerciseByKey.TemplateId.ModuleName.Should().Be("Module");
+        exerciseByKey.TemplateId.EntityName.Should().Be("Template");
+        exerciseByKey.Choice.Should().Be("Transfer");
+
+        var keyField = exerciseByKey.ContractKey.Record.Fields.Should().ContainSingle().Subject;
+        keyField.Label.Should().Be("owner");
+        keyField.Value.Party.Should().Be("party::alice");
+
+        var argumentField = exerciseByKey.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_writes_a_bare_scalar_exercise_by_key_key_as_the_scalar_itself()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByScalarKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exerciseByKeyScalar = commands.Commands_.Should().ContainSingle().Subject.ExerciseByKey;
+        exerciseByKeyScalar.Should().NotBeNull();
+        var contractKey = exerciseByKeyScalar!.ContractKey;
+        contractKey.SumCase.Should().Be(
+            ProtoValue.SumOneofCase.Party,
+            "a template keyed on a bare scalar is emitted with a KeyEncoder that hands the naked "
+            + "DamlValue over, never a single-field record wrapping it");
+        contractKey.Party.Should().Be("party::steward");
+    }
+
+    private static RuntimeCommands.CreateAndExerciseCommand CreateAndExercise(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    [Fact]
+    public void BuildCommands_adds_a_create_and_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateAndExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var createAndExercise = commands.Commands_.Should().ContainSingle().Subject.CreateAndExercise;
+        createAndExercise.Should().NotBeNull();
+        createAndExercise.TemplateId.PackageId.Should().Be("pkg");
+        createAndExercise.TemplateId.ModuleName.Should().Be("Module");
+        createAndExercise.TemplateId.EntityName.Should().Be("Template");
+        createAndExercise.Choice.Should().Be("Transfer");
+
+        var createArgumentField = createAndExercise.CreateArguments.Fields.Should().ContainSingle().Subject;
+        createArgumentField.Label.Should().Be("owner");
+        createArgumentField.Value.Party.Should().Be("party::alice");
+
+        var choiceArgumentField = createAndExercise.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        choiceArgumentField.Label.Should().Be("newOwner");
+        choiceArgumentField.Value.Party.Should().Be("party::bob");
     }
 
     [Fact]

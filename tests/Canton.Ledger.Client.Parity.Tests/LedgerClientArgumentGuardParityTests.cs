@@ -9,7 +9,7 @@ using Canton.Ledger.Testing;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Microsoft.Extensions.DependencyInjection;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 

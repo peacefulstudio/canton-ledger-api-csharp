@@ -15,7 +15,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml interface RichTypes:Holding

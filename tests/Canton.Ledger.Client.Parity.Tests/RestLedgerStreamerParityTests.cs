@@ -36,6 +36,7 @@ public sealed class RestLedgerStreamerParityTests : LedgerStreamerParityTests
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         ServiceProvider? services = null;
         try
         {
@@ -51,27 +52,27 @@ public sealed class RestLedgerStreamerParityTests : LedgerStreamerParityTests
             await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
             var party = await fixture.AllocatePartyAsync(
                 "rest-streamer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
-            await fixture.GrantUserRightsAsync(
-                fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
 
             var client = services.GetRequiredService<ICantonLedgerClient>();
             return new CapabilityLane<(ILedgerReader, ILedgerWriter, ICantonLedgerClient, Party)>(
                 (client, client, client, new Party(party.PartyId)),
                 async () =>
                 {
-                    await services.DisposeAsync().ConfigureAwait(false);
-                    await fixture.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await services.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
+                    }
                 });
         }
-        catch
+        catch (Exception openFailure)
         {
-            if (services is not null)
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await fixture.DisposeAsync().ConfigureAwait(false);
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
             throw;
         }
     }
