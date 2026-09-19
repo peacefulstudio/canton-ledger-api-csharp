@@ -2,6 +2,8 @@ name: Diag Windows TLS
 
 on:
   workflow_dispatch:
+  push:
+    branches: [diag/windows-tls-amd64]
 
 permissions:
   contents: read
