@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
   </ItemGroup>
 

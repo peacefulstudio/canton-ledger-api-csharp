@@ -3,6 +3,7 @@
 
 using System.ComponentModel.DataAnnotations;
 using Canton.Ledger.Kernel.Resilience;
+using Canton.Ledger.Kernel.Security;
 
 namespace Canton.Ledger.Rest.Client;
 
@@ -51,6 +52,24 @@ public class RestLedgerClientOptions : IValidatableObject
     /// </para>
     /// </remarks>
     public RetryOptions Retry { get; set; } = new();
+
+    /// <summary>
+    /// The TLS material the client presents as its own identity and accepts as trust anchors,
+    /// applied to the <see cref="HttpClient"/> named
+    /// <see cref="ServiceCollectionExtensions.HttpClientName"/>. Unconfigured by default, so the
+    /// client validates the participant against the operating system trust store and presents no
+    /// client certificate unless a consumer opts in.
+    /// </summary>
+    /// <remarks>
+    /// A host that supplies a primary handler of its own for the named client — through
+    /// <c>services.AddHttpClient(ServiceCollectionExtensions.HttpClientName)</c> and one of the
+    /// <c>ConfigurePrimaryHttpMessageHandler</c> overloads that hand back a handler — overrides
+    /// anything set here. Configuring that same named client for an unrelated concern through an
+    /// overload that adjusts the handler already in place, such as <c>UseSocketsHttpHandler</c>,
+    /// keeps it. See <see cref="ServiceCollectionExtensions.HttpClientName"/> for what that costs
+    /// and where the guarantee stops.
+    /// </remarks>
+    public TlsOptions Tls { get; set; } = new();
 
     /// <summary>
     /// The <see cref="StreamWindowLimit"/> a client applies when a consumer configures none:
@@ -119,16 +138,19 @@ public class RestLedgerClientOptions : IValidatableObject
     public TimeSpan StreamWindowIdleTimeout { get; set; } = DefaultStreamWindowIdleTimeout;
 
     /// <summary>
-    /// Recurses into <see cref="Retry"/> so its validation runs under the same
-    /// <c>ValidateDataAnnotations().ValidateOnStart()</c> pipeline as this type — runtime
+    /// Recurses into <see cref="Retry"/> and <see cref="Tls"/> so their validation runs under the
+    /// same <c>ValidateDataAnnotations().ValidateOnStart()</c> pipeline as this type — runtime
     /// data-annotation validation does not descend into nested options on its own — surfacing a
-    /// misconfigured retry pipeline at startup rather than at the first request.
+    /// misconfigured retry pipeline or an incoherent set of TLS material at startup rather than at
+    /// the first request.
     /// </summary>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(
             Retry, new ValidationContext(Retry), results, validateAllProperties: true);
+        Validator.TryValidateObject(
+            Tls, new ValidationContext(Tls), results, validateAllProperties: true);
 
         if (StreamWindowLimit <= 0)
         {

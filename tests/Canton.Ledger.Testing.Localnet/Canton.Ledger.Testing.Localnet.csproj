@@ -13,7 +13,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Canton.Ledger.Kernel\Canton.Ledger.Kernel.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Canton.Ledger.Testing.Localnet.Tests" />
   </ItemGroup>
 
 </Project>

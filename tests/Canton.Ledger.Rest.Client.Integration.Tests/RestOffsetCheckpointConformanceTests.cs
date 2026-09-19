@@ -11,7 +11,7 @@ using Canton.Ledger.Rest.Client.Raw;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 #pragma warning disable CANTONREST001
@@ -97,10 +97,7 @@ public class RestOffsetCheckpointConformanceTests(ITestOutputHelper output)
         await lane.Fixture.UploadDarAsync(DarPath(), TestContext.Current.CancellationToken);
         var party = await lane.Fixture.AllocatePartyAsync(
             "rest-offset-checkpoint", cancellationToken: TestContext.Current.CancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId,
-            actAs: [party.PartyId],
-            cancellationToken: TestContext.Current.CancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         var quietParty = new Party(party.PartyId);
         var beginExclusive = await lane.LedgerClient.GetLedgerEndAsync(

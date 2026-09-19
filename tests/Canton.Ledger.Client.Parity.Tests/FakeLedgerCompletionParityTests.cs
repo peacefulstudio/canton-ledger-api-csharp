@@ -6,7 +6,7 @@ using Canton.Ledger.Testing;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
-using Richtypes;
+using RichTypes;
 
 namespace Canton.Ledger.Client.Parity.Tests;
 

@@ -16,7 +16,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml template RichTypes:Marker
@@ -74,7 +74,7 @@ public sealed partial record Marker(
     {
         /// <summary>Creates a Contract from a CreatedEvent.</summary>
         public static Contract FromCreatedEvent(CreatedEvent @event) =>
-            new(new ContractId(@event.ContractId), global::Richtypes.Marker.FromRecord(@event.CreateArguments));
+            new(new ContractId(@event.ContractId), global::RichTypes.Marker.FromRecord(@event.CreateArguments));
     }
 }
 

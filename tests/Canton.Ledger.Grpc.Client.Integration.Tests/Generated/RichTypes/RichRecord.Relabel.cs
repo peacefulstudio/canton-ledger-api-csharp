@@ -7,7 +7,7 @@
 
 using Daml.Runtime.Data;
 
-namespace Richtypes;
+namespace RichTypes;
 
 public sealed partial record RichRecord
 {

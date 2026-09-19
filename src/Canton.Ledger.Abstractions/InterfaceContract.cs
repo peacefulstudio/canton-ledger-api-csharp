@@ -23,4 +23,11 @@ namespace Canton.Ledger.Abstractions;
 /// <param name="View">The deserialized interface view projection.</param>
 public sealed record InterfaceContract<TInterface, TView>(ContractId<TInterface> Id, TView View)
     where TInterface : IDamlInterface, IHasView<TView>
-    where TView : IDamlRecord<TView>;
+    where TView : IDamlRecord<TView>
+{
+    /// <summary>
+    /// The contract key read off the created event, or <c>null</c> when the implementing
+    /// template declares none.
+    /// </summary>
+    public ContractKey? Key { get; init; }
+}

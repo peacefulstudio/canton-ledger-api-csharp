@@ -20,7 +20,6 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class ContractStreamProjectorInterfaceViewTests
 {
-
     private sealed record TemplateMarker(DamlRecord Record) : ITemplate, IDamlRecord<TemplateMarker>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
@@ -37,6 +36,44 @@ public class ContractStreamProjectorInterfaceViewTests
 
         public static TemplateMarker FromRecord(DamlRecord record) => new(record);
     }
+
+    private sealed record ImplementingTemplateMarker(DamlRecord Record)
+        : ITemplate, IDamlRecord<ImplementingTemplateMarker>, IHasKey<ImplementingTemplateMarker, AccountKey>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("impl-pkg", "Token.Impl", "Asset");
+
+        public static string PackageId => "impl-pkg";
+
+        public static string PackageName => "token-impl";
+
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+
+        public static KeyDescriptor<ImplementingTemplateMarker, AccountKey> Key { get; } = new()
+        {
+            KeyEncoder = key => key.ToRecord(),
+            KeyDecoder = value => AccountKey.FromRecord(value.As<DamlRecord>()),
+        };
+
+        public DamlRecord ToRecord() => Record;
+
+        public static ImplementingTemplateMarker FromRecord(DamlRecord record) => new(record);
+    }
+
+    private sealed record AccountKey(
+        [property: DamlFieldAttribute("custodian")] Party Custodian,
+        [property: DamlFieldAttribute("label")] string Label) : IDamlRecord<AccountKey>
+    {
+        public DamlRecord ToRecord() => DamlRecord.Create(
+            DamlField.Create("custodian", Custodian.ToDamlValue()),
+            DamlField.Create("label", new DamlText(Label)));
+
+        public static AccountKey FromRecord(DamlRecord record) => new(
+            Party.FromDamlValue(record.GetRequiredField("custodian").As<DamlParty>()),
+            record.GetRequiredField("label").As<DamlText>().Value);
+    }
+
     private const string ImplementingTemplateIdJson =
         """{"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"}""";
 
@@ -73,6 +110,7 @@ public class ContractStreamProjectorInterfaceViewTests
     private static string CreatedEventJson(
         string interfaceViewsJson,
         string templateIdJson = ImplementingTemplateIdJson,
+        string? contractKeyJson = null,
         string offset = "42") =>
         $$"""
         {
@@ -82,6 +120,7 @@ public class ContractStreamProjectorInterfaceViewTests
           "templateId": {{templateIdJson}},
           "createArgument": {{CreateArgumentJson}},
           "interfaceViews": [{{interfaceViewsJson}}],
+          {{(contractKeyJson is null ? string.Empty : $@"""contractKey"": {contractKeyJson},")}}
           "witnessParties": ["alice::ns1"]
         }
         """;
@@ -226,6 +265,24 @@ public class ContractStreamProjectorInterfaceViewTests
         var created = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
         created.ContractId.Value.Should().Be("00holding");
         created.Payload.Amount.Should().Be("view-value");
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_decodes_the_implementing_templates_idiomatic_key_for_an_interface_marker()
+    {
+        var transaction = TransactionFrom(CreatedEventJson(
+            ComputedViewJson,
+            contractKeyJson: """{"custodian": "alice::ns1", "label": "asset-1"}"""));
+
+        MarkerMatcher<InterfaceMarker>.KeyType.Should().BeNull();
+        var projected = InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(transaction)
+            .Should().ContainSingle().Subject;
+
+        var created = projected.Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject;
+        created.Key.Should().NotBeNull();
+        var key = created.Key.Value.Should().BeOfType<DamlRecord>().Subject;
+        key.GetRequiredField("custodian").Should().Be(new DamlParty("alice::ns1"));
+        key.GetRequiredField("label").Should().Be(new DamlText("asset-1"));
     }
 
     [Theory]

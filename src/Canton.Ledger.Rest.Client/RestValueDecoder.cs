@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Wire;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -26,17 +27,23 @@ internal static class RestValueDecoder
         MalformedResponse.Decoding(record, DecodeRecord);
 
     public static DamlRecord ToDamlRecord<TShape>(WireRecord? record)
-        where TShape : IDamlRecord<TShape> =>
+        where TShape : IDamlRecord =>
         MalformedResponse.Decoding(record, DecodeRecordShapedAs<TShape>);
 
     public static DamlValue ToDamlValue(WireValue value) =>
         MalformedResponse.Decoding(value, DecodeValue);
 
+    public static DamlValue ToDamlValue<TResult>(WireValue value) =>
+        MalformedResponse.Decoding(value, DecodeValueShapedAs<TResult>);
+
+    public static DamlValue ToDamlValue(WireValue value, Type resultType) =>
+        MalformedResponse.Decoding(value, wireValue => DecodeValueShapedAs(wireValue, resultType));
+
     private static DamlRecord DecodeRecord(WireRecord? record) =>
         DecodeRecord(record, WithTypesInferredFromJson);
 
     private static DamlRecord DecodeRecordShapedAs<TShape>(WireRecord? record)
-        where TShape : IDamlRecord<TShape> =>
+        where TShape : IDamlRecord =>
         DecodeRecord(record, lfJson => DamlLfJsonReader.ReadRecord<TShape>(lfJson));
 
     private static DamlRecord DecodeRecord(
@@ -68,7 +75,12 @@ internal static class RestValueDecoder
     private static DamlRecord WithTypesInferredFromJson(JsonElement lfJson) =>
         DamlJsonSerializer.DeserializeRecord(lfJson.GetRawText());
 
-    private static DamlValue DecodeValue(WireValue value)
+    private static DamlValue DecodeValue(WireValue value) =>
+        DecodeRecognisedSumCase(value)
+        ?? WireUnitEncoding.Decode(value)
+        ?? throw NoRecognisedSumCase();
+
+    private static DamlValue? DecodeRecognisedSumCase(WireValue value)
     {
         if (value.Record is not null) return ToDamlRecord(value.Record);
         if (value.Variant is not null) return ToDamlVariant(value.Variant);
@@ -86,8 +98,59 @@ internal static class RestValueDecoder
         if (value.Bool is { } boolean) return new DamlBool(boolean);
         if (value.Date is { } days) return DamlDate.FromDaysSinceEpoch(days);
         if (value.AdditionalProperties.ContainsKey(WireValueNames.Unit)) return DamlUnit.Instance;
-        throw MalformedResponse.WithDetail("Received a wire Value with no recognisable sum case set.");
+        return null;
     }
+
+    private static MalformedResponseException NoRecognisedSumCase() =>
+        MalformedResponse.WithDetail("Received a wire Value with no recognisable sum case set.");
+
+    private static DamlValue DecodeValueShapedAs<TResult>(WireValue value) =>
+        DecodeRecognisedSumCase(value) ?? DecodeIdiomaticValueShapedAs<TResult>(value);
+
+    private static DamlValue DecodeIdiomaticValueShapedAs<TResult>(WireValue value)
+    {
+        using var document = JsonDocument.Parse(IdiomaticJsonTextOf(value.AdditionalProperties));
+        try
+        {
+            return DamlLfJsonReader.ReadValue<TResult>(document.RootElement);
+        }
+        catch (NotSupportedException deferredGenericFamily)
+            when (IsDeferredGenericFamily(deferredGenericFamily))
+        {
+            return WireUnitEncoding.Decode(value) ?? throw NoRecognisedSumCase();
+        }
+    }
+
+    private static DamlValue DecodeValueShapedAs(WireValue value, Type resultType) =>
+        DecodeRecognisedSumCase(value) ?? DecodeIdiomaticValueShapedAs(value, resultType);
+
+    private static DamlValue DecodeIdiomaticValueShapedAs(WireValue value, Type resultType)
+    {
+        using var document = JsonDocument.Parse(IdiomaticJsonTextOf(value.AdditionalProperties));
+        try
+        {
+            return DamlLfJsonReader.ReadValue(document.RootElement, resultType);
+        }
+        catch (NotSupportedException deferredGenericFamily)
+            when (IsDeferredGenericFamily(deferredGenericFamily))
+        {
+            return WireUnitEncoding.Decode(value) ?? throw NoRecognisedSumCase();
+        }
+    }
+
+    private static string IdiomaticJsonTextOf(IDictionary<string, object> idiomaticFields) =>
+        idiomaticFields.Count == 1 && idiomaticFields.TryGetValue(WireValueNames.Idiomatic, out var rawText) && rawText is string s
+            ? s
+            : JsonSerializer.Serialize(idiomaticFields);
+
+    // Daml.Runtime.Serialization.DamlLfJsonReader.ReadValue<T> throws the same NotSupportedException type for
+    // "this generic Daml type family (Optional/Tuple/Set/Map...) has no top-level reader yet" and for "this CLR
+    // type maps to nothing in Daml-LF"; only the message text distinguishes the deferred case that must fall
+    // back to the untyped reader from the genuinely unmapped case that must not.
+    private static bool IsDeferredGenericFamily(NotSupportedException exception) =>
+        exception.Message.Contains(DeferredGenericFamilyMessageFragment, StringComparison.Ordinal);
+
+    private const string DeferredGenericFamilyMessageFragment = "generic Daml type family";
 
     private static DamlVariant ToDamlVariant(WireVariant variant)
     {

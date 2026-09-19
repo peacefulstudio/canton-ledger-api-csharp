@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
   </ItemGroup>
 
@@ -23,14 +24,14 @@
     <!-- Shared with Canton.Ledger.Grpc.Client.Integration.Tests: the Marker and Asset templates'
          DAR and generated bindings, so both transports' conformance tests exercise the same
          create/exercise/reassignment round trips against the same on-ledger templates. -->
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
-             Link="Generated\Richtypes\Marker.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\HoldingView.cs"
-             Link="Generated\Richtypes\HoldingView.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\IHolding.cs"
-             Link="Generated\Richtypes\IHolding.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Asset.cs"
-             Link="Generated\Richtypes\Asset.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\Marker.cs"
+             Link="Generated\RichTypes\Marker.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\HoldingView.cs"
+             Link="Generated\RichTypes\HoldingView.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\IHolding.cs"
+             Link="Generated\RichTypes\IHolding.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\Asset.cs"
+             Link="Generated\RichTypes\Asset.cs" />
     <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
           Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

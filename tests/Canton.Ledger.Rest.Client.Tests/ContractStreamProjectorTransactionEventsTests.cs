@@ -29,6 +29,24 @@ public class ContractStreamProjectorTransactionEventsTests
             new();
     }
 
+    private sealed record ScalarKeyedMarker : ITemplate, IDamlRecord<ScalarKeyedMarker>, IHasKey<ScalarKeyedMarker, Party>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("tmpl-pkg", "Sample.Token", "Holding");
+        public static string PackageId => "tmpl-pkg";
+        public static string PackageName => "token-impl";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+        public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static ScalarKeyedMarker FromRecord(DamlRecord record) => new();
+
+        public static KeyDescriptor<ScalarKeyedMarker, Party> Key { get; } = new()
+        {
+            KeyEncoder = owner => owner.ToDamlValue(),
+            KeyDecoder = value => Party.FromDamlValue(value.As<DamlParty>()),
+        };
+    }
+
     private static Raw.Transaction TransactionFrom(string json)
     {
         var update = JsonSerializer.Deserialize<WireUpdate>(json, RestRefitSettings.SerializerOptions);
@@ -114,6 +132,45 @@ public class ContractStreamProjectorTransactionEventsTests
 
         created.Key.Should().NotBeNull(
             "a keyed template's materialization throws when the created event carries no key");
+        created.Key!.Value.Should().Be(new DamlParty("alice::ns1"));
+        created.Key.KeyHash.Should().Be("AQID");
+    }
+
+    [Fact]
+    public void ProjectTransactionEvents_populates_Created_Key_from_a_bare_scalar_wire_contract_key()
+    {
+        var transaction = TransactionFrom(
+            """
+            {
+              "update": {
+                "Transaction": {
+                  "value": {
+                    "offset": "7",
+                    "synchronizerId": "sync-1",
+                    "events": [
+                      {
+                        "CreatedEvent": {
+                          "offset": "7",
+                          "contractId": "00keyed",
+                          "templateId": {"packageId": "tmpl-pkg", "moduleName": "Sample.Token", "entityName": "Holding"},
+                          "createArgument": {"fields": [{"label": "owner", "value": {"party": "alice::ns1"}}]},
+                          "contractKey": "alice::ns1",
+                          "contractKeyHash": "AQID",
+                          "witnessParties": ["alice::ns1"]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        var created = ContractStreamProjector.ProjectTransactionEvents<ScalarKeyedMarker>(transaction)
+            .Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<ScalarKeyedMarker>.Created>().Subject;
+
+        created.Key.Should().NotBeNull();
         created.Key!.Value.Should().Be(new DamlParty("alice::ns1"));
         created.Key.KeyHash.Should().Be("AQID");
     }

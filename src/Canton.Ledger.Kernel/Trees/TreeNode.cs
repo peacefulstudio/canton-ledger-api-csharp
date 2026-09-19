@@ -5,7 +5,7 @@ using Daml.Runtime.Contracts;
 
 namespace Canton.Ledger.Kernel.Trees;
 
-internal delegate TreeEvent CloseSubtree(IReadOnlyList<TreeEvent> children);
+internal delegate TreeEvent CloseSubtree(EquatableArray<TreeEvent> children);
 
 internal sealed record TreeNode(int NodeId, Func<TreeNodeContent> Decode)
 {

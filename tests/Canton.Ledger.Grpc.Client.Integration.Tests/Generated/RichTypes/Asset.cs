@@ -16,7 +16,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Richtypes;
+namespace RichTypes;
 
 /// <summary>
 /// Generated from Daml template RichTypes:Asset
@@ -77,7 +77,7 @@ public sealed partial record Asset(
     {
         /// <summary>Creates a Contract from a CreatedEvent.</summary>
         public static Contract FromCreatedEvent(CreatedEvent @event) =>
-            new(new ContractId(@event.ContractId), global::Richtypes.Asset.FromRecord(@event.CreateArguments));
+            new(new ContractId(@event.ContractId), global::RichTypes.Asset.FromRecord(@event.CreateArguments));
     }
 }
 

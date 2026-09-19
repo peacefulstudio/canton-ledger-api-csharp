@@ -46,7 +46,7 @@ internal static class GrpcTransactionTreeProjector
                 children => Close(evt.Exercised, nodeId, children))
             : new TreeNodeContent.Leaf(ToCreatedNode(evt, nodeId));
 
-    private static TreeEvent Close(ProtoExercisedEvent exercised, int nodeId, IReadOnlyList<TreeEvent> children)
+    private static TreeEvent Close(ProtoExercisedEvent exercised, int nodeId, EquatableArray<TreeEvent> children)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
@@ -99,7 +99,7 @@ internal static class GrpcTransactionTreeProjector
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
     {
         if (created.InterfaceViews.Count == 0)
         {
@@ -114,7 +114,7 @@ internal static class GrpcTransactionTreeProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
             interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static int NodeIdOf(Event evt) => evt.EventCase switch

@@ -569,7 +569,7 @@ public class ContractStreamProjectorTests
     }
 
     [Theory]
-    [InlineData("""{}""")]
+    [InlineData("""{"mystery": "??"}""")]
     [InlineData("""{"int64": "not-a-number"}""")]
     [InlineData("""{"numeric": "not-a-number"}""")]
     [InlineData("""{"timestamp": "not-a-number"}""")]
@@ -583,6 +583,19 @@ public class ContractStreamProjectorTests
 
         var unclassified = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Unclassified>().Subject;
         unclassified.Kind.Should().Be(UnclassifiedKind.DecodeFailure);
+    }
+
+    [Fact]
+    public async Task ProjectActiveContractEntry_decodes_an_empty_field_Value_as_the_idiomatic_encoding_of_Unit()
+    {
+        var response = await ActiveContractsResponseWithArguments(
+            """{"fields": [{"label": "v", "value": {}}]}""");
+
+        var projected = ProjectSingleActiveContractEntry(response);
+
+        var created = projected.Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject;
+        created.Payload.Record.Fields.Should().ContainSingle()
+            .Which.Value.Should().Be(DamlUnit.Instance);
     }
 
     [Fact]

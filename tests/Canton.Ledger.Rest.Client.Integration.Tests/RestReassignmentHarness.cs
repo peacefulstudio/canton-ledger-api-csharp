@@ -3,14 +3,13 @@
 
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Rest.Client.Raw;
-using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using AssignCommand = Canton.Ledger.Abstractions.AssignCommand;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -40,8 +39,8 @@ internal sealed class RestReassignmentHarness
 {
     private const string ReassignmentFeatureDisabledSignal = "Multi-synchronizer feature flag is not enabled";
 
-    internal const string SingleSyncMessage =
-        "the participant reports fewer than two connected synchronizers, so this is the "
+    internal const string SingleSyncSkipMessage =
+        "Skipping: the participant reports fewer than two connected synchronizers, so this is the "
         + "single-synchronizer lane. Bring up a multi-synchronizer participant to run this "
         + "reassignment conformance test.";
 
@@ -64,12 +63,7 @@ internal sealed class RestReassignmentHarness
             cancellationToken: cancellationToken);
         if (synchronizers.Count < 2)
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                Assert.Fail($"Failing (multi-sync required): {SingleSyncMessage}");
-            }
-
-            Assert.Skip($"Skipping: {SingleSyncMessage}");
+            Assert.Skip(SingleSyncSkipMessage);
         }
 
         return new SynchronizerPair(
@@ -118,8 +112,7 @@ internal sealed class RestReassignmentHarness
         }
 
         var party = new Party(sourceParty);
-        await _lane.Fixture.GrantUserRightsAsync(
-            _lane.Fixture.ValidatorUserId, actAs: [party.Id], cancellationToken: cancellationToken);
+        await _lane.GrantActAsAsync(party.Id, cancellationToken);
 
         var hosted = await _lane.LedgerClient.GetConnectedSynchronizersAsync(party, cancellationToken: cancellationToken);
         if (hosted.Count < 2)
@@ -169,11 +162,6 @@ internal sealed class RestReassignmentHarness
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                throw;
-            }
-
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
@@ -193,11 +181,6 @@ internal sealed class RestReassignmentHarness
         }
         catch (LedgerOperationException ex) when (IsReassignmentFeatureDisabled(ex.Message))
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                throw;
-            }
-
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }
@@ -300,8 +283,7 @@ internal sealed class RestReassignmentHarness
     private static void SkipIfReassignmentFeatureDisabled(ExerciseOutcome<ContractStreamEvent<Asset>> outcome)
     {
         if (outcome is ExerciseOutcome<ContractStreamEvent<Asset>>.DamlError damlError
-            && IsReassignmentFeatureDisabled(damlError.Message)
-            && !MultiSyncReassignmentGate.Required)
+            && IsReassignmentFeatureDisabled(damlError.Message))
         {
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }

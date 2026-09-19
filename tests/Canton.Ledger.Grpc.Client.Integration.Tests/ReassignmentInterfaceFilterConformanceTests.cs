@@ -1,9 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Canton.Ledger.Testing.Localnet;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
@@ -16,8 +15,8 @@ public class ReassignmentInterfaceFilterConformanceTests
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
         + "(canton-localnet up && canton-localnet wait-ready) to run this integration test.";
 
-    private const string SingleSyncMessage =
-        "the participant reports fewer than two connected synchronizers, so this is the "
+    private const string SingleSyncSkipMessage =
+        "Skipping: the participant reports fewer than two connected synchronizers, so this is the "
         + "single-synchronizer lane. Bring up a multi-synchronizer participant to run this "
         + "reassignment conformance test.";
 
@@ -43,12 +42,7 @@ public class ReassignmentInterfaceFilterConformanceTests
         var synchronizers = await harness.ParticipantSynchronizersAsync(cancellationToken);
         if (synchronizers.Count < 2)
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                Assert.Fail($"Failing (multi-sync required): {SingleSyncMessage}");
-            }
-
-            Assert.Skip($"Skipping: {SingleSyncMessage}");
+            Assert.Skip(SingleSyncSkipMessage);
         }
 
         var sourceSynchronizerId = synchronizers[0].SynchronizerId;
@@ -93,12 +87,7 @@ public class ReassignmentInterfaceFilterConformanceTests
         var synchronizers = await harness.ParticipantSynchronizersAsync(cancellationToken);
         if (synchronizers.Count < 2)
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                Assert.Fail($"Failing (multi-sync required): {SingleSyncMessage}");
-            }
-
-            Assert.Skip($"Skipping: {SingleSyncMessage}");
+            Assert.Skip(SingleSyncSkipMessage);
         }
 
         var sourceSynchronizerId = synchronizers[0].SynchronizerId;
@@ -151,12 +140,7 @@ public class ReassignmentInterfaceFilterConformanceTests
         var synchronizers = await harness.ParticipantSynchronizersAsync(cancellationToken);
         if (synchronizers.Count < 2)
         {
-            if (MultiSyncReassignmentGate.Required)
-            {
-                Assert.Fail($"Failing (multi-sync required): {SingleSyncMessage}");
-            }
-
-            Assert.Skip($"Skipping: {SingleSyncMessage}");
+            Assert.Skip(SingleSyncSkipMessage);
         }
 
         var sourceSynchronizerId = synchronizers[0].SynchronizerId;

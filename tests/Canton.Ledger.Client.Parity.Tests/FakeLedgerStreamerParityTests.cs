@@ -9,7 +9,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
-using Richtypes;
+using RichTypes;
 
 namespace Canton.Ledger.Client.Parity.Tests;
 

@@ -27,14 +27,14 @@
          the Marker template, and for the Asset template with the Holding interface it implements,
          so the parity bodies exercise the exact same template-family and interface-family round
          trips across the Fake, REST, and gRPC providers. -->
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
-             Link="Generated\Richtypes\Marker.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Asset.cs"
-             Link="Generated\Richtypes\Asset.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\IHolding.cs"
-             Link="Generated\Richtypes\IHolding.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\HoldingView.cs"
-             Link="Generated\Richtypes\HoldingView.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\Marker.cs"
+             Link="Generated\RichTypes\Marker.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\Asset.cs"
+             Link="Generated\RichTypes\Asset.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\IHolding.cs"
+             Link="Generated\RichTypes\IHolding.cs" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\RichTypes\HoldingView.cs"
+             Link="Generated\RichTypes\HoldingView.cs" />
     <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
           Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

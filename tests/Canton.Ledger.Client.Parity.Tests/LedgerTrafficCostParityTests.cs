@@ -5,7 +5,7 @@ using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
-using Richtypes;
+using RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;

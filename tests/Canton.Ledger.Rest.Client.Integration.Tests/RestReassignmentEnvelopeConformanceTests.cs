@@ -9,7 +9,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using RichTypes;
 using Xunit;
 using RuntimeCommands = Daml.Runtime.Commands;
 using UnassignCommand = Canton.Ledger.Abstractions.UnassignCommand;
@@ -94,8 +94,7 @@ public class RestReassignmentEnvelopeConformanceTests(ITestOutputHelper output)
         RestConformanceLane lane, string partyIdHint, CancellationToken cancellationToken)
     {
         var party = await lane.Fixture.AllocatePartyAsync(partyIdHint, cancellationToken: cancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, cancellationToken);
         return new Party(party.PartyId);
     }
 
