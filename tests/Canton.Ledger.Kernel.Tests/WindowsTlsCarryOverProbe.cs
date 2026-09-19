@@ -26,6 +26,9 @@ public sealed class WindowsTlsCarryOverProbe
     [Fact] public Task R13_instance_second_selection_callback_null() => Scenario("R13", "instance", secondClient: o => o.LocalCertificateSelectionCallback = (s, t, l, r, i) => null!);
     [Fact] public Task R14_instance_no_cert_three_times() => Scenario("R14", "instance", noCertRepeats: 3);
     [Fact] public Task R15_no_presenter_control_three_no_cert() => Scenario("R15", null, noCertRepeats: 3);
+    [Fact] public Task R16_rejected_no_cert_handshake_first_then_present_then_no_cert() => Scenario("R16", "instance", preface: "reject");
+    [Fact] public Task R17_successful_no_cert_handshake_first_then_present_then_no_cert() => Scenario("R17", "instance", preface: "success");
+    [Fact] public Task R18_instance_then_no_cert_with_empty_ClientCertificates() => Scenario("R18", "instance", secondClient: o => o.ClientCertificates = new X509CertificateCollection());
 
     private static async Task Scenario(
         string label,
@@ -38,7 +41,8 @@ public sealed class WindowsTlsCarryOverProbe
         Action<SslServerAuthenticationOptions>? firstServer = null,
         Action<SslClientAuthenticationOptions>? secondClient = null,
         Action<SslServerAuthenticationOptions>? secondServer = null,
-        int noCertRepeats = 1)
+        int noCertRepeats = 1,
+        string? preface = null)
     {
         var materialA = new TlsTestMaterial();
         var caA = materialA.CreateCertificateAuthority("Canton Probe Root A");
@@ -49,6 +53,13 @@ public sealed class WindowsTlsCarryOverProbe
 
         try
         {
+            if (preface is not null)
+            {
+                var prefaceAuthority = preface == "reject" ? materialA.CreateCertificateAuthority("Canton Probe Unrelated") : caA;
+                var prefaceSeen = await Once(label, "preface-" + preface, caA, serverA, new TlsOptions { CertificateAuthorities = [prefaceAuthority] }, sameMaterial ? secondHost : "localhost", protocols, null, null);
+                TlsProbeLog.Line($"{label} preface-{preface} serverSaw={TlsProbeLog.Describe(prefaceSeen)}");
+            }
+
             if (presenterKind is not null)
             {
                 var presenterOptions = PresenterOptions(materialA, caA, clientA, presenterKind);

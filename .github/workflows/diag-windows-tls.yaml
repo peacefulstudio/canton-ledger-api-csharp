@@ -29,43 +29,28 @@ jobs:
       - name: Build Kernel.Tests
         run: dotnet build tests/Canton.Ledger.Kernel.Tests -c Release
 
-      - name: A1. Baseline whole TLS class with handshake chronology
+      - name: F. Real class under each candidate fix, fresh process each
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'a1.log'
-          & $env:TEST_EXE --filter-class $env:TLS_CLASS
-          Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE|REAL-TEST|kind=client' }
-          exit $LASTEXITCODE
+          foreach ($fix in 'none','f1','f2','f4') {
+            foreach ($attempt in 1,2) {
+              $env:TLS_FIX = $fix
+              $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "f-$fix-$attempt.log"
+              $summary = & $env:TEST_EXE --filter-class $env:TLS_CLASS | Select-String 'total:|failed:|succeeded:' | ForEach-Object { $_.Line.Trim() }
+              Write-Host "== fix=$fix attempt=$attempt exit=$LASTEXITCODE $($summary -join ' ')"
+              Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE' } | ForEach-Object { $_ -replace ' pid=\d+','' -replace '\(issued:.*','' }
+            }
+          }
+          $env:TLS_FIX = ''
 
-      - name: A2. Baseline again in a fresh process
+      - name: D2. Preface scenarios, one fresh process each
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'a2.log'
-          & $env:TEST_EXE --filter-class $env:TLS_CLASS
-          Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE|REAL-TEST' }
-          exit $LASTEXITCODE
-
-      - name: D. Carry-over scenarios, one fresh process each
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $scenarios = 'R01_','R02_','R03_','R04_','R05_','R06_','R07_','R08_','R09_','R10_','R11_','R12_','R13_','R14_','R15_'
-          foreach ($s in $scenarios) {
-            $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "d-$s.log"
+          foreach ($s in 'R16_','R17_','R18_') {
+            $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "d2-$s.log"
             & $env:TEST_EXE --filter-method "*$s*" | Out-Null
             Write-Host "== $s exit=$LASTEXITCODE"
-            Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR|present-step|protocol=' }
+            Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR|preface' } | ForEach-Object { $_ -replace ' pid=\d+','' -replace '\(issued:.*','' }
           }
-
-      - name: E. Carry-over class in a single process
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'e.log'
-          & $env:TEST_EXE --filter-class Canton.Ledger.Kernel.Tests.WindowsTlsCarryOverProbe
-          Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR' }

@@ -274,7 +274,17 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
 
     private async Task<string?> HandshakeAsync(TlsOptions options, [System.Runtime.CompilerServices.CallerMemberName] string test = "")
     {
-        var result = await HandshakeCoreAsync(options);
+        string? result;
+        try
+        {
+            result = await HandshakeCoreAsync(options);
+        }
+        catch (Exception exception)
+        {
+            TlsProbeLog.Line($"HANDSHAKE test={test} owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} FAILED {exception.GetType().Name}");
+            throw;
+        }
+
         var configured = options.ClientCertificate is not null || options.HasClientCertificatePem || options.HasClientCertificatePkcs12;
         TlsProbeLog.Line($"HANDSHAKE test={test} owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} clientConfigured={configured} serverSaw={TlsProbeLog.Describe(result)}");
         return result;
@@ -297,6 +307,16 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
             var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(options);
             authenticationOptions.TargetHost = ServerHostName;
             authenticationOptions.EnabledSslProtocols = SslProtocols.Tls12;
+            var withoutClientCertificate = authenticationOptions.ClientCertificateContext is null;
+            switch (Environment.GetEnvironmentVariable("TLS_FIX"))
+            {
+                case "f1" when withoutClientCertificate:
+                    authenticationOptions.AllowTlsResume = false;
+                    break;
+                case "f2" when withoutClientCertificate:
+                    authenticationOptions.ClientCertificates = new X509CertificateCollection();
+                    break;
+            }
 
             await using var clientStream = new SslStream(tcpClient.GetStream(), leaveInnerStreamOpen: false);
             await clientStream.AuthenticateAsClientAsync(authenticationOptions, cancellationToken);
