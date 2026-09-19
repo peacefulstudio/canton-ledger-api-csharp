@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  diag:
+  verify:
     strategy:
       fail-fast: false
       matrix:
@@ -19,38 +19,43 @@ jobs:
     env:
       TEST_EXE: tests/Canton.Ledger.Kernel.Tests/bin/Release/net10.0/Canton.Ledger.Kernel.Tests.exe
       TLS_CLASS: Canton.Ledger.Kernel.Tests.SslClientAuthenticationOptionsFactoryTests
+      TLS_TEST_FILE: tests/Canton.Ledger.Kernel.Tests/SslClientAuthenticationOptionsFactoryTests.cs
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
 
-      - name: Build Kernel.Tests
+      - name: Build Kernel.Tests with the fix
         run: dotnet build tests/Canton.Ledger.Kernel.Tests -c Release
 
-      - name: F. Real class under each candidate fix, fresh process each
+      - name: V1. TLS class with the fix, fresh process each
         continue-on-error: true
         shell: pwsh
         run: |
-          foreach ($fix in 'none','f1','f2','f4') {
-            foreach ($attempt in 1,2) {
-              $env:TLS_FIX = $fix
-              $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "f-$fix-$attempt.log"
-              $summary = & $env:TEST_EXE --filter-class $env:TLS_CLASS | Select-String 'total:|failed:|succeeded:' | ForEach-Object { $_.Line.Trim() }
-              Write-Host "== fix=$fix attempt=$attempt exit=$LASTEXITCODE $($summary -join ' ')"
-              Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE' } | ForEach-Object { $_ -replace ' pid=\d+','' -replace '\(issued:.*','' }
-            }
+          foreach ($attempt in 1,2,3) {
+            $summary = & $env:TEST_EXE --filter-class $env:TLS_CLASS | Select-String 'total:|failed:|succeeded:|Expected' | ForEach-Object { $_.Line.Trim() }
+            Write-Host "== with-fix attempt=$attempt exit=$LASTEXITCODE $($summary -join ' ')"
           }
-          $env:TLS_FIX = ''
 
-      - name: D2. Preface scenarios, one fresh process each
+      - name: V2. Whole Kernel.Tests assembly with the fix
         continue-on-error: true
         shell: pwsh
         run: |
-          foreach ($s in 'R16_','R17_','R18_') {
-            $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "d2-$s.log"
-            & $env:TEST_EXE --filter-method "*$s*" | Out-Null
-            Write-Host "== $s exit=$LASTEXITCODE"
-            Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR|preface' } | ForEach-Object { $_ -replace ' pid=\d+','' -replace '\(issued:.*','' }
+          $summary = & $env:TEST_EXE | Select-String 'total:|failed:|succeeded:|skipped:' | ForEach-Object { $_.Line.Trim() }
+          Write-Host "== whole-assembly with-fix exit=$LASTEXITCODE $($summary -join ' ')"
+
+      - name: M. Mutation, pre-fix test file restored from ddc2b2a
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          git checkout ddc2b2a -- $env:TLS_TEST_FILE
+          git diff --stat HEAD -- $env:TLS_TEST_FILE
+          dotnet build tests/Canton.Ledger.Kernel.Tests -c Release
+          foreach ($attempt in 1,2) {
+            $summary = & $env:TEST_EXE --filter-class $env:TLS_CLASS | Select-String 'total:|failed:|succeeded:|failed Canton|Expected' | ForEach-Object { $_.Line.Trim() }
+            Write-Host "== mutant attempt=$attempt exit=$LASTEXITCODE $($summary -join ' | ')"
           }

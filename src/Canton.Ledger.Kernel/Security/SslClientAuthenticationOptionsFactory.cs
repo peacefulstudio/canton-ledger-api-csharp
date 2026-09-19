@@ -72,9 +72,6 @@ public static class SslClientAuthenticationOptionsFactory
             authenticationOptions.CertificateChainPolicy = chainPolicy;
         }
 
-        if (Environment.GetEnvironmentVariable("TLS_FIX") == "f4" && authenticationOptions.ClientCertificateContext is null)
-            authenticationOptions.AllowTlsResume = false;
-
         return authenticationOptions;
     }
 

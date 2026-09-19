@@ -255,9 +255,7 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
     [Fact]
     public async Task Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured()
     {
-        TlsProbeLog.Line($"REAL-TEST store-before {TlsProbeLog.StoreSnapshot()}");
         var presented = await HandshakeAsync(new TlsOptions { CertificateAuthorities = [_certificateAuthority] });
-        TlsProbeLog.Line($"REAL-TEST owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} ownClient={_clientCertificate.Thumbprint} presented={TlsProbeLog.Describe(presented)} store-after {TlsProbeLog.StoreSnapshot()}");
 
         presented.Should().BeNull();
     }
@@ -272,25 +270,7 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         await act.Should().ThrowAsync<AuthenticationException>();
     }
 
-    private async Task<string?> HandshakeAsync(TlsOptions options, [System.Runtime.CompilerServices.CallerMemberName] string test = "")
-    {
-        string? result;
-        try
-        {
-            result = await HandshakeCoreAsync(options);
-        }
-        catch (Exception exception)
-        {
-            TlsProbeLog.Line($"HANDSHAKE test={test} owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} FAILED {exception.GetType().Name}");
-            throw;
-        }
-
-        var configured = options.ClientCertificate is not null || options.HasClientCertificatePem || options.HasClientCertificatePkcs12;
-        TlsProbeLog.Line($"HANDSHAKE test={test} owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} clientConfigured={configured} serverSaw={TlsProbeLog.Describe(result)}");
-        return result;
-    }
-
-    private async Task<string?> HandshakeCoreAsync(TlsOptions options)
+    private async Task<string?> HandshakeAsync(TlsOptions options)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
 
@@ -307,16 +287,14 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
             var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(options);
             authenticationOptions.TargetHost = ServerHostName;
             authenticationOptions.EnabledSslProtocols = SslProtocols.Tls12;
-            var withoutClientCertificate = authenticationOptions.ClientCertificateContext is null;
-            switch (Environment.GetEnvironmentVariable("TLS_FIX"))
-            {
-                case "f1" when withoutClientCertificate:
-                    authenticationOptions.AllowTlsResume = false;
-                    break;
-                case "f2" when withoutClientCertificate:
-                    authenticationOptions.ClientCertificates = new X509CertificateCollection();
-                    break;
-            }
+
+            // Workaround: SslStream on Windows (System.Net.Security, measured on .NET 10.0.12) keeps a
+            // process-wide credential cache whose key omits the client certificate when none is
+            // configured, so a certificate presented by an earlier handshake in the process is presented
+            // again here. AllowTlsResume is part of that key; turning it off gives handshakes that
+            // present nothing an entry no presenting handshake in this class ever writes to.
+            if (authenticationOptions.ClientCertificateContext is null)
+                authenticationOptions.AllowTlsResume = false;
 
             await using var clientStream = new SslStream(tcpClient.GetStream(), leaveInnerStreamOpen: false);
             await clientStream.AuthenticateAsClientAsync(authenticationOptions, cancellationToken);
