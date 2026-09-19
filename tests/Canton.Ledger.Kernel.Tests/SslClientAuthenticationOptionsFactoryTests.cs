@@ -272,7 +272,15 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         await act.Should().ThrowAsync<AuthenticationException>();
     }
 
-    private async Task<string?> HandshakeAsync(TlsOptions options)
+    private async Task<string?> HandshakeAsync(TlsOptions options, [System.Runtime.CompilerServices.CallerMemberName] string test = "")
+    {
+        var result = await HandshakeCoreAsync(options);
+        var configured = options.ClientCertificate is not null || options.HasClientCertificatePem || options.HasClientCertificatePkcs12;
+        TlsProbeLog.Line($"HANDSHAKE test={test} owner={System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_material)} clientConfigured={configured} serverSaw={TlsProbeLog.Describe(result)}");
+        return result;
+    }
+
+    private async Task<string?> HandshakeCoreAsync(TlsOptions options)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
 

@@ -19,7 +19,6 @@ jobs:
     env:
       TEST_EXE: tests/Canton.Ledger.Kernel.Tests/bin/Release/net10.0/Canton.Ledger.Kernel.Tests.exe
       TLS_CLASS: Canton.Ledger.Kernel.Tests.SslClientAuthenticationOptionsFactoryTests
-      TLS_METHOD: '*Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured'
     steps:
       - uses: actions/checkout@v4
 
@@ -27,79 +26,46 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Snapshot before
-        shell: pwsh
-        run: |
-          $out = Join-Path $env:RUNNER_TEMP 'snapshot-before.txt'
-          & {
-            "whoami: $(whoami)"
-            "OSVersion: $([Environment]::OSVersion)"
-            "OSDescription: $([System.Runtime.InteropServices.RuntimeInformation]::OSDescription)"
-            "ProcessArchitecture: $([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)"
-            "CurrentUser\My: $((Get-ChildItem Cert:\CurrentUser\My | Measure-Object).Count)"
-            Get-ChildItem Cert:\CurrentUser\My | Select-Object Thumbprint, Subject, HasPrivateKey | Format-Table -AutoSize | Out-String
-            "LocalMachine\My: $((Get-ChildItem Cert:\LocalMachine\My | Measure-Object).Count)"
-            Get-ChildItem Cert:\LocalMachine\My | Select-Object Thumbprint, Subject, HasPrivateKey | Format-Table -AutoSize | Out-String
-            "APPDATA RSA files: $((Get-ChildItem -Recurse -File "$env:APPDATA\Microsoft\Crypto\RSA" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-            "APPDATA Keys files: $((Get-ChildItem -Recurse -File "$env:APPDATA\Microsoft\Crypto\Keys" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-            "SystemKeys files: $((Get-ChildItem -Recurse -File "$env:ProgramData\Microsoft\Crypto\Keys" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-          } | Tee-Object -FilePath $out
-
       - name: Build Kernel.Tests
         run: dotnet build tests/Canton.Ledger.Kernel.Tests -c Release
 
-      - name: A. Baseline, whole TLS class
+      - name: A1. Baseline whole TLS class with handshake chronology
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'baseline.log'
+          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'a1.log'
           & $env:TEST_EXE --filter-class $env:TLS_CLASS
           Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG
+          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE|REAL-TEST|kind=client' }
           exit $LASTEXITCODE
 
-      - name: B1. Isolation, failing test alone
+      - name: A2. Baseline again in a fresh process
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'isolation1.log'
-          & $env:TEST_EXE --filter-method $env:TLS_METHOD
+          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'a2.log'
+          & $env:TEST_EXE --filter-class $env:TLS_CLASS
           Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG
+          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'HANDSHAKE|REAL-TEST' }
           exit $LASTEXITCODE
 
-      - name: B2. Isolation again in a fresh process
+      - name: D. Carry-over scenarios, one fresh process each
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'isolation2.log'
-          & $env:TEST_EXE --filter-method $env:TLS_METHOD
-          Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG
-          exit $LASTEXITCODE
+          $scenarios = 'R01_','R02_','R03_','R04_','R05_','R06_','R07_','R08_','R09_','R10_','R11_','R12_','R13_','R14_','R15_'
+          foreach ($s in $scenarios) {
+            $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP "d-$s.log"
+            & $env:TEST_EXE --filter-method "*$s*" | Out-Null
+            Write-Host "== $s exit=$LASTEXITCODE"
+            Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR|present-step|protocol=' }
+          }
 
-      - name: C. Probe variants
+      - name: E. Carry-over class in a single process
         continue-on-error: true
         shell: pwsh
         run: |
-          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'probe.log'
-          & $env:TEST_EXE --filter-class Canton.Ledger.Kernel.Tests.WindowsTlsProbe
+          $env:TLS_PROBE_LOG = Join-Path $env:RUNNER_TEMP 'e.log'
+          & $env:TEST_EXE --filter-class Canton.Ledger.Kernel.Tests.WindowsTlsCarryOverProbe
           Write-Host "exit=$LASTEXITCODE"
-          Get-Content $env:TLS_PROBE_LOG | Sort-Object
-          exit $LASTEXITCODE
-
-      - name: Snapshot after
-        if: always()
-        shell: pwsh
-        run: |
-          $out = Join-Path $env:RUNNER_TEMP 'snapshot-after.txt'
-          & {
-            "CurrentUser\My: $((Get-ChildItem Cert:\CurrentUser\My | Measure-Object).Count)"
-            Get-ChildItem Cert:\CurrentUser\My | Select-Object Thumbprint, Subject, HasPrivateKey | Format-Table -AutoSize | Out-String
-            "LocalMachine\My: $((Get-ChildItem Cert:\LocalMachine\My | Measure-Object).Count)"
-            "APPDATA RSA files: $((Get-ChildItem -Recurse -File "$env:APPDATA\Microsoft\Crypto\RSA" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-            "APPDATA Keys files: $((Get-ChildItem -Recurse -File "$env:APPDATA\Microsoft\Crypto\Keys" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-            "SystemKeys files: $((Get-ChildItem -Recurse -File "$env:ProgramData\Microsoft\Crypto\Keys" -ErrorAction SilentlyContinue | Measure-Object).Count)"
-          } | Tee-Object -FilePath $out
-          Write-Host '--- before ---'
-          Get-Content (Join-Path $env:RUNNER_TEMP 'snapshot-before.txt') | Select-String 'files:|My:'
+          Get-Content $env:TLS_PROBE_LOG | Where-Object { $_ -match 'RESULT|ERROR' }
