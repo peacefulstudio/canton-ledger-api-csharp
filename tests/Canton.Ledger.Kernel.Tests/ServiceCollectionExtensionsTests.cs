@@ -202,6 +202,29 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddCantonAuth_unconfigured_tls_still_refuses_TLS_resumption_on_the_primary_handler()
+    {
+        var services = new ServiceCollection();
+        services.AddCantonAuth(options =>
+        {
+            options.ClientId = "my-client";
+            options.ClientSecret = "my-secret";
+            options.Domain = "https://auth.example.com";
+        });
+
+        using var provider = services.BuildServiceProvider();
+        var handler = provider.GetRequiredService<IHttpMessageHandlerFactory>()
+            .CreateHandler("CantonAuth");
+        while (handler is DelegatingHandler delegating)
+            handler = delegating.InnerHandler!;
+
+        var socketsHandler = handler.Should().BeOfType<SocketsHttpHandler>().Subject;
+        socketsHandler.SslOptions.AllowTlsResume.Should().BeFalse();
+        socketsHandler.SslOptions.ClientCertificateContext.Should().BeNull();
+        socketsHandler.SslOptions.CertificateChainPolicy.Should().BeNull();
+    }
+
+    [Fact]
     public void AddCantonAuth_fails_at_startup_when_nested_tls_is_incoherent()
     {
         var services = new ServiceCollection();

@@ -110,10 +110,11 @@ public class LedgerGrpcChannelTests : IDisposable
     }
 
     [Fact]
-    public void BuildOptions_leaves_SslOptions_at_its_defaults_when_Tls_is_unconfigured()
+    public void BuildOptions_refuses_TLS_resumption_and_presents_nothing_when_Tls_is_unconfigured()
     {
         var sslOptions = HandlerFrom(NewOptions()).SslOptions;
 
+        sslOptions.AllowTlsResume.Should().BeFalse();
         sslOptions.ClientCertificateContext.Should().BeNull();
         sslOptions.ClientCertificates.Should().BeNull();
         sslOptions.CertificateChainPolicy.Should().BeNull();

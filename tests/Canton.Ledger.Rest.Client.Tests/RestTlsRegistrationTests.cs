@@ -53,11 +53,6 @@ public class RestTlsRegistrationTests
         return handler;
     }
 
-    private static int HandlerBuilderActionCount(IServiceProvider provider) =>
-        provider.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>()
-            .Get(ServiceCollectionExtensions.HttpClientName)
-            .HttpMessageHandlerBuilderActions.Count;
-
     private static void AssertTrusts(SslClientAuthenticationOptions sslOptions, X509Certificate2 authority) =>
         sslOptions.CertificateChainPolicy!.CustomTrustStore
             .Should().ContainSingle().Which.Thumbprint.Should().Be(authority.Thumbprint);
@@ -74,13 +69,15 @@ public class RestTlsRegistrationTests
     }
 
     [Fact]
-    public void AddRestLedgerClient_unconfigured_tls_registers_no_handler_builder_action()
+    public void AddRestLedgerClient_unconfigured_tls_still_refuses_TLS_resumption_on_the_primary_handler()
     {
-        using var authority = CertificateAuthority();
-        using var configured = BuildProvider(new TlsOptions { CertificateAuthorities = [authority] });
-        using var unconfigured = BuildProvider(new TlsOptions());
+        using var provider = BuildProvider(new TlsOptions());
 
-        HandlerBuilderActionCount(unconfigured).Should().Be(HandlerBuilderActionCount(configured) - 1);
+        var handler = PrimaryHandler(provider).Should().BeOfType<SocketsHttpHandler>().Subject;
+
+        handler.SslOptions.AllowTlsResume.Should().BeFalse();
+        handler.SslOptions.ClientCertificateContext.Should().BeNull();
+        handler.SslOptions.CertificateChainPolicy.Should().BeNull();
     }
 
     [Fact]

@@ -103,11 +103,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<HttpClientFactoryOptions>(HttpClientName)
             .PostConfigure<IOptions<ClientCredentialsOptions>>(static (factoryOptions, authOptions) =>
             {
-                var tls = authOptions.Value.Tls;
-                if (!tls.IsConfigured)
-                    return;
-
-                var sslOptions = SslClientAuthenticationOptionsFactory.Create(tls);
+                var sslOptions = SslClientAuthenticationOptionsFactory.Create(authOptions.Value.Tls);
 
                 factoryOptions.HttpMessageHandlerBuilderActions.Insert(0, builder =>
                 {

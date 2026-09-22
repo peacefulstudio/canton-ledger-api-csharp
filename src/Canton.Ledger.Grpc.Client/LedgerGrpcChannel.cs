@@ -18,10 +18,8 @@ internal static class LedgerGrpcChannel
         {
             KeepAlivePingDelay = options.KeepAlivePingDelay,
             KeepAlivePingTimeout = options.KeepAlivePingTimeout,
+            SslOptions = SslClientAuthenticationOptionsFactory.Create(options.Tls),
         };
-
-        if (options.Tls.IsConfigured)
-            httpHandler.SslOptions = SslClientAuthenticationOptionsFactory.Create(options.Tls);
 
         var channelOptions = new GrpcChannelOptions
         {

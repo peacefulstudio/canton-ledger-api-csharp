@@ -342,11 +342,7 @@ public static class ServiceCollectionExtensions
         services.AddOptions<HttpClientFactoryOptions>(HttpClientName)
             .PostConfigure<IOptions<RestLedgerClientOptions>>(static (factoryOptions, ledgerOptions) =>
             {
-                var tls = ledgerOptions.Value.Tls;
-                if (!tls.IsConfigured)
-                    return;
-
-                var sslOptions = SslClientAuthenticationOptionsFactory.Create(tls);
+                var sslOptions = SslClientAuthenticationOptionsFactory.Create(ledgerOptions.Value.Tls);
 
                 factoryOptions.HttpMessageHandlerBuilderActions.Insert(0, builder =>
                 {

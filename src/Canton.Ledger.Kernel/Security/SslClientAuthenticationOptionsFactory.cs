@@ -41,7 +41,9 @@ internal static class SslClientAuthenticationOptionsFactory
         // supported managed API isolates credentials per connection). AllowTlsResume participates in
         // the credential cache key, so clearing it on the no-certificate path gives those handshakes
         // a cache entry no certificate-bearing handshake ever writes to. It runs on every platform so
-        // the shipped path is the tested one.
+        // the shipped path is the tested one, and every transport attaches these options to its
+        // handler even for an unconfigured TlsOptions — a connection that skipped the factory would
+        // sit in the cache bucket the certificate-bearing connections share.
         if (authenticationOptions.ClientCertificateContext is null)
             authenticationOptions.AllowTlsResume = false;
 
