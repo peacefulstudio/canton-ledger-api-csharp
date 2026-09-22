@@ -19,6 +19,8 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Fixed
 
+- `SslClientAuthenticationOptionsFactoryTests` quarantines its two Windows-only flaky cases (`Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured` and `Create_presents_no_client_certificate_after_a_prior_handshake_to_the_same_host_presented_one`) on Windows via a dynamic `Assert.SkipUnless`, rather than failing CI there. Root cause is an open upstream .NET runtime bug, not this factory: on Windows, `TlsContext` keeps reusing the first certificate a selection callback ever chose in the process, leaking it into later handshakes that configure none — tracked as [dotnet/runtime#134180](https://github.com/dotnet/runtime/issues/134180), open, targeted at .NET 12, not yet shipped for net10.0. Both tests still run and assert normally on Linux and macOS, where this caching bug doesn't reproduce. No production behavior changes; this is a test-only change.
+
 ### Security
 
 ## [0.5.0-preview.2] - 2026-09-11
