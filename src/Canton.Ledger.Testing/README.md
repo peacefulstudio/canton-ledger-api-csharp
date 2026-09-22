@@ -32,7 +32,7 @@ when omitted).
 | `FakeLedgerClientBuilder` | `WithLedgerEnd` (the ledger end *before* any write — stage an event for a bounded window opened around the `n`th write at that offset plus `n`), `WithActiveContracts<T>` (the staged snapshot must end on a single terminal `Checkpoint` or `StreamError`, as a participant's does — `WithMalformedActiveContracts<T>` stages one that deliberately does not), `WithContractEvents<T>`, `WithLedgerEffects<T>`, `WithExerciseResult<TResult>`, `WithCreateResult<TTemplate>`, `WithSubmissionOutcome`, `WithTransactionTree`, `WithReassignmentResult<T>`, `WithCompletionEvents`, `WithConnectedSynchronizers`, `WithLedgerApiVersion`, `WithTrafficCostEstimate` (staging `null` replays a participant that served no estimation), `WithUpdateByOffset`, `WithUpdateById`, then `Build()`. |
 | `LedgerEvents` | Factories for `AcsSnapshotEntry<T>` variants, all constrained `where T : ITemplate, IDamlRecord<T>`: `Created` (typed `T` payload plus a `ContractKey? key`), `Checkpoint`, `StreamError` (an optional `DamlErrorCategory?` and source `Exception?` after the status code and message), `Unclassified` (a nullable `LedgerOffset?` and an `UnclassifiedKind`). |
 | `ContractEvents` | Factories for `ContractStreamEvent<T>` variants, all constrained `where T : ITemplate, IDamlRecord<T>`: `Created` and `Assigned` (typed `T` payload plus a `ContractKey? key`), `Archived`, `Unassigned`, `Exercised`, `Checkpoint`, `StreamError` (an optional `DamlErrorCategory?` and source `Exception?` after the status code and message), `Unclassified` (an `UnclassifiedKind`). |
-| `LedgerOutcomes` | Factories for `ExerciseOutcome<T>` variants: `One`, `None`, `Many`, `DamlError`, `InfraError` (an optional `DamlErrorCategory?` before the source `Exception?`). |
+| `LedgerOutcomes` | Factories for `ExerciseOutcome<T>` variants: `One`, `None`, `Many`, `DamlError`, `InfraError` (an optional `DamlErrorCategory?` before the source `Exception?`), `CommittedUndecodable` (the command committed but its response could not be decoded; carries the update id when one was read). |
 | `LedgerResults` | Factories for `TransactionResult`, `SubmitAndWaitResult`, `Contract<T>`. |
 | `FakeAdminClient` | Configurable in-memory `IAdminClient`. Build it with `FakeAdminClient.Create()`. Query-style members you did not stage throw `NotSupportedException`; the void command members (`GrantUserRightsAsync`, `RevokeUserRightsAsync`, `UploadDarAsync`, `ValidateDarAsync`) always succeed. |
 | `FakeAdminClientBuilder` | `WithParticipantId`, `WithAllocatedParty`, `WithParties`, `WithUser`, `WithUsers`, `WithUserRights`, `WithKnownPackages`, `WithPackage`, `WithVettedPackages`, then `Build()`. |
@@ -92,7 +92,8 @@ var owner = new Party("bob");
 var completion = new Completion(
     new CommandId("cmd-1"), Offset: 1, ActAs: [owner],
     new SynchronizerTime("sync1", DateTimeOffset.UtcNow),
-    SubmissionId: null, UserId: null, DeduplicationOffset: null, DeduplicationDuration: null);
+    SubmissionId: null, UserId: null, DeduplicationOffset: null, DeduplicationDuration: null,
+    PaidTrafficCost: 0, TraceContext: null);
 
 ICantonLedgerClient client = FakeLedgerClient.Create()
     .WithCompletionEvents(

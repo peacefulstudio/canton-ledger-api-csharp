@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Reflection;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Daml.Runtime.Contracts;
@@ -312,4 +313,30 @@ public class FakePqsClientTests
 
         results.Should().ContainSingle();
     }
+
+    [Fact]
+    public void Payload_returning_template_methods_constrain_T_to_IDamlRecord_like_the_client_they_fake()
+    {
+        var payloadReturning = typeof(FakePqsClient)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+            .Where(m => m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 1 && m.Name != "ExistsAsync")
+            .Append(typeof(FakePqsClientBuilder).GetMethod(nameof(FakePqsClientBuilder.WithQueryResults))!)
+            .ToList();
+
+        payloadReturning.Should().HaveCount(7);
+        payloadReturning.Should().OnlyContain(m => ConstrainsToDamlRecord(m));
+    }
+
+    [Fact]
+    public void ExistsAsync_leaves_T_unconstrained_by_IDamlRecord()
+    {
+        var exists = typeof(FakePqsClient).GetMethod(nameof(FakePqsClient.ExistsAsync))!;
+
+        ConstrainsToDamlRecord(exists).Should().BeFalse();
+    }
+
+    private static bool ConstrainsToDamlRecord(MethodInfo method) =>
+        method.GetGenericArguments()[0]
+            .GetGenericParameterConstraints()
+            .Any(c => c.IsGenericType && c.GetGenericTypeDefinition() == typeof(IDamlRecord<>));
 }

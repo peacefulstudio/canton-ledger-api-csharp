@@ -9,7 +9,6 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
-using Daml.Runtime.Serialization;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 using WireCreatedEvent = Canton.Ledger.Rest.Client.Raw.CreatedEvent;
 using WireExercisedEvent = Canton.Ledger.Rest.Client.Raw.ExercisedEvent;
@@ -56,11 +55,11 @@ internal static class RestTransactionResultProjector
         return new TransactionResult(
             transaction.UpdateId,
             LedgerOffset.At(RestWireConversions.ParseOffset(transaction.Offset)),
-            createdContracts,
-            archivedContractIds,
+            EquatableArray.Create(createdContracts),
+            EquatableArray.Create(archivedContractIds),
             ToCommandId(transaction.CommandId))
         {
-            ExercisedEvents = exercisedEvents,
+            ExercisedEvents = EquatableArray.Create(exercisedEvents),
         };
     }
 
@@ -70,7 +69,7 @@ internal static class RestTransactionResultProjector
         TransactionResultFolds.Project(
             outcome,
             result => TransactionResultFolds.ToCreatedContractId<TTemplate>(
-                result, MarkerMatcher<TTemplate>.MatchesContract));
+                result, RestMarkerMatcher<TTemplate>.MatchesContract));
 
     public static ExerciseOutcome<TResult> ProjectChoiceResult<TResult>(
         ExerciseOutcome<TransactionResult> outcome, ChoiceName choice) =>
@@ -97,18 +96,18 @@ internal static class RestTransactionResultProjector
             TreeShape.EventIdOf(nodeId),
             created.ContractId,
             runtimeTemplateId,
-            RestValueDecoder.ToDamlRecord(created.CreateArgument),
+            RestPayloadDecoder.CreateArgumentOf(created, runtimeTemplateId),
             RestWireConversions.ToPartyList(created.WitnessParties),
             RestWireConversions.ToPartyList(created.Signatories),
             RestWireConversions.ToPartyList(created.Observers),
-            ContractKey: RestWireConversions.ContractKeyOf(created, runtimeTemplateId),
+            ContractKey: RestPayloadDecoder.ContractKeyOf(created, runtimeTemplateId),
             CreatedAt: created.CreatedAt)
         {
             InterfaceIds = ToInterfaceIds(created),
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
     {
         if (created.InterfaceViews is not { Count: > 0 } views)
         {
@@ -123,7 +122,7 @@ internal static class RestTransactionResultProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interfaceId");
             interfaceIds.Add(ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static ExercisedEvent ToExercisedEvent(WireExercisedEvent exercised)
@@ -131,21 +130,17 @@ internal static class RestTransactionResultProjector
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
                 $"ExercisedEvent for contract '{exercised.ContractId}' has no templateId");
-        var choiceArgument = exercised.ChoiceArgument is null
-            ? DamlUnit.Instance
-            : RestValueDecoder.ToDamlValue(exercised.ChoiceArgument);
-        var result = exercised.ExerciseResult is null
-            ? DamlUnit.Instance
-            : RestValueDecoder.ToDamlValue(exercised.ExerciseResult);
+        var runtimeTemplateId = ToRuntimeIdentifier(templateId);
+        var payloads = RestPayloadDecoder.ExercisePayloadsOf(exercised, runtimeTemplateId);
         var interfaceId = exercised.InterfaceId is null ? null : ToRuntimeIdentifier(exercised.InterfaceId);
 
         return new ExercisedEvent(
             exercised.ContractId,
-            ToRuntimeIdentifier(templateId),
+            runtimeTemplateId,
             interfaceId,
             exercised.Choice,
-            choiceArgument,
-            result,
+            payloads.Argument,
+            payloads.Result,
             exercised.Consuming ?? false,
             RestWireConversions.ToPartyList(exercised.ActingParties),
             RestWireConversions.ToPartyList(exercised.WitnessParties));

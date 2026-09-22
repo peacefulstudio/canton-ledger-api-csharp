@@ -1,9 +1,13 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Testing.Helpers;
+using Daml.Runtime;
+using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Xunit;
@@ -22,6 +26,62 @@ namespace Canton.Ledger.Rest.Client.Tests;
 
 public class RestTransactionTreeProjectorTests
 {
+    private sealed record TreeHolding : ITemplate, IDamlRecord<TreeHolding>, IHasKey<TreeHolding, string>
+    {
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Token.Holding", "Holding");
+        public static string PackageId => "pkg";
+        public static string PackageName => "token-holding";
+        public static Version PackageVersion { get; } = new(0, 1, 0);
+        public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
+        public DamlRecord ToRecord() => new(TemplateId, []);
+
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(json, context);
+        public static TreeHolding FromRecord(DamlRecord record) => new();
+
+        public static KeyDescriptor<TreeHolding, string> Key { get; } = new()
+        {
+            KeyEncoder = label => new DamlText(label),
+            KeyDecoder = value => value.As<DamlText>().Value,
+            KeyJsonReader = DamlLfJsonDecoders.ReadText,
+        };
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceArchive { get; } = UnitChoice("Archive");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceBackwards { get; } = UnitChoice("Backwards");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceDeepest { get; } = UnitChoice("Deepest");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceExecuteSwap { get; } = UnitChoice("ExecuteSwap");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceFirst { get; } = UnitChoice("First");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceInner { get; } = UnitChoice("Inner");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceNarrow { get; } = UnitChoice("Narrow");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceOuter { get; } = UnitChoice("Outer");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoicePeek { get; } = UnitChoice("Peek");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceSecond { get; } = UnitChoice("Second");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceStraddles { get; } = UnitChoice("Straddles");
+
+        public static Choice<TreeHolding, DamlUnit, DamlUnit> ChoiceWide { get; } = UnitChoice("Wide");
+
+        private static Choice<TreeHolding, DamlUnit, DamlUnit> UnitChoice(string name) => new()
+        {
+            Name = new ChoiceName(name),
+            Consuming = false,
+            ArgumentEncoder = unit => unit,
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultDecoder = result => result.As<DamlUnit>(),
+            ResultJsonReader = DamlLfJsonDecoders.ReadUnit,
+        };
+    }
+
     [Fact]
     public void Project_throws_when_the_transaction_is_null()
     {
@@ -251,8 +311,8 @@ public class RestTransactionTreeProjectorTests
                 NodeId = 0,
                 ContractId = "00rich",
                 TemplateId = TemplateId,
-                CreateArgument = new WireRecord(),
-                ContractKey = new WireValue { Text = "the-key" },
+                CreateArgument = EmptyRecord(),
+                ContractKey = JsonSerializer.Deserialize<WireValue>("\"the-key\"", RestRefitSettings.SerializerOptions)!,
                 CreatedAt = DateTimeOffset.UnixEpoch.AddSeconds(1234),
                 WitnessParties = ["alice"],
                 Signatories = ["issuer"],
@@ -267,7 +327,7 @@ public class RestTransactionTreeProjectorTests
         node.Signatories.Should().Equal((Party)"issuer");
         node.Observers.Should().Equal((Party)"bob");
         node.WitnessParties.Should().Equal((Party)"alice");
-        node.ContractKey.Should().NotBeNull();
+        node.ContractKey!.Value.Should().Be(new DamlText("the-key"));
         node.CreatedAt.Should().Be(DateTimeOffset.UnixEpoch.AddSeconds(1234));
         node.InterfaceIds.Should().ContainSingle().Which.EntityName.Should().Be("IAsset");
     }
@@ -283,8 +343,9 @@ public class RestTransactionTreeProjectorTests
                 LastDescendantNodeId = 0,
                 ContractId = "00rich",
                 TemplateId = TemplateId,
-                InterfaceId = InterfaceId,
                 Choice = "ExecuteSwap",
+                ChoiceArgument = UnitValue(),
+                ExerciseResult = UnitValue(),
                 Consuming = true,
                 ActingParties = ["alice"],
                 WitnessParties = ["bob", "carol"],
@@ -299,7 +360,43 @@ public class RestTransactionTreeProjectorTests
         node.Consuming.Should().BeTrue();
         node.ActingParties.Should().Equal((Party)"alice");
         node.WitnessParties.Should().Equal((Party)"bob", (Party)"carol");
-        node.InterfaceId.Should().Be(new RuntimeIdentifier("iface-pkg", "Token.Api", "IAsset"));
+        node.InterfaceId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Project_refuses_an_interface_choice_exercise_naming_the_interface_and_the_choice()
+    {
+        var exercised = Exercised(nodeId: 0, lastDescendantNodeId: 0, "00rich", "ExecuteSwap");
+        exercised.ExercisedEvent!.InterfaceId = InterfaceId;
+
+        var act = () => RestTransactionTreeProjector.Project(Transaction(exercised));
+
+        act.Should().Throw<TemplateTypeRequiredException>().Which.Message.Should().Be(
+            "No generated type is loaded for choice 'ExecuteSwap' of 'iface-pkg:Token.Api:IAsset'; load exactly one assembly generated for its Daml package before reading this payload over the JSON Ledger API.");
+    }
+
+    [Fact]
+    public void Project_throws_when_an_exercised_event_has_no_choice_argument()
+    {
+        var exercised = Exercised(nodeId: 0, lastDescendantNodeId: 0, "00rich", "ExecuteSwap");
+        exercised.ExercisedEvent!.ChoiceArgument = null!;
+
+        var act = () => RestTransactionTreeProjector.Project(Transaction(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00rich' has no choiceArgument, though the Ledger API marks the field as required.");
+    }
+
+    [Fact]
+    public void Project_throws_when_an_exercised_event_has_no_exercise_result()
+    {
+        var exercised = Exercised(nodeId: 0, lastDescendantNodeId: 0, "00rich", "ExecuteSwap");
+        exercised.ExercisedEvent!.ExerciseResult = null!;
+
+        var act = () => RestTransactionTreeProjector.Project(Transaction(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00rich' has no exerciseResult, though the Ledger API marks the field as required.");
     }
 
     [Fact]
@@ -396,6 +493,12 @@ public class RestTransactionTreeProjectorTests
             .Which.Message.Should().Be(MalformedTreeMessages.NodeIdsDoNotAscend);
     }
 
+    private static WireValue UnitValue() =>
+        JsonSerializer.Deserialize<WireValue>("{}", RestRefitSettings.SerializerOptions)!;
+
+    private static WireRecord EmptyRecord() =>
+        JsonSerializer.Deserialize<WireRecord>("{}", RestRefitSettings.SerializerOptions)!;
+
     private static WireTransaction Transaction(params WireEvent[] events) =>
         new() { UpdateId = "update-1", Offset = "42", CommandId = "cmd-1", Events = events };
 
@@ -406,7 +509,7 @@ public class RestTransactionTreeProjectorTests
             NodeId = nodeId,
             ContractId = contractId,
             TemplateId = TemplateId,
-            CreateArgument = new WireRecord(),
+            CreateArgument = EmptyRecord(),
         },
     };
 
@@ -419,6 +522,8 @@ public class RestTransactionTreeProjectorTests
             ContractId = contractId,
             TemplateId = TemplateId,
             Choice = choice,
+            ChoiceArgument = UnitValue(),
+            ExerciseResult = UnitValue(),
         },
     };
 

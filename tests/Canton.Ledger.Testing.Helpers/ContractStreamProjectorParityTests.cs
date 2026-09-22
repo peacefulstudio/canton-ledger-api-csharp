@@ -11,7 +11,7 @@ namespace Canton.Ledger.Testing.Helpers;
 
 /// <summary>
 /// Behavioural parity suite over the active-contract classification policy, run against every
-/// transport's <c>ContractStreamProjector</c> through one shared set of test bodies. It pins the
+/// transport's <c>GrpcContractStreamProjector</c> or <c>RestContractStreamProjector</c> through one shared set of test bodies. It pins the
 /// no-silent-drop decision tree that both transports delegate to a single
 /// implementation: which shape becomes which <see cref="UnclassifiedKind"/>, the missing-
 /// synchronizer rule, the order the two are reported in, how many events each entry shape

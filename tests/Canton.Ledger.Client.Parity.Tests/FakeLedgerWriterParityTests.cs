@@ -7,7 +7,7 @@ using Daml.Ledger.Abstractions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 
 namespace Canton.Ledger.Client.Parity.Tests;
 

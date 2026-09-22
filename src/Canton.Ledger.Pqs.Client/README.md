@@ -110,29 +110,17 @@ To register this source by hand, take the name from `Canton.Ledger.Kernel` — n
 tracing.AddSource(LedgerActivitySourceNames.PqsClient);
 ```
 
-### Custom JSON Serialization
+### Payload Decoding
 
-`PqsClientOptions.JsonSerializerOptions` *replaces* the client's payload defaults rather than adding to
-them, so start from `PqsClientOptions.CreateDefaultJsonSerializerOptions()` whenever you need a converter
-of your own alongside them — a variant factory for an abstract Daml type `System.Text.Json` cannot
-construct, say. It returns a fresh, mutable instance on every call:
+Each row's `payload` is decoded with the generated Daml-LF JSON reader, so Daml variants, optionals and numerics need no serializer configuration, and the payload-returning methods require a generated template type (`where T : ITemplate, IDamlRecord<T>`).
 
-```csharp
-services.AddPqsClient(options =>
-{
-    options.ConnectionString = "Host=localhost;Database=pqs";
+Decoding is strict:
 
-    var jsonOptions = PqsClientOptions.CreateDefaultJsonSerializerOptions();
-    jsonOptions.Converters.Add(new MyVariantConverterFactory());
-    options.JsonSerializerOptions = jsonOptions;
-});
-```
+- PQS documents Daml `Numeric` and `Int64` as JSON strings by default, and `--target-encoding-numericasstring` / `--target-encoding-int64asstring` change that default. A bare JSON number where an `Int64` or `Numeric` is expected is refused.
+- PQS stores nullable fields as JSON nulls by default. `--target-encoding-excludenulls` is not supported: a payload that omits an optional field's key fails to decode with an error naming the field.
+- A row over 16 MiB, 100,000 JSON nodes or nesting depth 128 fails to decode. These limits are not configurable.
 
-The defaults it carries are case-insensitive property matching for PQS's camelCase keys,
-`JsonNumberHandling.AllowReadingFromString` for Daml `Numeric`, and a `JsonStringEnumConverter` for Daml
-enums. Rebuilding them by hand and missing one fails at query time rather than at build time. To replace
-them outright instead, assign a `new JsonSerializerOptions { /* ... */ }`; to keep exactly the defaults,
-leave the property `null`.
+A row that cannot be decoded throws `JsonException`.
 
 ## Related Packages
 

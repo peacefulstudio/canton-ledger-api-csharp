@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using Canton.Ledger.Abstractions;
 using System.Text.Json;
 using Daml.Runtime.Contracts;
@@ -69,93 +70,19 @@ public class PqsClientTests
     }
 
     [Fact]
-    public void DefaultJsonSerializerOptions_is_read_only()
-    {
-        PqsClient.DefaultJsonSerializerOptions.IsReadOnly.Should().BeTrue();
-    }
-
-    [Fact]
-    public void DefaultJsonSerializerOptions_mutation_throws()
-    {
-        var options = PqsClient.DefaultJsonSerializerOptions;
-
-        var act = () => options.PropertyNameCaseInsensitive = false;
-
-        act.Should().Throw<InvalidOperationException>();
-    }
-
-    [Fact]
-    public void DefaultJsonSerializerOptions_returns_same_instance()
-    {
-        PqsClient.DefaultJsonSerializerOptions
-            .Should().BeSameAs(PqsClient.DefaultJsonSerializerOptions);
-    }
-
-    [Fact]
-    public void DefaultJsonSerializerOptions_can_deserialize_camel_case_payload()
-    {
-        var json = """{"initiator":"alice","counterparty":"bob","numSwaps":"42","status":"Active"}""";
-
-        var result = JsonSerializer.Deserialize<FilterTests.SampleTemplate>(
-            json, PqsClient.DefaultJsonSerializerOptions);
-
-        result.Should().NotBeNull();
-        result!.Initiator.Should().Be("alice");
-        result.Counterparty.Should().Be("bob");
-        result.NumSwaps.Should().Be(42);
-        result.Status.Should().Be("Active");
-    }
-
-    [Fact]
-    public void DefaultJsonSerializerOptions_deserializes_numeric_from_json_string()
-    {
-        var json = """{"price":"1.5"}""";
-
-        var result = JsonSerializer.Deserialize<NumericPayload>(json, PqsClient.DefaultJsonSerializerOptions);
-
-        result.Should().NotBeNull();
-        result!.Price.Should().Be(1.5m);
-    }
-
-    [Fact]
-    public void DefaultJsonSerializerOptions_deserializes_enum_from_string()
-    {
-        var json = """{"side":"Sell"}""";
-
-        var result = JsonSerializer.Deserialize<EnumPayload>(json, PqsClient.DefaultJsonSerializerOptions);
-
-        result.Should().NotBeNull();
-        result!.Side.Should().Be(OrderSide.Sell);
-    }
-
-    [Fact]
     public void DeserializeContract_maps_contract_id_and_camel_case_payload()
     {
         const string payload =
             """{"initiator":"alice","counterparty":"bob","numSwaps":"42","status":"Active"}""";
 
         var contract = PqsClient.DeserializeContract<FilterTests.SampleTemplate>(
-            "00abc123", payload, PqsClient.DefaultJsonSerializerOptions);
+            "00abc123", payload);
 
         contract.Id.Value.Should().Be("00abc123");
         contract.Data.Initiator.Should().Be("alice");
         contract.Data.Counterparty.Should().Be("bob");
         contract.Data.NumSwaps.Should().Be(42);
         contract.Data.Status.Should().Be("Active");
-    }
-
-    [Theory]
-    [InlineData("null")]
-    [InlineData("  null  ")]
-    public void DeserializeContract_throws_InvalidOperationException_for_null_payload(string payloadJson)
-    {
-        var act = () => PqsClient.DeserializeContract<FilterTests.SampleTemplate>(
-            "00abc123", payloadJson, PqsClient.DefaultJsonSerializerOptions);
-
-        act.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should()
-                .Contain("00abc123")
-                .And.Contain(typeof(FilterTests.SampleTemplate).FullName!);
     }
 
     [Fact]
@@ -285,22 +212,22 @@ public class PqsClientTests
     }
 
     [Fact]
-    public void DeserializeContract_reads_a_bare_string_ContractId_with_no_hand_registered_converter()
+    public void DeserializeContract_reads_a_bare_string_ContractId()
     {
         const string payload = """{"owner":"alice","target":"00deadbeef"}""";
 
         var contract = PqsClient.DeserializeContract<ReferencingTemplate>(
-            "00abc123", payload, PqsClient.DefaultJsonSerializerOptions);
+            "00abc123", payload);
 
         contract.Data.Target.Value.Should().Be(
             "00deadbeef",
-            "the emitted JsonConverter makes the consumer-side converter registration unnecessary");
+            "a ContractId is a bare string on the PQS wire");
         contract.Data.Owner.Should().Be("alice");
     }
 
     internal sealed record ReferencingTemplate(
         [property: DamlField("owner")] string Owner,
-        [property: DamlField("target")] ContractId<FilterTests.SampleTemplate> Target) : ITemplate
+        [property: DamlField("target")] ContractId<FilterTests.SampleTemplate> Target) : ITemplate, IDamlRecord<ReferencingTemplate>
     {
         public static RuntimeIdentifier TemplateId { get; } = new("pkg123", "Test.Module", "ReferencingTemplate");
         public static string PackageId => "pkg123";
@@ -312,6 +239,13 @@ public class PqsClientTests
             DamlField.Create("owner", new DamlParty(Owner)),
             DamlField.Create("target", new DamlContractId(Target.Value)));
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            PqsRecordReader.Read(
+                json,
+                context,
+                ("owner", DamlLfJsonDecoders.ReadParty),
+                ("target", DamlLfJsonDecoders.ReadContractId));
+
         public static ReferencingTemplate FromRecord(DamlRecord record) => new(
             Owner: record.GetRequiredField("owner").As<DamlParty>().Value,
             Target: new ContractId<FilterTests.SampleTemplate>(
@@ -322,10 +256,4 @@ public class PqsClientTests
     {
         return new PostgresException(messageText, severity: "ERROR", invariantSeverity: "ERROR", sqlState: sqlState);
     }
-
-    private sealed record NumericPayload(decimal Price);
-
-    private enum OrderSide { Buy, Sell }
-
-    private sealed record EnumPayload(OrderSide Side);
 }

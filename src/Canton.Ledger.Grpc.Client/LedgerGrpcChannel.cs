@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Net.Http;
+using Canton.Ledger.Kernel.Security;
 using Grpc.Net.Client;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -13,15 +14,20 @@ internal static class LedgerGrpcChannel
 
     internal static GrpcChannelOptions BuildOptions(LedgerClientOptions options)
     {
+        var httpHandler = new SocketsHttpHandler
+        {
+            KeepAlivePingDelay = options.KeepAlivePingDelay,
+            KeepAlivePingTimeout = options.KeepAlivePingTimeout,
+        };
+
+        if (options.Tls.IsConfigured)
+            httpHandler.SslOptions = SslClientAuthenticationOptionsFactory.Create(options.Tls);
+
         var channelOptions = new GrpcChannelOptions
         {
             MaxReceiveMessageSize = options.MaxMessageSize,
             MaxSendMessageSize = options.MaxMessageSize,
-            HttpHandler = new SocketsHttpHandler
-            {
-                KeepAlivePingDelay = options.KeepAlivePingDelay,
-                KeepAlivePingTimeout = options.KeepAlivePingTimeout,
-            },
+            HttpHandler = httpHandler,
             DisposeHttpClient = true,
         };
 

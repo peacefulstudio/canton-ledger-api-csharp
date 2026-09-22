@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -40,15 +41,31 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
 
     private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "TransactionTreeTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(
+                json,
+                context,
+                ("owner", DamlLfJsonDecoders.ReadParty));
         public static TestTemplate FromRecord(DamlRecord record) =>
             new();
+
+        public static Choice<TestTemplate, DamlUnit, DamlUnit> ChoiceExecuteSwap { get; } = new()
+        {
+            Name = new ChoiceName("ExecuteSwap"),
+            Consuming = false,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = result => result.As<DamlUnit>(),
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = DamlLfJsonDecoders.ReadUnit,
+        };
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport) =>
@@ -125,7 +142,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_InfraError_when_the_node_ids_cannot_form_a_tree()
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_CommittedUndecodable_when_the_node_ids_cannot_form_a_tree()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -135,8 +152,10 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionTreeAsync(
             Submission(), AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
-        outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.InfraError>()
-            .Which.Message.Should().Contain("node ids must strictly ascend");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.CommittedUndecodable>().Subject;
+        undecodable.Message.Should().Contain("node ids must strictly ascend");
+        undecodable.UpdateId.Should().Be("upd-1");
+        undecodable.SourceException.Should().BeOfType<MalformedTransactionTreeException>();
     }
 
     [Fact]
@@ -167,7 +186,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_InfraError_when_the_response_carries_no_transaction()
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_CommittedUndecodable_when_the_response_carries_no_transaction()
     {
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, "{}");
         var client = ClientWith(transport);
@@ -175,8 +194,9 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionTreeAsync(
             Submission(), AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
-        outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.InfraError>()
-            .Which.Message.Should().Contain("no transaction was present");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.CommittedUndecodable>().Subject;
+        undecodable.Message.Should().Contain("no transaction was present");
+        undecodable.UpdateId.Should().BeNull();
     }
 
     [Fact]
@@ -252,7 +272,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
     }
 
     private const string TemplateIdJson =
-        """{"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}""";
+        """{"packageId": "pkg", "moduleName": "Module", "entityName": "TransactionTreeTemplate"}""";
 
     private static string CreatedJson(int nodeId, string contractId) =>
         $$$"""
@@ -262,7 +282,7 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
             "nodeId": {{{nodeId}}},
             "contractId": "{{{contractId}}}",
             "templateId": {{{TemplateIdJson}}},
-            "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
+            "createArgument": {"owner": "party::alice"}
           }
         }
         """;
@@ -277,6 +297,8 @@ public sealed class RestLedgerClientTransactionTreeTests : IDisposable
             "contractId": "00target",
             "templateId": {{TemplateIdJson}},
             "choice": "ExecuteSwap",
+            "choiceArgument": {},
+            "exerciseResult": {},
             "consuming": false,
             "actingParties": ["party::alice"],
             "witnessParties": ["party::alice"]

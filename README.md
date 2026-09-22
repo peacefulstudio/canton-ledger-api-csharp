@@ -114,7 +114,7 @@ var exists = await pqsClient.ExistsAsync<Agreement>(contractId);
 
 ### Authentication
 
-`Canton.Ledger.Kernel` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register a token provider before adding the clients:
+`Canton.Ledger.Kernel` ships as a dependency of `Canton.Ledger.Grpc.Client`. Register an authentication provider explicitly; the built-in providers may be added before or after unauthenticated `AddLedgerClient` or `AddRestLedgerClient` registrations:
 
 ```csharp
 using Canton.Ledger.Kernel.Authentication;
@@ -239,7 +239,7 @@ This library targets Canton Ledger API v2. The proto files are automatically dow
 | 0.2.x | 3.4.x |
 | 0.1.x | 3.4.x |
 
-From `0.4.1` the vendored protos and JSON Ledger API spec are pinned at Canton `3.5.9`, and the library supports Canton 3.5 only — running it against a 3.4.x participant is untested and unsupported. Any `3.5.x` patch release is fine: the vendored surface is stable within the minor.
+From `0.4.1` the vendored protos and JSON Ledger API spec are pinned at Canton `3.5.18`, and the library supports Canton 3.5 only — running it against a 3.4.x participant is untested and unsupported. Any `3.5.x` patch release is fine: the vendored surface is stable within the minor.
 
 From `0.4.x`, the `Canton.Ledger.*` package minor tracks the `Daml.Runtime` / `Daml.Ledger.Abstractions` minor line — package `0.N.x` embeds `Daml.* 0.N.x` — so the Daml runtime line is legible straight off the package version (the `0.3.x` line is skipped to realign). Patch and `-preview.N` suffixes evolve independently.
 

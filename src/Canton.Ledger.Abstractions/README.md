@@ -9,7 +9,7 @@ The transport-neutral Canton contract layer: the Canton-participant surface type
 | `ICantonLedgerClient` | The Canton participant client surface — everything on `ILedgerClient` plus the Canton-only operations (fire-and-forget submit, the command completion stream, connected-synchronizer and Ledger API version discovery, offset/id point reads, tree-shaped submission, traffic-cost estimation) |
 | `CompletionStreamEvent` | A command-completion stream event — `CommandAccepted`/`CommandRejected`/`Checkpoint`/`StreamError`, with the verdict modelled as the event type |
 | `Completion` | The transport-neutral command-completion payload (command id, offset, act-as parties, synchronizer time, submission/user ids, deduplication period) |
-| `CompletionStatus` | The `google.rpc.Code` verdict of a rejected command (`Code`, `Message`) |
+| `CompletionStatus` | The `google.rpc.Code` verdict of a rejected command (`Code`, `Message`) plus the structured rejection detail decoded from `google.rpc.Status.details` (`ErrorId`, `Metadata`) |
 | `SynchronizerTime` | The synchronizer id and record time a completion was sequenced at |
 | `ConnectedSynchronizer` | A synchronizer the participant is connected to (`SynchronizerAlias`, `SynchronizerId`, `Permission`) |
 | `TrafficCostEstimate` | What a participant estimates a submission would consume in synchronizer traffic, in bytes (`EstimatedAt`, `ConfirmationRequestCost`, `ConfirmationResponseCost`, `TotalCost`) — the one shape both transports' `EstimateTrafficCostAsync` project into |

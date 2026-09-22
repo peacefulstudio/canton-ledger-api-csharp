@@ -117,7 +117,8 @@ public class MalformedResponseTests
     /// <summary>
     /// The shapes the pinned runtime raises when a legal wire value carries an illegal payload — a
     /// negative offset, a party that is empty or all whitespace, a date or timestamp outside the
-    /// Daml-LF range, a proto sum case the converter does not recognise.
+    /// Daml-LF range, a proto sum case the converter does not recognise, a Daml-LF JSON value the
+    /// type-directed reader refuses for its Daml type.
     /// </summary>
     public static TheoryData<Exception> UndecodableWireValues() =>
     [
@@ -125,6 +126,7 @@ public class MalformedResponseTests
         new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", "id"),
         new NotSupportedException("Proto Value case None is not supported"),
         new InvalidOperationException("Record field 'amount' has no Value set."),
+        new JsonException("'10000-01-01' at 'DateOnly' is not a valid Daml Date."),
     ];
 
     [Theory]

@@ -1,10 +1,13 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using System.Net;
 using AwesomeAssertions;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime;
+using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
@@ -36,15 +39,29 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
 
     private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "StreamingTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(json, context);
+
         public static TestTemplate FromRecord(DamlRecord record) =>
             new();
+
+        public static Choice<TestTemplate, DamlUnit, DamlUnit> ChoiceArchive { get; } = new()
+        {
+            Name = new ChoiceName("Archive"),
+            Consuming = true,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = result => result.As<DamlUnit>(),
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = DamlLfJsonDecoders.ReadUnit,
+        };
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport) =>
@@ -64,7 +81,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}, "createArgument": {"fields": []}, "witnessParties": ["party::alice"]}, "synchronizerId": "sync-1"}}}]
+            [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "synchronizerId": "sync-1"}}}]
             """);
         var client = ClientWith(transport);
 
@@ -89,7 +106,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"contractEntry": {"JsIncompleteUnassigned": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}, "createArgument": {"fields": []}, "witnessParties": ["party::alice"]}, "unassignedEvent": {"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "11", "reassignmentId": "reassignment-1", "reassignmentCounter": "7"}}}}]
+            [{"contractEntry": {"JsIncompleteUnassigned": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "unassignedEvent": {"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "11", "reassignmentId": "reassignment-1", "reassignmentCounter": "7"}}}}]
             """);
         var client = ClientWith(transport);
 
@@ -139,7 +156,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             .WithResponse(
                 HttpStatusCode.OK,
                 """
-                [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "not-a-number", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}, "createArgument": {"fields": []}}, "synchronizerId": "sync-1"}}}]
+                [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "not-a-number", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}}, "synchronizerId": "sync-1"}}}]
                 """)
             .WithResponseForPath("/v2/state/ledger-end", HttpStatusCode.OK, """{"offset": 5}""");
         var client = ClientWith(transport);
@@ -230,12 +247,60 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
+    public async Task SubscribeActiveAsync_populates_StreamError_ErrorId_from_the_parsed_participant_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.Conflict,
+            """
+            {
+              "code": 9,
+              "message": "the user's rights changed",
+              "details": [
+                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "STALE_STREAM_AUTHORIZATION", "metadata": {}}
+              ]
+            }
+            """);
+        var client = ClientWith(transport);
+
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
+        {
+            entries.Add(entry);
+        }
+
+        entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_leaves_StreamError_ErrorId_null_when_the_body_carries_no_structured_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.ServiceUnavailable, "");
+        var client = ClientWith(transport);
+
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(1), TestContext.Current.CancellationToken))
+        {
+            entries.Add(entry);
+        }
+
+        entries.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a failure the participant attached no structured error to has no code to hand on, and none is invented");
+    }
+
+    [Fact]
     public async Task SubscribeAsync_posts_to_v2_updates_with_begin_exclusive_and_end_inclusive()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"update": {"Transaction": {"value": {"offset": "11", "synchronizerId": "sync-1", "events": [{"CreatedEvent": {"offset": "11", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}, "createArgument": {"fields": []}, "witnessParties": ["party::alice"]}}]}}}},
+            [{"update": {"Transaction": {"value": {"offset": "11", "synchronizerId": "sync-1", "events": [{"CreatedEvent": {"offset": "11", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}}]}}}},
             {"update": {"OffsetCheckpoint": {"value": {"offset": "11"}}}}]
             """);
         var client = ClientWith(transport);
@@ -282,12 +347,59 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
+    public async Task SubscribeAsync_populates_StreamError_ErrorId_from_the_parsed_participant_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.Conflict,
+            """
+            {
+              "code": 9,
+              "message": "the user's rights changed",
+              "details": [
+                {"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "STALE_STREAM_AUTHORIZATION", "metadata": {}}
+              ]
+            }
+            """);
+        var client = ClientWith(transport);
+
+        var events = new List<ContractStreamEvent<TestTemplate>>();
+        await foreach (var evt in client.SubscribeAsync<TestTemplate>(
+            Alice, LedgerOffset.At(5), LedgerOffset.At(11), TestContext.Current.CancellationToken))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_leaves_StreamError_ErrorId_null_when_the_body_carries_no_structured_error()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.ServiceUnavailable, "");
+        var client = ClientWith(transport);
+
+        var events = new List<ContractStreamEvent<TestTemplate>>();
+        await foreach (var evt in client.SubscribeAsync<TestTemplate>(
+            Alice, LedgerOffset.At(5), LedgerOffset.At(11), TestContext.Current.CancellationToken))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<TestTemplate>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a failure the participant attached no structured error to has no code to hand on, and none is invented");
+    }
+
+    [Fact]
     public async Task SubscribeLedgerEffectsAsync_posts_to_v2_updates_and_projects_ledger_effects_events()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"update": {"Transaction": {"value": {"offset": "12", "synchronizerId": "sync-1", "events": [{"ExercisedEvent": {"offset": "12", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"}, "choice": "Archive", "choiceArgument": {"record": {"fields": []}}, "actingParties": ["party::alice"], "consuming": true, "witnessParties": ["party::alice"], "exerciseResult": {"unit": {}}}}]}}}}]
+            [{"update": {"Transaction": {"value": {"offset": "12", "synchronizerId": "sync-1", "events": [{"ExercisedEvent": {"offset": "12", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "choice": "Archive", "choiceArgument": {}, "actingParties": ["party::alice"], "consuming": true, "witnessParties": ["party::alice"], "exerciseResult": {}}}]}}}}]
             """);
         var client = ClientWith(transport);
 

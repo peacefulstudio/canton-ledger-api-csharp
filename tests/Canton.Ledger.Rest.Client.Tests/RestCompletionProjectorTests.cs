@@ -199,4 +199,27 @@ public class RestCompletionProjectorTests
         var readCommandId = () => payload.CommandId.Value;
         readCommandId.Should().NotThrow().Which.Should().Be("cmd-present");
     }
+
+    [Theory]
+    [InlineData("not-a-number")]
+    [InlineData("-1")]
+    [InlineData("12.5")]
+    public void Project_refuses_a_paid_traffic_cost_the_wire_states_but_that_is_not_a_non_negative_integer(
+        string wireCost)
+    {
+        var completion = new WireCompletion
+        {
+            CommandId = "cmd-1",
+            UpdateId = "update-1",
+            Offset = "42",
+            PaidTrafficCost = wireCost,
+        };
+
+        var thrown = Record.Exception(() => RestCompletionProjector.Project(completion));
+
+        thrown.Should().BeOfType<FormatException>(
+            "a stated cost that cannot be read is a malformed participant response, and reporting it as "
+            + "zero would be indistinguishable from the participant staying silent")
+            .Which.Message.Should().Contain("paid traffic cost");
+    }
 }

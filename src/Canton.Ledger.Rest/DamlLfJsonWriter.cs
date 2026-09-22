@@ -31,11 +31,20 @@ internal static class DamlLfJsonWriter
 
     private static readonly DateOnly Epoch = new(1970, 1, 1);
 
-    /// <summary>Writes <paramref name="record"/> as a Daml-LF JSON object keyed by field label.</summary>
+    /// <summary>
+    /// Writes <paramref name="record"/> as a Daml-LF JSON object keyed by field label, or, for a record read
+    /// from a participant, as the Daml-LF JSON it was read from.
+    /// </summary>
     public static void WriteRecord(Utf8JsonWriter writer, WireRecord record)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(record);
+
+        if (record.Fields is null && TryGetReadLfJson(record.AdditionalProperties, out var readLfJson))
+        {
+            writer.WriteRawValue(readLfJson);
+            return;
+        }
 
         writer.WriteStartObject();
         foreach (var field in record.Fields ?? [])
@@ -56,7 +65,10 @@ internal static class DamlLfJsonWriter
         writer.WriteEndObject();
     }
 
-    /// <summary>Writes <paramref name="value"/> in the Daml-LF JSON encoding.</summary>
+    /// <summary>
+    /// Writes <paramref name="value"/> in the Daml-LF JSON encoding, or, for a value read from a participant,
+    /// as the Daml-LF JSON it was read from.
+    /// </summary>
     public static void WriteValue(Utf8JsonWriter writer, WireValue value)
     {
         ArgumentNullException.ThrowIfNull(writer);
@@ -79,8 +91,17 @@ internal static class DamlLfJsonWriter
         if (value.Enum is not null) { WriteEnum(writer, value.Enum); return; }
         if (value.GenMap is not null)
             throw new JsonException("Daml-LF JSON encoding of GenMap is not implemented; no supported template uses one yet.");
+        if (TryGetReadLfJson(value.AdditionalProperties, out var readLfJson)) { writer.WriteRawValue(readLfJson); return; }
 
         throw new JsonException("A Daml value reached the wire with no arm set, so it cannot be encoded as Daml-LF JSON.");
+    }
+
+    private static bool TryGetReadLfJson(IDictionary<string, object> additionalProperties, out string readLfJson)
+    {
+        readLfJson = additionalProperties.TryGetValue(WireValueNames.Idiomatic, out var raw) && raw is string lfJson
+            ? lfJson
+            : string.Empty;
+        return readLfJson.Length > 0;
     }
 
     private static void WriteUnit(Utf8JsonWriter writer)

@@ -7,7 +7,7 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;

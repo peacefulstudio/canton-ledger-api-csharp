@@ -4,7 +4,9 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <!-- snake_case test method names -->
-    <NoWarn>$(NoWarn);CA1707</NoWarn>
+    <!-- CA5359: the in-process TLS test server must accept the throwaway client certificates the
+         TLS tests generate; it is the client side that is under test. -->
+    <NoWarn>$(NoWarn);CA1707;CA5359</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

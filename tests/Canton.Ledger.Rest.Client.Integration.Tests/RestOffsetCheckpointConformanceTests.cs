@@ -11,7 +11,8 @@ using Canton.Ledger.Rest.Client.Raw;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using Canton.Ledger.Grpc.Client.Integration.Tests;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 #pragma warning disable CANTONREST001
@@ -80,8 +81,7 @@ public class RestOffsetCheckpointConformanceTests(ITestOutputHelper output)
     private static readonly TimeSpan RequestMargin = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan UnmeasurableWindowBackoff = TimeSpan.FromSeconds(2);
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     [Fact]
     public async Task Updates_windows_reopened_over_the_advertised_emission_delay_carry_an_offset_checkpoint()
@@ -97,10 +97,7 @@ public class RestOffsetCheckpointConformanceTests(ITestOutputHelper output)
         await lane.Fixture.UploadDarAsync(DarPath(), TestContext.Current.CancellationToken);
         var party = await lane.Fixture.AllocatePartyAsync(
             "rest-offset-checkpoint", cancellationToken: TestContext.Current.CancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId,
-            actAs: [party.PartyId],
-            cancellationToken: TestContext.Current.CancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, TestContext.Current.CancellationToken);
 
         var quietParty = new Party(party.PartyId);
         var beginExclusive = await lane.LedgerClient.GetLedgerEndAsync(

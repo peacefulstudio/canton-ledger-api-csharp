@@ -2,14 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.ComponentModel.DataAnnotations;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Canton.Ledger.Pqs.Client;
 
 /// <summary>
 /// Configuration options for the PQS client.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Payloads decode through the generated Daml-LF JSON reader, strictly. PQS documents Daml
+/// <c>Numeric</c> and <c>Int64</c> as JSON strings by default, and
+/// <c>--target-encoding-numericasstring</c> / <c>--target-encoding-int64asstring</c> change that
+/// default; a bare JSON number where an <c>Int64</c> or <c>Numeric</c> is expected is refused.
+/// </para>
+/// <para>
+/// <c>--target-encoding-excludenulls</c> is not supported: PQS stores nullable fields as JSON nulls
+/// by default, and a payload that omits an optional field's key fails to decode with an error
+/// naming the field. A row over 16 MiB, 100,000 JSON nodes or nesting depth 128 fails to decode
+/// like any other undecodable row.
+/// </para>
+/// </remarks>
 public class PqsClientOptions
 {
     /// <summary>
@@ -17,40 +29,4 @@ public class PqsClientOptions
     /// </summary>
     [Required]
     public required string ConnectionString { get; set; }
-
-    /// <summary>
-    /// Optional <see cref="JsonSerializerOptions"/> for deserializing PQS contract payloads.
-    /// When <c>null</c>, the client uses its own defaults: case-insensitive property matching for
-    /// PQS's camelCase keys, Daml <c>Numeric</c> read from a JSON string, and Daml enums read as
-    /// plain strings.
-    /// </summary>
-    /// <remarks>
-    /// Setting this replaces those defaults rather than adding to them, so payloads needing both
-    /// them and a converter of your own start from
-    /// <see cref="CreateDefaultJsonSerializerOptions"/> and add the converter to what it returns.
-    /// </remarks>
-    public JsonSerializerOptions? JsonSerializerOptions { get; set; }
-
-    /// <summary>
-    /// Builds a fresh, mutable <see cref="System.Text.Json.JsonSerializerOptions"/> carrying the
-    /// defaults the client applies when <see cref="JsonSerializerOptions"/> is <c>null</c>:
-    /// <see cref="System.Text.Json.JsonSerializerOptions.PropertyNameCaseInsensitive"/> for PQS's
-    /// camelCase keys, <see cref="JsonNumberHandling.AllowReadingFromString"/> for Daml
-    /// <c>Numeric</c>, and a <see cref="JsonStringEnumConverter"/> for Daml enums.
-    /// </summary>
-    /// <returns>
-    /// A new instance on every call, so a converter added to one — a variant factory for an
-    /// abstract Daml type System.Text.Json cannot construct, say — reaches only the client it is
-    /// assigned to.
-    /// </returns>
-    public static JsonSerializerOptions CreateDefaultJsonSerializerOptions()
-    {
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            NumberHandling = JsonNumberHandling.AllowReadingFromString,
-        };
-        options.Converters.Add(new JsonStringEnumConverter());
-        return options;
-    }
 }

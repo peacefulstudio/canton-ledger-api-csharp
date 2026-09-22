@@ -114,12 +114,32 @@ public class FakeLedgerClientAcsTerminalContractTests
     }
 
     [Fact]
+    public void WithActiveInterfaceContracts_rejects_an_empty_snapshot()
+    {
+        var staging = () => FakeLedgerClient.Create()
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>();
+
+        staging.Should().Throw<ArgumentException>().WithMessage("*terminal*");
+    }
+
+    [Fact]
     public void WithActiveInterfaceContracts_rejects_an_entry_staged_after_the_terminal_checkpoint()
     {
         var staging = () => FakeLedgerClient.Create()
             .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
                 HoldingCheckpointAt(1),
                 HoldingCreatedAt(2));
+
+        staging.Should().Throw<ArgumentException>().WithMessage("*terminal*");
+    }
+
+    [Fact]
+    public void WithActiveInterfaceContracts_rejects_a_checkpoint_and_a_stream_error_in_the_same_snapshot()
+    {
+        var staging = () => FakeLedgerClient.Create()
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                HoldingCheckpointAt(2),
+                HoldingStreamErrorAt());
 
         staging.Should().Throw<ArgumentException>().WithMessage("*terminal*");
     }
@@ -136,10 +156,40 @@ public class FakeLedgerClientAcsTerminalContractTests
     }
 
     [Fact]
+    public void WithActiveInterfaceContracts_accepts_a_snapshot_ending_on_a_terminal_stream_error()
+    {
+        var staging = () => FakeLedgerClient.Create()
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                HoldingCreatedAt(1),
+                HoldingStreamErrorAt());
+
+        staging.Should().NotThrow();
+    }
+
+    [Fact]
     public async Task WithMalformedActiveInterfaceContracts_replays_a_snapshot_the_real_ledger_cannot_produce()
     {
         var truncated = HoldingCreatedAt(1);
         var client = FakeLedgerClient.Create()
+            .WithMalformedActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(truncated)
+            .Build();
+
+        var entries = await CollectAsync(client.SubscribeActiveAsync(
+            new ViewDescriptor<IDemoHoldingView, DemoHoldingView>(),
+            Alice,
+            cancellationToken: TestContext.Current.CancellationToken));
+
+        entries.Should().Equal(truncated);
+    }
+
+    [Fact]
+    public async Task WithMalformedActiveInterfaceContracts_replaces_an_interface_shaped_snapshot_staged_for_the_same_type()
+    {
+        var truncated = HoldingCreatedAt(1);
+        var client = FakeLedgerClient.Create()
+            .WithActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(
+                HoldingCreatedAt(1),
+                HoldingCheckpointAt(1))
             .WithMalformedActiveInterfaceContracts<IDemoHoldingView, DemoHoldingView>(truncated)
             .Build();
 
@@ -167,6 +217,10 @@ public class FakeLedgerClientAcsTerminalContractTests
     private static InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView> HoldingCheckpointAt(long offset) =>
         new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.Checkpoint(
             new StakeholderResume(LedgerOffset.At(offset)));
+
+    private static InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView> HoldingStreamErrorAt() =>
+        new InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView>.StreamError(
+            14, "snapshot aborted mid-stream");
 
     private static async Task<List<T>> CollectAsync<T>(IAsyncEnumerable<T> source)
     {

@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using System;
 using AwesomeAssertions;
 using Daml.Runtime;
@@ -41,7 +43,7 @@ public class PqsInterfaceQueryTests
         const string payload = """{"amount":"123.45"}""";
 
         var contract = PqsClient.DeserializeInterfaceContract<ISampleInterface, SampleView>(
-            "00cid", payload, PqsClient.DefaultJsonSerializerOptions);
+            "00cid", payload);
 
         contract.Id.Value.Should().Be("00cid");
         contract.View.Amount.Should().Be(123.45m);
@@ -50,15 +52,12 @@ public class PqsInterfaceQueryTests
     [Theory]
     [InlineData("null")]
     [InlineData("  null  ")]
-    public void DeserializeInterfaceContract_throws_InvalidOperationException_for_null_payload(string payloadJson)
+    public void DeserializeInterfaceContract_refuses_a_null_payload(string payloadJson)
     {
         var act = () => PqsClient.DeserializeInterfaceContract<ISampleInterface, SampleView>(
-            "00cid", payloadJson, PqsClient.DefaultJsonSerializerOptions);
+            "00cid", payloadJson);
 
-        act.Should().Throw<InvalidOperationException>()
-            .Which.Message.Should()
-                .Contain("00cid")
-                .And.Contain(typeof(SampleView).FullName!);
+        act.Should().Throw<JsonException>();
     }
 }
 
@@ -81,6 +80,9 @@ internal interface ISampleInterface : IDamlInterface, IHasView<SampleView>
 internal sealed record SampleView([property: DamlFieldAttribute("amount")] decimal Amount) : IDamlRecord<SampleView>
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
+
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+        PqsRecordReader.Read(json, context, ("amount", DamlLfJsonDecoders.ReadNumeric));
 
     public static SampleView FromRecord(DamlRecord record) =>
         new(record.GetRequiredField("amount").As<DamlNumeric>().Value);

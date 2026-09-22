@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.Diagnostics.CodeAnalysis;
+using System.Net.Security;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Canton.Ledger.Kernel.DependencyInjection;
+using Canton.Ledger.Kernel.Security;
 using Canton.Ledger.Rest.Client.Raw;
 using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Refit;
@@ -32,9 +36,44 @@ namespace Canton.Ledger.Rest.Client;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// The name of the <see cref="HttpClient"/> the client is built over. Hosts can
-    /// customize it further via <c>services.AddHttpClient(HttpClientName)</c>.
+    /// The name of the <see cref="HttpClient"/> the client is built over. Hosts can customize it
+    /// further via <c>services.AddHttpClient(HttpClientName)</c>, up to and including supplying a
+    /// primary handler of their own — which discards everything
+    /// <see cref="RestLedgerClientOptions.Tls"/> configured, so see the remarks before doing so.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Anything a host sets on the named client wins over
+    /// <see cref="RestLedgerClientOptions.Tls"/>, whichever of the two registrations comes first
+    /// in <c>Program.cs</c>: the typed TLS material is applied ahead of every host action, so a
+    /// host action that assigns a primary handler of its own replaces it, silently and by design.
+    /// Configuring an unrelated concern through <c>UseSocketsHttpHandler</c> — a proxy, a
+    /// connection limit — keeps the typed TLS material, because that overload merges into the
+    /// handler already in place; only
+    /// <c>ConfigurePrimaryHttpMessageHandler(Func&lt;HttpMessageHandler&gt;)</c> replaces it
+    /// wholesale, which is the overload that means "I am taking over the handler".
+    /// </para>
+    /// <para>
+    /// The mechanism is the head of one list: the typed material is applied by an action inserted
+    /// at position 0 of <c>HttpClientFactoryOptions.HttpMessageHandlerBuilderActions</c>, while
+    /// every <c>AddHttpClient</c> extension method appends its own action to that same list. Two
+    /// things step outside it. A host that itself calls
+    /// <c>PostConfigure&lt;HttpClientFactoryOptions&gt;(HttpClientName, …)</c> and inserts at
+    /// the head reverts to dependency-injection registration order between the two post-configures,
+    /// and can therefore be overridden rather than override. An
+    /// <see cref="IHttpMessageHandlerBuilderFilter"/> that assigns
+    /// <see cref="HttpMessageHandlerBuilder.PrimaryHandler"/> before calling the next filter runs
+    /// ahead of every builder action, so the handler it supplied keeps its non-TLS settings while
+    /// its <see cref="SslClientAuthenticationOptions"/> are replaced wholesale.
+    /// </para>
+    /// <para>
+    /// One exception to host-wins is not ours to fix: a host setting
+    /// <see cref="SslClientAuthenticationOptions.CertificateRevocationCheckMode"/> is silently
+    /// overridden by the chain policy that <see cref="TlsOptions.CertificateAuthorities"/> installs,
+    /// because .NET reads revocation from the chain policy once one is present. Ask for revocation
+    /// checking through <see cref="TlsOptions.RevocationMode"/> instead.
+    /// </para>
+    /// </remarks>
     public const string HttpClientName = "Canton.Ledger.Rest";
 
     /// <summary>
@@ -284,6 +323,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RestOptionsRegisteredMarker>();
         services.AddValidatedOptions<RestLedgerClientOptions>(configuration)
             .ValidateDataAnnotations();
+        AddTypedTls(services);
+        AddAuthTlsValidation(services);
     }
 
     private static void AddRestLedgerOptions(IServiceCollection services, Action<RestLedgerClientOptions> configure)
@@ -293,6 +334,55 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RestOptionsRegisteredMarker>();
         services.AddValidatedOptions<RestLedgerClientOptions>(configure)
             .ValidateDataAnnotations();
+        AddTypedTls(services);
+        AddAuthTlsValidation(services);
+    }
+
+    private static void AddTypedTls(IServiceCollection services) =>
+        services.AddOptions<HttpClientFactoryOptions>(HttpClientName)
+            .PostConfigure<IOptions<RestLedgerClientOptions>>(static (factoryOptions, ledgerOptions) =>
+            {
+                var tls = ledgerOptions.Value.Tls;
+                if (!tls.IsConfigured)
+                    return;
+
+                var sslOptions = SslClientAuthenticationOptionsFactory.Create(tls);
+
+                factoryOptions.HttpMessageHandlerBuilderActions.Insert(0, builder =>
+                {
+                    var handler = builder.PrimaryHandler as SocketsHttpHandler
+                        ?? new SocketsHttpHandler { PooledConnectionLifetime = factoryOptions.HandlerLifetime };
+                    handler.SslOptions = sslOptions;
+                    builder.PrimaryHandler = handler;
+                });
+            });
+
+    private static void AddAuthTlsValidation(IServiceCollection services)
+    {
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<RestLedgerClientOptions>, AuthTlsOptionsValidator>());
+    }
+
+    private sealed class AuthTlsOptionsValidator(
+        IServiceProvider serviceProvider,
+        IOptions<ClientCredentialsOptions> authOptions) : IValidateOptions<RestLedgerClientOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, RestLedgerClientOptions options)
+        {
+            if (name != Options.DefaultName)
+                return ValidateOptionsResult.Skip;
+
+            if (serviceProvider.GetService<ClientCredentialsRegistration>() is null)
+                return ValidateOptionsResult.Success;
+
+            return options.Tls.IsConfigured
+                && !authOptions.Value.Tls.IsConfigured
+                    ? ValidateOptionsResult.Fail(
+                        "RestLedgerClientOptions.Tls is configured while client-credentials authentication "
+                        + "uses an unconfigured ClientCredentialsOptions.Tls. Configure TLS separately "
+                        + "for the token endpoint.")
+                    : ValidateOptionsResult.Success;
+        }
     }
 
     private sealed class RestApisRegisteredMarker;

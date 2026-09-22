@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Canton.Ledger.Abstractions;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -268,7 +270,7 @@ public class FilterTests
         [property: DamlFieldAttribute("initiator")] string Initiator,
         [property: DamlFieldAttribute("counterparty")] string Counterparty,
         [property: DamlFieldAttribute("numSwaps")] long NumSwaps,
-        [property: DamlFieldAttribute("status")] string Status) : ITemplate
+        [property: DamlFieldAttribute("status")] string Status) : ITemplate, IDamlRecord<SampleTemplate>
     {
         public static Identifier TemplateId { get; } = new("pkg123", "Test.Module", "SampleTemplate");
         public static string PackageId => "pkg123";
@@ -281,6 +283,15 @@ public class FilterTests
             DamlField.Create("counterparty", new DamlParty(Counterparty)),
             DamlField.Create("numSwaps", new DamlInt64(NumSwaps)),
             DamlField.Create("status", new DamlText(Status)));
+
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            PqsRecordReader.Read(
+                json,
+                context,
+                ("initiator", DamlLfJsonDecoders.ReadParty),
+                ("counterparty", DamlLfJsonDecoders.ReadParty),
+                ("numSwaps", DamlLfJsonDecoders.ReadInt64),
+                ("status", DamlLfJsonDecoders.ReadText));
 
         public static SampleTemplate FromRecord(DamlRecord record) => new(
             Initiator: record.GetRequiredField("initiator").As<DamlParty>().Value,

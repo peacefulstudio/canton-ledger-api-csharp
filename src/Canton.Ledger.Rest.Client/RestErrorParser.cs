@@ -59,9 +59,6 @@ namespace Canton.Ledger.Rest.Client;
 /// </remarks>
 internal static class RestErrorParser
 {
-    private const string ErrorInfoTypeSuffix = "/google.rpc.ErrorInfo";
-    private const string ReasonPropertyName = "reason";
-    private const string MetadataPropertyName = "metadata";
     private const string CategoryMetadataKey = "category";
     private const string PlainTextMediaType = "text/plain";
 
@@ -119,16 +116,14 @@ internal static class RestErrorParser
             return new ParsedLedgerError.Unstructured(fallbackMessage, httpStatusCode);
         }
 
-        var errorInfo = FindErrorInfo(status.Details);
+        var errorInfo = RestErrorDetails.FindErrorInfo(status.Details);
         if (errorInfo is null)
         {
             return new ParsedLedgerError.Unstructured(status.Message, httpStatusCode);
         }
 
-        var metadata = ToMetadata(errorInfo);
-        var errorId = errorInfo.AdditionalProperties.TryGetValue(ReasonPropertyName, out var reasonValue)
-            ? AsString(reasonValue)
-            : string.Empty;
+        var metadata = RestErrorDetails.ToMetadata(errorInfo);
+        var errorId = RestErrorDetails.ReadErrorId(errorInfo);
 
         return new ParsedLedgerError.Structured(
             ParsedLedgerError.MapCategory(metadata.TryGetValue(CategoryMetadataKey, out var raw) ? raw : null),
@@ -198,19 +193,6 @@ internal static class RestErrorParser
         }
     }
 
-    private static Raw.GoogleProtobufAny? FindErrorInfo(ICollection<Raw.GoogleProtobufAny>? details)
-    {
-        if (details is null) return null;
-        foreach (var detail in details)
-        {
-            if (detail?.Type is { } type && type.EndsWith(ErrorInfoTypeSuffix, StringComparison.Ordinal))
-            {
-                return detail;
-            }
-        }
-        return null;
-    }
-
     private static IReadOnlyDictionary<string, string> ToMetadata(IReadOnlyDictionary<string, string?>? context)
     {
         if (context is null || context.Count == 0)
@@ -225,32 +207,4 @@ internal static class RestErrorParser
         }
         return metadata;
     }
-
-    private static IReadOnlyDictionary<string, string> ToMetadata(Raw.GoogleProtobufAny errorInfo)
-    {
-        if (!errorInfo.AdditionalProperties.TryGetValue(MetadataPropertyName, out var rawMetadata))
-        {
-            return EmptyMetadata;
-        }
-
-        if (rawMetadata is not JsonElement { ValueKind: JsonValueKind.Object } metadataElement)
-        {
-            return EmptyMetadata;
-        }
-
-        var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var property in metadataElement.EnumerateObject())
-        {
-            metadata[property.Name] = AsString(property.Value);
-        }
-        return metadata;
-    }
-
-    private static string AsString(object value) =>
-        value switch
-        {
-            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString() ?? string.Empty,
-            JsonElement element => element.GetRawText(),
-            _ => value.ToString() ?? string.Empty,
-        };
 }

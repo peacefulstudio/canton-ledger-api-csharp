@@ -12,4 +12,11 @@ namespace Canton.Ledger.Rest.Client;
 internal static class WireValueNames
 {
     internal const string Unit = "unit";
+
+    /// <summary>
+    /// Holds the raw Daml-LF JSON text of every wire <see cref="Raw.Value"/> and <see cref="Raw.Record"/>
+    /// read from a participant — ambiguous without the Daml type, so the read path preserves it here
+    /// for a type-directed decode instead of binding it to an arm.
+    /// </summary>
+    internal const string Idiomatic = "idiomatic";
 }

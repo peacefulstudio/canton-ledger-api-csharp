@@ -32,10 +32,14 @@ public class FakeLedgerClientInterfaceViewTests
             Owner, cancellationToken: TestContext.Current.CancellationToken);
 
         holdings.Should().HaveCount(2);
-        holdings[0].Id.Value.Should().Be("cid1");
-        holdings[0].View.Amount.Should().Be(42.5m);
-        holdings[1].Id.Value.Should().Be("cid2");
-        holdings[1].View.Amount.Should().Be(7m);
+        holdings[0].Contract.Id.Value.Should().Be("cid1");
+        holdings[0].Contract.View.Amount.Should().Be(42.5m);
+        holdings[0].LastUpdateOffset.Should().Be(LedgerOffset.At(1));
+        holdings[0].SynchronizerId.Should().Be(Synchronizer);
+        holdings[1].Contract.Id.Value.Should().Be("cid2");
+        holdings[1].Contract.View.Amount.Should().Be(7m);
+        holdings[1].LastUpdateOffset.Should().Be(LedgerOffset.At(2));
+        holdings[1].SynchronizerId.Should().Be(Synchronizer);
     }
 
     [Fact]
@@ -120,8 +124,32 @@ public class FakeLedgerClientInterfaceViewTests
         var keyed = await client.QueryActiveAsync<IKeyedHoldingView, KeyedHoldingView>(
             Owner, cancellationToken: TestContext.Current.CancellationToken);
 
-        demo.Should().ContainSingle().Which.View.Amount.Should().Be(3m);
-        keyed.Should().ContainSingle().Which.View.Amount.Should().Be(9m);
+        demo.Should().ContainSingle().Which.Contract.View.Amount.Should().Be(3m);
+        keyed.Should().ContainSingle().Which.Contract.View.Amount.Should().Be(9m);
+    }
+
+    [Fact]
+    public async Task QueryActiveAsync_carries_the_contract_key_for_a_keyed_template_observed_through_an_interface()
+    {
+        var key = new ContractKey(new DamlParty((string)Owner), new Identifier("test-tpkg", "MiniDemo.Keyed", "Keyed"));
+
+        ICantonLedgerClient client = FakeLedgerClient.Create()
+            .WithActiveInterfaceContracts<IKeyedHoldingView, KeyedHoldingView>(
+                new InterfaceAcsSnapshotEntry<IKeyedHoldingView, KeyedHoldingView>.Created(
+                    new ContractId<IKeyedHoldingView>("cid1"),
+                    new KeyedHoldingView(5m),
+                    key,
+                    LedgerOffset.At(1),
+                    Synchronizer,
+                    [Owner]),
+                new InterfaceAcsSnapshotEntry<IKeyedHoldingView, KeyedHoldingView>.Checkpoint(
+                    new StakeholderResume(LedgerOffset.At(1))))
+            .Build();
+
+        var holdings = await client.QueryActiveAsync<IKeyedHoldingView, KeyedHoldingView>(
+            Owner, cancellationToken: TestContext.Current.CancellationToken);
+
+        holdings.Should().ContainSingle().Which.Contract.Key.Should().Be(key);
     }
 
     private static InterfaceAcsSnapshotEntry<IDemoHoldingView, DemoHoldingView> Created(

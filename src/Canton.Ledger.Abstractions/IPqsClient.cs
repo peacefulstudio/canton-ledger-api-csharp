@@ -20,6 +20,12 @@ namespace Canton.Ledger.Abstractions;
 /// Queries use the generated Daml C# bindings for type safety. The type identifier
 /// is derived from the generated Daml type metadata in the format required by PQS.
 /// </para>
+/// <para>
+/// Each payload is decoded strictly through the generated Daml-LF JSON reader, which is why the
+/// payload-returning methods require <c>IDamlRecord&lt;T&gt;</c>. A payload that omits an optional
+/// field's key, or carries a bare JSON number for an <c>Int64</c> or <c>Numeric</c>, fails with a
+/// <see cref="System.Text.Json.JsonException"/>.
+/// </para>
 /// </remarks>
 public interface IPqsClient
 {
@@ -28,7 +34,7 @@ public interface IPqsClient
     /// </summary>
     Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Queries all active contracts that implement a Daml interface, projecting each row's
@@ -71,7 +77,7 @@ public interface IPqsClient
     Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         PqsFilter filter,
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Queries a bounded page of active contracts of a given template type, applying
@@ -87,7 +93,7 @@ public interface IPqsClient
     Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         PqsPage page,
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Queries a bounded page of active contracts that implement a Daml interface, projecting each
@@ -134,7 +140,7 @@ public interface IPqsClient
         PqsFilter filter,
         PqsPage page,
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Queries a single active contract matching a filter.
@@ -144,7 +150,7 @@ public interface IPqsClient
     Task<Contract<T>?> QueryOneAsync<T>(
         PqsFilter filter,
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Fetches a single contract by its contract ID.
@@ -152,7 +158,7 @@ public interface IPqsClient
     Task<Contract<T>?> FetchByIdAsync<T>(
         ContractId<T> contractId,
         CancellationToken cancellationToken = default)
-        where T : ITemplate;
+        where T : ITemplate, IDamlRecord<T>;
 
     /// <summary>
     /// Checks if a contract exists and is active.

@@ -8,7 +8,7 @@ using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;
@@ -36,8 +36,7 @@ public class PqsRoundTripTests
     private static readonly TimeSpan ProjectionTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     private static async Task<Party> ScribeReadablePartyAsync(IAdminClient admin, string userId)
     {

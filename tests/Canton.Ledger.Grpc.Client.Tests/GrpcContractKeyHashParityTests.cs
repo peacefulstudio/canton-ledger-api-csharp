@@ -27,12 +27,12 @@ public sealed class GrpcContractKeyHashParityTests : ContractKeyHashParityTests
     };
 
     private static ContractKey? ContractStreamKey() =>
-        ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(KeyedTransaction())
+        GrpcContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(KeyedTransaction())
             .Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject.Key;
 
     private static ContractKey? InterfaceStreamKey() =>
-        InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(KeyedTransaction())
+        GrpcInterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(KeyedTransaction())
             .Should().ContainSingle().Subject
             .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject.Key;
 

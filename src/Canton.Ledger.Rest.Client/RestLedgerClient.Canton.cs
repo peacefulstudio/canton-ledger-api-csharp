@@ -99,9 +99,10 @@ internal sealed partial class RestLedgerClient
     /// Submits over one blocking <c>POST /v2/commands/submit-and-wait-for-reassignment</c> call and
     /// projects the resulting reassignment into the typed <see cref="ContractStreamEvent{T}.Assigned"/>
     /// / <see cref="ContractStreamEvent{T}.Unassigned"/> variant. A structured error maps to a
-    /// <see cref="ExerciseOutcome{T}.DamlError"/>; a transport failure, per-call
-    /// <paramref name="timeout"/> overrun, or malformed response maps to an
-    /// <see cref="ExerciseOutcome{T}.InfraError"/>, never a thrown exception. Argument validation and
+    /// <see cref="ExerciseOutcome{T}.DamlError"/>; a transport failure or per-call
+    /// <paramref name="timeout"/> overrun maps to an <see cref="ExerciseOutcome{T}.InfraError"/>; a
+    /// response of a committed reassignment that cannot be decoded maps to an
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never a thrown exception. Argument validation and
     /// request construction run before the call is issued, so they throw synchronously to the caller
     /// rather than through the returned <see cref="Task{TResult}"/>.
     /// </remarks>
@@ -126,6 +127,7 @@ internal sealed partial class RestLedgerClient
                 HttpMethod.Post, SubmitAndWaitForReassignmentPath, request,
                 MissingReassignmentMessage, MalformedReassignmentBodyPrefix),
             ProjectReassignmentOutcome<T>,
+            body => NonEmptyOrNull(body.Reassignment?.UpdateId),
             timeout,
             cancellationToken);
     }
@@ -136,8 +138,8 @@ internal sealed partial class RestLedgerClient
     {
         if (body.Reassignment is not { } reassignment)
         {
-            return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                (int)HttpStatusCode.InternalServerError, MissingReassignmentMessage);
+            return new ExerciseOutcome<ContractStreamEvent<T>>.CommittedUndecodable(
+                UpdateId: null, MissingReassignmentMessage, new InvalidOperationException(MissingReassignmentMessage));
         }
 
         try
@@ -147,17 +149,17 @@ internal sealed partial class RestLedgerClient
         catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
         {
             LogReassignmentUndecodable(_logger, decodeFailure);
-            return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                (int)HttpStatusCode.InternalServerError,
+            return new ExerciseOutcome<ContractStreamEvent<T>>.CommittedUndecodable(
+                NonEmptyOrNull(reassignment.UpdateId),
                 $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}",
-                SourceException: decodeFailure);
+                decodeFailure);
         }
     }
 
     private ContractStreamEvent<T> ProjectReassignmentResult<T>(Raw.Reassignment reassignment)
         where T : ITemplate, IDamlRecord<T>
     {
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<T>(reassignment, _logger).ToList();
+        var projected = RestContractStreamProjector.ProjectReassignmentEvents<T>(reassignment, _logger).ToList();
         return projected.FirstOrDefault(e => e is ContractStreamEvent<T>.Assigned or ContractStreamEvent<T>.Unassigned)
             ?? projected.FirstOrDefault()
             ?? new ContractStreamEvent<T>.Unclassified(
@@ -267,7 +269,7 @@ internal sealed partial class RestLedgerClient
     }
 
     private static CompletionStreamEvent.StreamError ToCompletionStreamError(StreamFault fault) =>
-        new(fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
+        new(fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
 
     private CompletionStreamEvent? ProjectCompletionResponse(WireCompletionResponse? completionResponse)
     {

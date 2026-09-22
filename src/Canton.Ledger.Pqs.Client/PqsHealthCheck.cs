@@ -9,9 +9,10 @@ using Npgsql;
 
 namespace Canton.Ledger.Pqs.Client;
 
-internal sealed partial class PqsHealthCheck(IOptions<PqsClientOptions> options, ILogger<PqsHealthCheck>? logger = null) : IHealthCheck
+internal sealed partial class PqsHealthCheck(IOptions<PqsClientOptions> options, NpgsqlDataSource? dataSource = null, ILogger<PqsHealthCheck>? logger = null) : IHealthCheck
 {
     private readonly PqsClientOptions _options = (options ?? throw new ArgumentNullException(nameof(options))).Value;
+    private readonly NpgsqlDataSource? _dataSource = dataSource;
     private readonly ILogger<PqsHealthCheck> _logger = logger ?? NullLogger<PqsHealthCheck>.Instance;
 
     public async Task<HealthCheckResult> CheckHealthAsync(
@@ -20,11 +21,9 @@ internal sealed partial class PqsHealthCheck(IOptions<PqsClientOptions> options,
     {
         try
         {
-            var connection = new NpgsqlConnection(_options.ConnectionString);
+            var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             await using (connection.ConfigureAwait(false))
             {
-                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
                 var command = new NpgsqlCommand("SELECT 1", connection);
                 await using (command.ConfigureAwait(false))
                 {
@@ -46,6 +45,26 @@ internal sealed partial class PqsHealthCheck(IOptions<PqsClientOptions> options,
                 context.Registration.FailureStatus,
                 description: "PQS database is unreachable.",
                 exception: ex);
+        }
+    }
+
+    private async Task<NpgsqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        if (_dataSource is not null)
+        {
+            return await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var connection = new NpgsqlConnection(_options.ConnectionString);
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
     }
 

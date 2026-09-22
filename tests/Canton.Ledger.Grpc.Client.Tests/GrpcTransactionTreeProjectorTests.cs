@@ -339,6 +339,7 @@ public class GrpcTransactionTreeProjectorTests
             ContractId = contractId,
             TemplateId = TemplateId,
             Choice = choice,
+            ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
             ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
         },
     };
@@ -349,4 +350,28 @@ public class GrpcTransactionTreeProjectorTests
         TreeEvent.Exercised exercised => exercised.ContractId,
         _ => throw new InvalidOperationException($"Unhandled tree event: {evt.GetType().Name}"),
     };
+
+    [Fact]
+    public void Project_throws_a_malformed_response_for_an_exercised_event_without_a_choice_argument()
+    {
+        var exercised = Exercised(nodeId: 0, lastDescendantNodeId: 0, "00rich", "ExecuteSwap");
+        exercised.Exercised.ChoiceArgument = null;
+
+        var act = () => GrpcTransactionTreeProjector.Project(Transaction(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00rich' has no choice_argument, though the Ledger API marks the field as required.");
+    }
+
+    [Fact]
+    public void Project_throws_a_malformed_response_for_an_exercised_event_without_an_exercise_result()
+    {
+        var exercised = Exercised(nodeId: 0, lastDescendantNodeId: 0, "00rich", "ExecuteSwap");
+        exercised.Exercised.ExerciseResult = null;
+
+        var act = () => GrpcTransactionTreeProjector.Project(Transaction(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00rich' has no exercise_result, though the Ledger API marks the field as required.");
+    }
 }

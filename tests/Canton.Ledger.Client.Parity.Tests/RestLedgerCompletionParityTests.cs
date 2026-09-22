@@ -10,7 +10,8 @@ using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using Canton.Ledger.Grpc.Client.Integration.Tests;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 using RuntimeCreateCommand = Daml.Runtime.Commands.CreateCommand;
 
@@ -26,8 +27,7 @@ public sealed class RestLedgerCompletionParityTests : LedgerCompletionParityTest
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
         + "(canton-localnet up && canton-localnet wait-ready) to run this parity test.";
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     protected override async Task<CapabilityLane<CompletionProbe>> OpenCompletionAsync(CancellationToken cancellationToken)
     {
@@ -37,6 +37,7 @@ public sealed class RestLedgerCompletionParityTests : LedgerCompletionParityTest
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         ServiceProvider? services = null;
         try
         {
@@ -49,8 +50,7 @@ public sealed class RestLedgerCompletionParityTests : LedgerCompletionParityTest
                 "rest-completion-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
             var owner = new Party(party.PartyId);
             var userId = fixture.ValidatorUserId;
-            await fixture.GrantUserRightsAsync(
-                userId, actAs: [party.PartyId], cancellationToken: cancellationToken).ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
 
             var jsonAddress = fixture.Endpoints.JsonLedgerApi.ToString();
             services = new ServiceCollection()
@@ -86,18 +86,14 @@ public sealed class RestLedgerCompletionParityTests : LedgerCompletionParityTest
                 }
                 finally
                 {
-                    await fixture.DisposeAsync().ConfigureAwait(false);
+                    await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
                 }
             });
         }
-        catch
+        catch (Exception openFailure)
         {
-            if (services is not null)
-            {
-                await services.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await fixture.DisposeAsync().ConfigureAwait(false);
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
             throw;
         }
     }

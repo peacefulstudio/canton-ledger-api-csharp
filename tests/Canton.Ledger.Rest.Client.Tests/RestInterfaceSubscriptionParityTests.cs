@@ -44,12 +44,12 @@ internal sealed class ViewedParticipantHandler : HttpMessageHandler
           "nodeId": 0,
           "contractId": "{{{InterfaceSubscriptionParityTests.ViewedContractId}}}",
           "templateId": {"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"},
-          "createArgument": {"fields": []},
+          "createArgument": {},
           "interfaceViews": [
             {
               "interfaceId": {"packageId": "viewed-pkg", "moduleName": "Token.Api", "entityName": "IViewedHolding"},
               "viewStatus": {"code": 0, "message": ""},
-              "viewValue": {"fields": [{"label": "amount", "value": {"numeric": "{{{Amount}}}"}}]}
+              "viewValue": {"amount": "{{{Amount}}}"}
             }
           ],
           "witnessParties": ["{{{InterfaceSubscriptionParityTests.Owner.Id}}}"]

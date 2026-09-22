@@ -3,6 +3,7 @@
 
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
+using Canton.Ledger.Grpc.Client.Integration.Tests;
 using Canton.Ledger.Testing.Localnet;
 using Daml.Ledger.Abstractions;
 using Daml.Runtime.Data;
@@ -23,8 +24,7 @@ public sealed class GrpcLedgerWriterParityTests : LedgerWriterParityTests
         + "(or the legacy un-namespaced CANTON_LOCALNET_* globals) and bring up the localnet "
         + "(canton-localnet up && canton-localnet wait-ready) to run this parity test.";
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     protected override async Task<CapabilityLane<(ILedgerWriter Writer, ICantonLedgerClient Client, Party Owner)>> OpenWriterAsync(
         CancellationToken cancellationToken)
@@ -35,30 +35,46 @@ public sealed class GrpcLedgerWriterParityTests : LedgerWriterParityTests
         }
 
         var fixture = LocalnetFixture.FromEnvironment();
+        var actAsRights = ActAsRightsLease.ForValidator(fixture);
         var grpcAddress = Environment.GetEnvironmentVariable(GrpcUrlEnv) ?? DefaultGrpcUrl;
-
-        await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
-        var party = await fixture.AllocatePartyAsync(
-            "grpc-writer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
-        await fixture.GrantUserRightsAsync(
-            fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-
-        var services = new ServiceCollection()
-            .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
-            .AddLedgerClient(options =>
-            {
-                options.GrpcAddress = grpcAddress;
-                options.UserId = fixture.ValidatorUserId;
-            })
-            .BuildServiceProvider();
-
-        var writer = services.GetRequiredService<ILedgerWriter>();
-        var client = services.GetRequiredService<ICantonLedgerClient>();
-        return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>((writer, client, new Party(party.PartyId)), async () =>
+        ServiceProvider? services = null;
+        try
         {
-            await services.DisposeAsync().ConfigureAwait(false);
-            await fixture.DisposeAsync().ConfigureAwait(false);
-        });
+            await fixture.UploadDarAsync(DarPath(), cancellationToken).ConfigureAwait(false);
+            var party = await fixture.AllocatePartyAsync(
+                "grpc-writer-parity", cancellationToken: cancellationToken).ConfigureAwait(false);
+            await actAsRights.GrantAsync(party.PartyId, cancellationToken).ConfigureAwait(false);
+
+            services = new ServiceCollection()
+                .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
+                .AddLedgerClient(options =>
+                {
+                    options.GrpcAddress = grpcAddress;
+                    options.UserId = fixture.ValidatorUserId;
+                })
+                .BuildServiceProvider();
+
+            var writer = services.GetRequiredService<ILedgerWriter>();
+            var client = services.GetRequiredService<ICantonLedgerClient>();
+            return new CapabilityLane<(ILedgerWriter, ICantonLedgerClient, Party)>(
+                (writer, client, new Party(party.PartyId)),
+                async () =>
+                {
+                    try
+                    {
+                        await services.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await LaneTeardown.ReleaseAsync(actAsRights, fixture).ConfigureAwait(false);
+                    }
+                });
+        }
+        catch (Exception openFailure)
+        {
+            await LaneTeardown.ReleaseAsync(openFailure, services, actAsRights, fixture)
+                .ConfigureAwait(false);
+            throw;
+        }
     }
 }

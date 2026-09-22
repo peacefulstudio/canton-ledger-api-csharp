@@ -31,13 +31,13 @@ internal sealed partial class SubmissionClient
     private readonly ILogger _logger;
     private readonly Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionResult>> _pointReadByOffset;
     private readonly Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionTree>> _treePointReadByOffset;
-    private readonly CommandBuilder _commandBuilder;
+    private readonly GrpcCommandBuilder _commandBuilder;
 
     internal SubmissionClient(
         LedgerCallInvoker invoker,
         CommandService.CommandServiceClient commandService,
         CommandSubmissionService.CommandSubmissionServiceClient commandSubmissionService,
-        CommandBuilder commandBuilder,
+        GrpcCommandBuilder commandBuilder,
         LedgerClientOptions options,
         ILogger logger,
         Func<long, RuntimeCommands.SubmitterInfo, CancellationToken, Task<TransactionResult>> pointReadByOffset,
@@ -67,7 +67,7 @@ internal sealed partial class SubmissionClient
             {
                 var submission = NewExerciseSubmission(activity, command, submitter, workflowId, commandId);
 
-                var transactionFormat = SubscribeRequestBuilder.BuildTransactionFormat(submitter);
+                var transactionFormat = GrpcSubscribeRequestBuilder.BuildTransactionFormat(submitter);
 
                 var commands = _commandBuilder.BuildCommands(submission);
                 var outcome = await TrySubmitCoreAsync(
@@ -163,8 +163,8 @@ internal sealed partial class SubmissionClient
 
                 var submitter = new RuntimeCommands.SubmitterInfo(
                     new HashSet<Daml.Runtime.Data.Party> { submission.Submitter }, new HashSet<Daml.Runtime.Data.Party>());
-                var eventFormat = SubscribeRequestBuilder.BuildReassignmentEventFormat(
-                    submitter, MarkerMatcher<T>.StreamFilterIdentifier(), MarkerMatcher<T>.IsInterface);
+                var eventFormat = GrpcSubscribeRequestBuilder.BuildReassignmentEventFormat(
+                    submitter, GrpcMarkerMatcher<T>.StreamFilterIdentifier(), GrpcMarkerMatcher<T>.IsInterface);
 
                 var request = new SubmitAndWaitForReassignmentRequest
                 {
@@ -188,10 +188,10 @@ internal sealed partial class SubmissionClient
                     catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
                     {
                         LogReassignmentResponseUndecodable(_logger, decodeFailure);
-                        return new ExerciseOutcome<ContractStreamEvent<T>>.InfraError(
-                            (int)StatusCode.Internal,
+                        return new ExerciseOutcome<ContractStreamEvent<T>>.CommittedUndecodable(
+                            UpdateIdOrNull(response.Reassignment?.UpdateId),
                             $"Could not decode the reassignment in the ledger response: {decodeFailure.Message}",
-                            SourceException: decodeFailure);
+                            decodeFailure);
                     }
 
                     return new ExerciseOutcome<ContractStreamEvent<T>>.One(projected);
@@ -212,7 +212,7 @@ internal sealed partial class SubmissionClient
     private static ContractStreamEvent<T> ProjectReassignmentResult<T>(SubmitAndWaitForReassignmentResponse response)
         where T : ITemplate, IDamlRecord<T>
     {
-        var projected = ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment).ToList();
+        var projected = GrpcContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment).ToList();
         return projected.FirstOrDefault(e => e is ContractStreamEvent<T>.Assigned or ContractStreamEvent<T>.Unassigned)
             ?? projected.FirstOrDefault()
             ?? new ContractStreamEvent<T>.Unclassified(
@@ -253,7 +253,7 @@ internal sealed partial class SubmissionClient
                 var commands = _commandBuilder.BuildCommands(submission.WithSubmitter(submitter));
                 return TrySubmitCoreAsync(
                     commands,
-                    SubscribeRequestBuilder.BuildTransactionFormat(submitter),
+                    GrpcSubscribeRequestBuilder.BuildTransactionFormat(submitter),
                     submitter,
                     GrpcTransactionTreeProjector.Project,
                     _treePointReadByOffset,
@@ -334,10 +334,10 @@ internal sealed partial class SubmissionClient
             catch (Exception decodeFailure) when (decodeFailure is not OperationCanceledException)
             {
                 LogTransactionResponseUndecodable(_logger, decodeFailure);
-                return new ExerciseOutcome<TProjection>.InfraError(
-                    (int)StatusCode.Internal,
-                    $"Could not decode the transaction in the ledger response: {decodeFailure.Message}",
-                    SourceException: decodeFailure);
+                return new ExerciseOutcome<TProjection>.CommittedUndecodable(
+                    UpdateIdOrNull(response.Transaction?.UpdateId),
+                    $"The command committed, but its transaction could not be decoded: {decodeFailure.Message}",
+                    decodeFailure);
             }
 
             if (_logger.IsEnabled(LogLevel.Information))
@@ -365,6 +365,9 @@ internal sealed partial class SubmissionClient
             return outcome;
         }
     }
+
+    private static string? UpdateIdOrNull(string? updateId) =>
+        string.IsNullOrEmpty(updateId) ? null : updateId;
 
     private static (int CreatedCount, int ArchivedCount) CountCreatedAndArchived(Transaction transaction)
     {
@@ -426,6 +429,9 @@ internal sealed partial class SubmissionClient
                 break;
             case ExerciseOutcome<T>.InfraError infraError:
                 activity.RecordInfraError(infraError.StatusCode, infraError.Message);
+                break;
+            case ExerciseOutcome<T>.CommittedUndecodable undecodable:
+                activity.RecordCommittedUndecodable(undecodable.Message);
                 break;
             case ExerciseOutcome<T>.One:
             case ExerciseOutcome<T>.None:

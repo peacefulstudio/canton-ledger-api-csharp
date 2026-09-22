@@ -76,7 +76,8 @@ public sealed class ReadEnvelopeSerializationTests
         var payload = response.ContractEntry.JsActiveContract.CreatedEvent.CreateArgument;
         payload.Should().NotBeNull();
         payload.Fields.Should().BeNullOrEmpty();
-        payload.AdditionalProperties.Should().ContainKey("owner");
+        using var createArgument = JsonDocument.Parse((string)payload.AdditionalProperties["idiomatic"]);
+        createArgument.RootElement.GetProperty("owner").GetString().Should().Be("alice::1220ab");
     }
 
     [Fact]

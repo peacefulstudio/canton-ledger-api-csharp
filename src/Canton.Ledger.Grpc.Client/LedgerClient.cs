@@ -32,7 +32,7 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     private readonly CommandCompletionService.CommandCompletionServiceClient _commandCompletionService;
     private readonly VersionService.VersionServiceClient _versionService;
     private readonly Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient _interactiveSubmissionService;
-    private readonly CommandBuilder _commandBuilder;
+    private readonly GrpcCommandBuilder _commandBuilder;
     private readonly LedgerClientOptions _options;
     private readonly ILogger<LedgerClient> _logger;
     private bool _disposed;
@@ -55,7 +55,7 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
         _interactiveSubmissionService =
             new Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient(_channel);
 
-        _commandBuilder = new CommandBuilder(_options);
+        _commandBuilder = new GrpcCommandBuilder(_options);
         _invoker = new LedgerCallInvoker(_options, tokenProvider);
         _submissionClient = new SubmissionClient(
             _invoker, commandService, commandSubmissionService, _commandBuilder, _options, _logger,
@@ -127,7 +127,7 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
             ?? new Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient(channel);
         _logger = logger ?? NullLogger<LedgerClient>.Instance;
 
-        _commandBuilder = new CommandBuilder(_options);
+        _commandBuilder = new GrpcCommandBuilder(_options);
         _invoker = new LedgerCallInvoker(_options, tokenProvider);
         _submissionClient = new SubmissionClient(
             _invoker, commandService, commandSubmissionService, _commandBuilder, _options, _logger,
@@ -136,6 +136,12 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,
@@ -202,6 +208,12 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
@@ -212,6 +224,12 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
@@ -224,6 +242,12 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,

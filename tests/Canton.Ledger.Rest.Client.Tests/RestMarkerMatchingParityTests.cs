@@ -19,8 +19,8 @@ public sealed class RestMarkerMatchingParityTests : MarkerMatchingParityTests
 
     protected override bool IsInterfaceMarker(DamlTypeKind marker) => marker switch
     {
-        DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.IsInterface,
-        DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.IsInterface,
+        DamlTypeKind.Template => RestMarkerMatcher<TemplateMarker>.IsInterface,
+        DamlTypeKind.Interface => RestMarkerMatcher<InterfaceMarker>.IsInterface,
         _ => throw new ArgumentOutOfRangeException(nameof(marker)),
     };
 
@@ -28,8 +28,8 @@ public sealed class RestMarkerMatchingParityTests : MarkerMatchingParityTests
     {
         var identifier = marker switch
         {
-            DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.FilterIdentifier,
-            DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.FilterIdentifier,
+            DamlTypeKind.Template => RestMarkerMatcher<TemplateMarker>.FilterIdentifier,
+            DamlTypeKind.Interface => RestMarkerMatcher<InterfaceMarker>.FilterIdentifier,
             _ => throw new ArgumentOutOfRangeException(nameof(marker)),
         };
         return new RuntimeIdentifier(identifier.PackageId, identifier.ModuleName, identifier.EntityName);
@@ -44,8 +44,8 @@ public sealed class RestMarkerMatchingParityTests : MarkerMatchingParityTests
 
     protected override bool MatchesCreatedContract(DamlTypeKind marker, CreatedContract created) => marker switch
     {
-        DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.MatchesContract(created),
-        DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.MatchesContract(created),
+        DamlTypeKind.Template => RestMarkerMatcher<TemplateMarker>.MatchesContract(created),
+        DamlTypeKind.Interface => RestMarkerMatcher<InterfaceMarker>.MatchesContract(created),
         _ => throw new ArgumentOutOfRangeException(nameof(marker)),
     };
 
@@ -53,10 +53,10 @@ public sealed class RestMarkerMatchingParityTests : MarkerMatchingParityTests
         where TMarker : Daml.Runtime.IDamlType =>
         scenario.Event switch
         {
-            MarkerWireEvent.Created => MarkerMatcher<TMarker>.MatchesCreated(BuildCreated(scenario)),
-            MarkerWireEvent.Archived => MarkerMatcher<TMarker>.MatchesArchived(BuildArchived(scenario)),
-            MarkerWireEvent.Exercised => MarkerMatcher<TMarker>.MatchesExercised(BuildExercised(scenario)),
-            MarkerWireEvent.Unassigned => MarkerMatcher<TMarker>.MatchesUnassigned(BuildUnassigned(scenario)),
+            MarkerWireEvent.Created => RestMarkerMatcher<TMarker>.MatchesCreated(BuildCreated(scenario)),
+            MarkerWireEvent.Archived => RestMarkerMatcher<TMarker>.MatchesArchived(BuildArchived(scenario)),
+            MarkerWireEvent.Exercised => RestMarkerMatcher<TMarker>.MatchesExercised(BuildExercised(scenario)),
+            MarkerWireEvent.Unassigned => RestMarkerMatcher<TMarker>.MatchesUnassigned(BuildUnassigned(scenario)),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
         };
 

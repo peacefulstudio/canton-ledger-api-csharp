@@ -11,10 +11,18 @@ internal sealed partial class LedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// The participant reports the hierarchy on the ledger-effects transaction this method asks for,
     /// as the child events nested under each exercise. A duplicate submission the participant
     /// deduplicates is resolved through the tree-shaped point read, so a retried command still yields
     /// the committed transaction rather than a rejection.
+    /// </para>
+    /// <para>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </para>
     /// </remarks>
     public Task<ExerciseOutcome<TransactionTree>> TrySubmitAndWaitForTransactionTreeAsync(
         RuntimeCommands.CommandsSubmission submission,

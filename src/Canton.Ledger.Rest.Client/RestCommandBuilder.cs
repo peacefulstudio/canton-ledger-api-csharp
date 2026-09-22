@@ -7,8 +7,10 @@ using RuntimeCommands = Daml.Runtime.Commands;
 using WireAssignCommand = Canton.Ledger.Rest.Client.Raw.AssignCommand;
 using WireCommand = Canton.Ledger.Rest.Client.Raw.Command;
 using WireCommands = Canton.Ledger.Rest.Client.Raw.Commands;
+using WireCreateAndExerciseCommand = Canton.Ledger.Rest.Client.Raw.CreateAndExerciseCommand;
 using WireCreateCommand = Canton.Ledger.Rest.Client.Raw.CreateCommand;
 using WireDisclosedContract = Canton.Ledger.Rest.Client.Raw.DisclosedContract;
+using WireExerciseByKeyCommand = Canton.Ledger.Rest.Client.Raw.ExerciseByKeyCommand;
 using WireExerciseCommand = Canton.Ledger.Rest.Client.Raw.ExerciseCommand;
 using WireIdentifier = Canton.Ledger.Rest.Client.Raw.Identifier;
 using WireReassignmentCommand = Canton.Ledger.Rest.Client.Raw.ReassignmentCommand;
@@ -21,9 +23,10 @@ namespace Canton.Ledger.Rest.Client;
 /// <summary>
 /// Builds the generated wire <see cref="WireCommands"/> shape from a transport-neutral
 /// <see cref="RuntimeCommands.CommandsSubmission"/>, mirroring the gRPC transport's
-/// <c>CommandBuilder</c>. Only <see cref="RuntimeCommands.CreateCommand"/> and
-/// <see cref="RuntimeCommands.ExerciseCommand"/> are supported today, matching the gRPC
-/// transport's scope.
+/// <c>CommandBuilder</c>. <see cref="RuntimeCommands.CreateCommand"/>,
+/// <see cref="RuntimeCommands.ExerciseCommand"/>, <see cref="RuntimeCommands.ExerciseByKeyCommand"/>
+/// and <see cref="RuntimeCommands.CreateAndExerciseCommand"/> are all supported today, matching the
+/// gRPC transport's scope.
 /// </summary>
 internal static class RestCommandBuilder
 {
@@ -150,6 +153,26 @@ internal static class RestCommandBuilder
                     ContractId = exercise.ContractId.Value,
                     Choice = exercise.Choice.Value,
                     ChoiceArgument = RestValueEncoder.ToWireValue(exercise.ChoiceArgument),
+                },
+            },
+            RuntimeCommands.ExerciseByKeyCommand exerciseByKey => new WireCommand
+            {
+                ExerciseByKeyCommand = new WireExerciseByKeyCommand
+                {
+                    TemplateId = ToWireIdentifier(exerciseByKey.TemplateId),
+                    ContractKey = RestValueEncoder.ToWireValue(exerciseByKey.ContractKey),
+                    Choice = exerciseByKey.Choice.Value,
+                    ChoiceArgument = RestValueEncoder.ToWireValue(exerciseByKey.ChoiceArgument),
+                },
+            },
+            RuntimeCommands.CreateAndExerciseCommand createAndExercise => new WireCommand
+            {
+                CreateAndExerciseCommand = new WireCreateAndExerciseCommand
+                {
+                    TemplateId = ToWireIdentifier(createAndExercise.TemplateId),
+                    CreateArguments = RestValueEncoder.ToWireRecord(createAndExercise.CreateArguments),
+                    Choice = createAndExercise.Choice.Value,
+                    ChoiceArgument = RestValueEncoder.ToWireValue(createAndExercise.ChoiceArgument),
                 },
             },
             _ => throw new NotSupportedException($"Command type {command.GetType().Name} is not supported."),

@@ -10,7 +10,8 @@ using AwesomeAssertions;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using Canton.Ledger.Grpc.Client.Integration.Tests;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 #pragma warning disable CANTONREST001
@@ -59,8 +60,7 @@ public class RestMinLedgerTimeConformanceTests
     private static readonly TimeSpan ObservationWindow = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PromptCommit = TimeSpan.FromSeconds(10);
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     private static async Task<Party> NewOwnerAsync(RestConformanceLane lane, CancellationToken cancellationToken)
     {
@@ -71,8 +71,7 @@ public class RestMinLedgerTimeConformanceTests
 
         var party = await lane.Fixture.AllocatePartyAsync(
             "rest-min-ledger-time", cancellationToken: cancellationToken);
-        await lane.Fixture.GrantUserRightsAsync(
-            lane.Fixture.ValidatorUserId, actAs: [party.PartyId], cancellationToken: cancellationToken);
+        await lane.GrantActAsAsync(party.PartyId, cancellationToken);
         return new Party(party.PartyId);
     }
 

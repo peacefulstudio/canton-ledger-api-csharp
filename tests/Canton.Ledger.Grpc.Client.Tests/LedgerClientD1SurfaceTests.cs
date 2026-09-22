@@ -267,6 +267,7 @@ public sealed class LedgerClientD1SurfaceTests : IDisposable
                 ContractId = "00exer",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Accept",
+                ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value(),
             },
         });

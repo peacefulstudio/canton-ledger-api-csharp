@@ -70,7 +70,7 @@ public class TransactionResultFoldsTests
         damlError.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateOther);
         damlError.ErrorId.Should().Be("SOME_ERROR");
         damlError.Message.Should().Be("gone");
-        damlError.Metadata.Should().BeSameAs(metadata);
+        damlError.Metadata.Should().BeEquivalentTo(metadata);
     }
 
     [Fact]
@@ -89,6 +89,22 @@ public class TransactionResultFoldsTests
     }
 
     [Fact]
+    public void Project_carries_a_CommittedUndecodable_across_unchanged()
+    {
+        var sourceException = new FormatException("Cannot parse wire Int64 value 'x' as a 64-bit integer.");
+
+        var projected = TransactionResultFolds.Project(
+            new ExerciseOutcome<TransactionResult>.CommittedUndecodable(
+                "update-1", "the transaction could not be decoded", sourceException),
+            _ => new ExerciseOutcome<int>.One(0));
+
+        var undecodable = projected.Should().BeOfType<ExerciseOutcome<int>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("update-1");
+        undecodable.Message.Should().Be("the transaction could not be decoded");
+        undecodable.SourceException.Should().BeSameAs(sourceException);
+    }
+
+    [Fact]
     public void Project_rejects_a_null_outcome()
     {
         var act = () => TransactionResultFolds.Project<int>(null!, _ => new ExerciseOutcome<int>.One(0));
@@ -103,7 +119,7 @@ public class TransactionResultFoldsTests
         new(
             UpdateId: "u1",
             CompletionOffset: LedgerOffset.At(1),
-            CreatedContracts: created,
+            CreatedContracts: EquatableArray.Create(created),
             ArchivedContractIds: [],
             CommandId: default);
 }
