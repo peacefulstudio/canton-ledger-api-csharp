@@ -19,11 +19,13 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
 
     private readonly TlsTestMaterial _material = new();
     private readonly X509Certificate2 _certificateAuthority;
+    private readonly X509Certificate2 _serverCertificate;
     private readonly X509Certificate2 _clientCertificate;
 
     public SslClientAuthenticationOptionsFactoryTests()
     {
         _certificateAuthority = _material.CreateCertificateAuthority("Canton Test Root");
+        _serverCertificate = _material.IssueServerCertificate(_certificateAuthority, ServerHostName);
         _clientCertificate = _material.IssueClientCertificate(_certificateAuthority, "Canton Test Client");
     }
 
@@ -304,6 +306,11 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         presented.Should().BeNull();
     }
 
+    // SChannel (Windows) keys its session cache by TargetHost only, so resumption crosses
+    // ports and this test reliably catches the bug on Windows. On Linux/macOS (OpenSSL/
+    // Secure Transport) the cache is typically scoped to (host, port), so a failure here
+    // may not reproduce locally on non-Windows platforms — the test is still a valid canary
+    // for the SChannel-specific behaviour it was added to cover.
     [Fact]
     public async Task Create_presents_no_client_certificate_after_a_prior_handshake_to_the_same_host_presented_one()
     {
@@ -328,22 +335,14 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         await act.Should().ThrowAsync<AuthenticationException>();
     }
 
-    // Each call mints its own TargetHost and server certificate rather than sharing one
-    // across a test method. Windows SChannel keys its credential-handle cache by TargetHost
-    // alone, ignoring port, so two loopback handshakes to the same host name can leak a
-    // client certificate from the first handshake into the second (dotnet/runtime#134180,
-    // open, targeted at .NET 12). A unique TargetHost per call gives each handshake its own
-    // cache entry and sidesteps the collision below the app layer.
     private async Task<string?> HandshakeAsync(TlsOptions options)
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var targetHost = $"{ServerHostName}-{Guid.NewGuid():N}";
-        var serverCertificate = _material.IssueServerCertificate(_certificateAuthority, targetHost);
 
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
 
-        var acceptTask = AcceptAsync(listener, serverCertificate, cancellationToken);
+        var acceptTask = AcceptAsync(listener, cancellationToken);
 
         try
         {
@@ -351,7 +350,7 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
             await tcpClient.ConnectAsync((IPEndPoint)listener.LocalEndpoint, cancellationToken);
 
             var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(options);
-            authenticationOptions.TargetHost = targetHost;
+            authenticationOptions.TargetHost = ServerHostName;
             authenticationOptions.EnabledSslProtocols = SslProtocols.Tls12;
             authenticationOptions.AllowTlsResume = false;
 
@@ -367,10 +366,7 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         }
     }
 
-    private static async Task<string?> AcceptAsync(
-        TcpListener listener,
-        X509Certificate2 serverCertificate,
-        CancellationToken cancellationToken)
+    private async Task<string?> AcceptAsync(TcpListener listener, CancellationToken cancellationToken)
     {
         using var serverClient = await listener.AcceptTcpClientAsync(cancellationToken);
         await using var serverStream = new SslStream(serverClient.GetStream(), leaveInnerStreamOpen: false);
@@ -378,7 +374,7 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         await serverStream.AuthenticateAsServerAsync(
             new SslServerAuthenticationOptions
             {
-                ServerCertificate = serverCertificate,
+                ServerCertificate = _serverCertificate,
                 ClientCertificateRequired = true,
                 EnabledSslProtocols = SslProtocols.Tls12,
                 RemoteCertificateValidationCallback = (_, _, _, _) => true,

@@ -19,8 +19,6 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Fixed
 
-- `SslClientAuthenticationOptionsFactoryTests` no longer shares one `TargetHost` and server certificate across the sequential handshakes in a test method. On Windows, SChannel keys its credential-handle cache by `TargetHost` alone (ignoring port), so two loopback handshakes to the same host name could leak a client certificate presented by an earlier handshake into a later one that configured none — an OS-level caching behavior below the TLS options surface (tracked upstream as [dotnet/runtime#134180](https://github.com/dotnet/runtime/issues/134180), open, targeted at .NET 12). Each handshake now mints its own `TargetHost` and matching server certificate, giving it its own cache entry. No production behavior changes; this is a test-only fix.
-
 ### Security
 
 ## [0.5.0-preview.2] - 2026-09-11
