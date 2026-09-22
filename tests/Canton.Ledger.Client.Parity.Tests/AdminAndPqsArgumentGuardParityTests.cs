@@ -8,7 +8,7 @@ using Canton.Ledger.Pqs.Client;
 using Canton.Ledger.Testing;
 using Daml.Runtime.Contracts;
 using Microsoft.Extensions.DependencyInjection;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Client.Parity.Tests;

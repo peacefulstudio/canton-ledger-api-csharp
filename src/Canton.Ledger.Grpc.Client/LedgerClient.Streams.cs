@@ -65,7 +65,7 @@ internal sealed partial class LedgerClient
             {
                 LogCompletionStreamError(_logger, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new CompletionStreamEvent.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException, fault.ErrorId);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -78,7 +78,7 @@ internal sealed partial class LedgerClient
                     {
                         LogCompletionStreamDecodeFailed(_logger, stream.Current.Completion.Offset, decodeFailure);
                         yield return new CompletionStreamEvent.StreamError(
-                            StreamFault.NoTransportFailure, decodeFailure.Message, null, decodeFailure);
+                            StreamFault.NoTransportFailure, decodeFailure.Message, SourceException: decodeFailure);
                         yield break;
                     }
 
@@ -164,7 +164,7 @@ internal sealed partial class LedgerClient
         CancellationToken cancellationToken = default)
         where T : ITemplate, IDamlRecord<T>
     {
-        var filterId = MarkerMatcher<T>.StreamFilterIdentifier();
+        var filterId = GrpcMarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeAsyncCore<T>(submitter, filterId, fromOffset?.Value, toOffset?.Value, TransactionShape.AcsDelta, cancellationToken);
     }
 
@@ -182,7 +182,7 @@ internal sealed partial class LedgerClient
         CancellationToken cancellationToken = default)
         where T : ITemplate, IDamlRecord<T>
     {
-        var filterId = MarkerMatcher<T>.StreamFilterIdentifier();
+        var filterId = GrpcMarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeAsyncCore<T>(submitter, filterId, fromOffset?.Value, toOffset?.Value, TransactionShape.LedgerEffects, cancellationToken);
     }
 
@@ -201,12 +201,12 @@ internal sealed partial class LedgerClient
         activity?.SetTag(LedgerActivityTagNames.CantonFromOffset, fromOffset);
         activity.SetSubmitterTags(submitter);
 
-        var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
             filterId,
             fromOffset,
             toOffset,
-            MarkerMatcher<T>.IsInterface,
+            GrpcMarkerMatcher<T>.IsInterface,
             transactionShape);
 
         LogSubscribeStarted(_logger, typeof(T).Name, fromOffset ?? 0L);
@@ -226,7 +226,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new ContractStreamEvent<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -246,7 +246,7 @@ internal sealed partial class LedgerClient
         switch (response.UpdateCase)
         {
             case GetUpdatesResponse.UpdateOneofCase.Transaction:
-                foreach (var typedEvent in ContractStreamProjector.ProjectTransactionEvents<T>(response.Transaction, _logger))
+                foreach (var typedEvent in GrpcContractStreamProjector.ProjectTransactionEvents<T>(response.Transaction, _logger))
                 {
                     yield return typedEvent;
                 }
@@ -255,7 +255,7 @@ internal sealed partial class LedgerClient
                 yield return new ContractStreamEvent<T>.Checkpoint(LedgerOffset.At(response.OffsetCheckpoint.Offset));
                 break;
             case GetUpdatesResponse.UpdateOneofCase.Reassignment:
-                foreach (var typedEvent in ContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment, _logger))
+                foreach (var typedEvent in GrpcContractStreamProjector.ProjectReassignmentEvents<T>(response.Reassignment, _logger))
                 {
                     yield return typedEvent;
                 }
@@ -289,7 +289,7 @@ internal sealed partial class LedgerClient
         CancellationToken cancellationToken = default)
         where T : ITemplate, IDamlRecord<T>
     {
-        var templateFilter = MarkerMatcher<T>.StreamFilterIdentifier();
+        var templateFilter = GrpcMarkerMatcher<T>.StreamFilterIdentifier();
         return SubscribeActiveAsyncCore<T>(submitter, templateFilter, activeAtOffset?.Value, cancellationToken);
     }
 
@@ -308,11 +308,11 @@ internal sealed partial class LedgerClient
         var effectiveOffset = activeAtOffset ?? (await GetLedgerEndForSnapshotAsync(cancellationToken).ConfigureAwait(false)).Offset;
         var sharedHeaders = await _invoker.GetHeadersAsync(cancellationToken).ConfigureAwait(false);
 
-        var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(
+        var request = GrpcSubscribeRequestBuilder.BuildGetActiveContractsRequest(
             submitter,
             templateFilter,
             effectiveOffset,
-            MarkerMatcher<T>.IsInterface);
+            GrpcMarkerMatcher<T>.IsInterface);
 
         LogSubscribeActiveStarted(_logger, typeof(T).Name, effectiveOffset);
 
@@ -331,7 +331,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(T).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new AcsSnapshotEntry<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -341,7 +341,7 @@ internal sealed partial class LedgerClient
                 yield break;
             }
 
-            foreach (var projected in ContractStreamProjector.ProjectActiveContractEntry<T>(
+            foreach (var projected in GrpcContractStreamProjector.ProjectActiveContractEntry<T>(
                 stream.Current, _logger, LedgerOffset.At(effectiveOffset)))
             {
                 if (projected is ContractStreamEvent<T>.Unclassified unclassified)

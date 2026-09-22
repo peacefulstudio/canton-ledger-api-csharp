@@ -6,7 +6,7 @@ using Canton.Ledger.Testing;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Data;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 
 namespace Canton.Ledger.Client.Parity.Tests;
 
@@ -24,7 +24,9 @@ public sealed class FakeLedgerCompletionParityTests : LedgerCompletionParityTest
             SubmissionId: null,
             UserId: null,
             DeduplicationOffset: null,
-            DeduplicationDuration: null);
+            DeduplicationDuration: null,
+            PaidTrafficCost: 0L,
+            TraceContext: null);
 
         var client = FakeLedgerClient.Create()
             .WithCompletionEvents(

@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 
@@ -23,6 +25,7 @@ public sealed record MyTemplate(string Field1, string Field2) : ITemplate, IDaml
         DamlField.Create("field1", new DamlText(Field1)),
         DamlField.Create("field2", new DamlText(Field2)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static MyTemplate FromRecord(DamlRecord record) =>
         new(record.GetRequiredField("field1").As<DamlText>().Value, record.GetRequiredField("field2").As<DamlText>().Value);
 }
@@ -30,7 +33,7 @@ public sealed record MyTemplate(string Field1, string Field2) : ITemplate, IDaml
 public sealed record Asset(
     [property: DamlFieldAttribute("owner")] Party Owner,
     [property: DamlFieldAttribute("name")] string Name,
-    [property: DamlFieldAttribute("value")] decimal Value) : ITemplate
+    [property: DamlFieldAttribute("value")] decimal Value) : ITemplate, IDamlRecord<Asset>
 {
     public static Identifier TemplateId { get; } = new("quickstart", "Quickstart", "Asset");
     public static string PackageId => "quickstart";
@@ -42,6 +45,9 @@ public sealed record Asset(
         DamlField.Create("owner", Owner.ToDamlValue()),
         DamlField.Create("name", new DamlText(Name)),
         DamlField.Create("value", new DamlNumeric(Value)));
+
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
+    public static Asset FromRecord(DamlRecord record) => throw new NotSupportedException();
 
     // A codegen-emitted choice argument record. ToRecord() yields the DamlValue the
     // 3-arg ExerciseCommand.For expects for the choice argument.
@@ -55,7 +61,7 @@ public sealed record Asset(
 public sealed record Agreement(
     [property: DamlFieldAttribute("initiator")] string Initiator,
     [property: DamlFieldAttribute("counterparty")] string Counterparty,
-    [property: DamlFieldAttribute("status")] string Status) : ITemplate
+    [property: DamlFieldAttribute("status")] string Status) : ITemplate, IDamlRecord<Agreement>
 {
     public static Identifier TemplateId { get; } = new("quickstart", "Quickstart", "Agreement");
     public static string PackageId => "quickstart";
@@ -67,4 +73,7 @@ public sealed record Agreement(
         DamlField.Create("initiator", new DamlText(Initiator)),
         DamlField.Create("counterparty", new DamlText(Counterparty)),
         DamlField.Create("status", new DamlText(Status)));
+
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
+    public static Agreement FromRecord(DamlRecord record) => throw new NotSupportedException();
 }

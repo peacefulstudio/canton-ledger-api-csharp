@@ -6,6 +6,7 @@ using Canton.Ledger.Kernel.Commands;
 using Canton.Ledger.Kernel.Wire;
 using ProtoCompletion = Com.Daml.Ledger.Api.V2.Completion;
 using ProtoSynchronizerTime = Com.Daml.Ledger.Api.V2.SynchronizerTime;
+using ProtoTraceContext = Com.Daml.Ledger.Api.V2.TraceContext;
 using RuntimeCommands = Daml.Runtime.Commands;
 
 namespace Canton.Ledger.Grpc.Client;
@@ -15,10 +16,15 @@ internal static class GrpcCompletionProjector
     public static CompletionStreamEvent Project(ProtoCompletion completion)
     {
         ArgumentNullException.ThrowIfNull(completion);
+
+        var errorInfo = GrpcErrorDetails.FindErrorInfo(completion.Status);
+
         return CompletionVerdict.Classify(
             ToCompletion(completion),
             completion.Status?.Code,
             completion.Status?.Message,
+            NullIfEmpty(errorInfo?.Reason),
+            GrpcErrorDetails.ToMetadata(errorInfo),
             completion.UpdateId);
     }
 
@@ -34,7 +40,14 @@ internal static class GrpcCompletionProjector
             : null,
         completion.DeduplicationPeriodCase == ProtoCompletion.DeduplicationPeriodOneofCase.DeduplicationDuration
             ? completion.DeduplicationDuration.ToTimeSpan()
-            : null);
+            : null,
+        completion.PaidTrafficCost,
+        ToTraceContext(completion.TraceContext));
+
+    private static TraceContext? ToTraceContext(ProtoTraceContext? traceContext) =>
+        traceContext is { Traceparent: { } traceparent } && !string.IsNullOrWhiteSpace(traceparent)
+            ? new TraceContext(traceparent, NullIfEmpty(traceContext.Tracestate))
+            : null;
 
     private static RuntimeCommands.CommandId ToRequiredCommandId(ProtoCompletion completion) =>
         string.IsNullOrEmpty(completion.CommandId)
@@ -49,6 +62,6 @@ internal static class GrpcCompletionProjector
                 synchronizerTime.SynchronizerId,
                 synchronizerTime.RecordTime?.ToDateTimeOffset() ?? default);
 
-    private static string? NullIfEmpty(string value) =>
+    private static string? NullIfEmpty(string? value) =>
         string.IsNullOrEmpty(value) ? null : value;
 }

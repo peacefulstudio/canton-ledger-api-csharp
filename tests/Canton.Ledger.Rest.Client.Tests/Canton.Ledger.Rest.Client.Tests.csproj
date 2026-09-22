@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Daml.Ledger.Abstractions.Testing.Conformance" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Configuration" />

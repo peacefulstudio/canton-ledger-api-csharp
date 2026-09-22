@@ -41,7 +41,7 @@ public class ExerciseOutcomeExtensionsTests
     [Fact]
     public void OneOrThrow_throws_for_Many_reporting_count_and_contract_ids()
     {
-        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.Many(2, ["cid-1", "cid-2"]);
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.Many(["cid-1", "cid-2"]);
 
         var act = () => outcome.OneOrThrow("Mint");
 
@@ -65,7 +65,7 @@ public class ExerciseOutcomeExtensionsTests
         exception.Operation.Should().Be("Transfer");
         exception.Category.Should().Be(DamlErrorCategory.InvalidGivenCurrentSystemStateResourceMissing);
         exception.ErrorId.Should().Be("CONTRACT_NOT_FOUND");
-        exception.Metadata.Should().BeSameAs(SampleMetadata);
+        exception.Metadata.Should().BeEquivalentTo(SampleMetadata);
         exception.Message.Should().Contain("Transfer").And.Contain("CONTRACT_NOT_FOUND")
             .And.Contain("contract abc is not active");
     }
@@ -83,6 +83,47 @@ public class ExerciseOutcomeExtensionsTests
         exception.StatusCode.Should().Be(14);
         exception.InnerException.Should().BeSameAs(source);
         exception.Message.Should().Contain("Mint").And.Contain("participant unreachable");
+    }
+
+    [Fact]
+    public void OneOrThrow_throws_for_CommittedUndecodable_reporting_the_commit_and_the_update_id()
+    {
+        var source = new FormatException("bad offset");
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.CommittedUndecodable(
+            "update-1", "the transaction could not be decoded", source);
+
+        var act = () => outcome.OneOrThrow("Mint");
+
+        var exception = act.Should().Throw<LedgerOperationException>().Which;
+        exception.Operation.Should().Be("Mint");
+        exception.Message.Should().Be("Mint: committed but undecodable: the transaction could not be decoded");
+        exception.CommitState.Should().Be(CommitState.Committed);
+        exception.UpdateId.Should().Be("update-1");
+        exception.InnerException.Should().BeSameAs(source);
+    }
+
+    [Fact]
+    public void OneOrThrow_reports_no_update_id_for_a_CommittedUndecodable_that_never_read_one()
+    {
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.CommittedUndecodable(
+            null, "no transaction was present", new InvalidOperationException("no transaction was present"));
+
+        var act = () => outcome.OneOrThrow("Mint");
+
+        var exception = act.Should().Throw<LedgerOperationException>().Which;
+        exception.CommitState.Should().Be(CommitState.Committed);
+        exception.UpdateId.Should().BeNull();
+    }
+
+    [Fact]
+    public void ThrowIfError_treats_CommittedUndecodable_as_success_because_the_command_committed()
+    {
+        ExerciseOutcome<int> outcome = new ExerciseOutcome<int>.CommittedUndecodable(
+            "update-1", "the transaction could not be decoded", new FormatException("bad offset"));
+
+        var act = () => outcome.ThrowIfError("Settle");
+
+        act.Should().NotThrow();
     }
 
     [Fact]
@@ -167,7 +208,7 @@ public class ExerciseOutcomeExtensionsTests
         {
             new ExerciseOutcome<int>.One(1),
             new ExerciseOutcome<int>.None(),
-            new ExerciseOutcome<int>.Many(2, ["cid-1", "cid-2"]),
+            new ExerciseOutcome<int>.Many(["cid-1", "cid-2"]),
         };
 
         foreach (var outcome in outcomes)

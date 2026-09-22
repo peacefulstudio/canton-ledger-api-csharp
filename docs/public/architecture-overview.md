@@ -142,7 +142,7 @@ Authentication is abstracted behind `ITokenProvider` (`GetTokenAsync` → bearer
 
 ### `Canton.Ledger.Pqs.Client` — the read model
 
-A type-safe query client for the Participant Query Store, the SQL read model Canton ships alongside the participant. `PqsClient` queries PQS's PostgreSQL functions through Npgsql (`SELECT … FROM active(@templateId) …`) and deserializes each contract's JSON payload into the same generated binding types used on the write path.
+A type-safe query client for the Participant Query Store, the SQL read model Canton ships alongside the participant. `PqsClient` queries PQS's PostgreSQL functions through Npgsql (`SELECT … FROM active(@templateId) …`) and decodes each contract's JSON payload into the same generated binding types used on the write path, through the generated Daml-LF JSON reader.
 
 The read *surface* — `IPqsClient` with `Filter`/`PqsFilter`, `PqsPage` and `InterfaceContract<TInterface, TView>` — is declared in `Canton.Ledger.Abstractions` alongside `ICantonLedgerClient`, `IAdminClient` and `ITokenProvider`, so `Canton.Ledger.Testing` fakes every client surface while depending on nothing but the neutral packages. The filter cases stay `internal` to the declaring assembly, so `Npgsql` never crosses the package boundary: the SQL renderer accumulates parameters into a plain `ICollection<(string Name, string Value)>` and `PqsClient` binds them to a real `NpgsqlCommand` at execution time.
 
@@ -176,6 +176,6 @@ The read paths mirror it:
 
 ## Versioning and dependencies
 
-- **Canton protos** are pinned by `CantonVersion` in `Directory.Build.props` — currently `3.5.9`; bumping it re-targets the whole stub layer at the next build. The same pin drives the vendored JSON Ledger API spec behind `Canton.Ledger.Rest`, so both transports track one Canton version, and that version is a Canton 3.5 release: the library supports Canton 3.5 only.
+- **Canton protos** are pinned by `CantonVersion` in `Directory.Build.props` — currently `3.5.18`; bumping it re-targets the whole stub layer at the next build. The same pin drives the vendored JSON Ledger API spec behind `Canton.Ledger.Rest`, so both transports track one Canton version, and that version is a Canton 3.5 release: the library supports Canton 3.5 only.
 - **`Daml.Runtime` / `Daml.Ledger.Abstractions`** versions are pinned centrally in `Directory.Packages.props` and updated in lockstep with codegen releases.
 - All package versions in this repository are managed centrally (NuGet central package management); see `Directory.Packages.props` for the authoritative list.

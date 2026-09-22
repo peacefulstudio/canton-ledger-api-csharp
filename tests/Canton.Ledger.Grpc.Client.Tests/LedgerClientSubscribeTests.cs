@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
 using Com.Daml.Ledger.Api.V2;
@@ -627,6 +629,68 @@ public sealed class LedgerClientSubscribeTests : IDisposable
     }
 
     [Fact]
+    public async Task SubscribeAsync_populates_StreamError_ErrorId_from_the_transport_fault()
+    {
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "STALE_STREAM_AUTHORIZATION", "the user's rights changed", "2");
+        StubGetUpdatesFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>().Subject;
+        error.ErrorId.Should().Be(
+            "STALE_STREAM_AUTHORIZATION",
+            "the category this fault shares with every other contention condition cannot say which one arrived");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_leaves_StreamError_ErrorId_null_when_the_fault_carries_no_structured_error()
+    {
+        StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<ContractStreamEvent<FooBar>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a transport fault the participant attached no error to reports no code, and none is invented");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_populates_StreamError_ErrorId_from_the_transport_fault()
+    {
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "STALE_STREAM_AUTHORIZATION", "the user's rights changed", "2");
+        StubGetUpdatesFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.StreamError>().Subject;
+        error.ErrorId.Should().Be(
+            "STALE_STREAM_AUTHORIZATION",
+            "the interface-projected stream reads the fault through the same path as the plain stream, and must carry the code too");
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_for_interface_marker_leaves_StreamError_ErrorId_null_when_the_fault_carries_no_structured_error()
+    {
+        StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeAsync(FooViewDescriptor, ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<InterfaceStreamEvent<IFoo, FooView>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a transport fault the participant attached no error to reports no code, and none is invented");
+    }
+
+    [Fact]
     public async Task SubscribeAsync_leaves_StreamError_Category_null_when_the_fault_carries_no_category()
     {
         StubGetUpdatesFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
@@ -813,6 +877,37 @@ public sealed class LedgerClientSubscribeTests : IDisposable
             .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>().Subject;
         error.Category.Should().Be(DamlErrorCategory.ContentionOnSharedResources);
         error.SourceException.Should().BeSameAs(rpcException);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_populates_StreamError_ErrorId_from_the_transport_fault()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        var rpcException = CategorisedRpcException.WithCategory(
+            StatusCode.Aborted, "STALE_STREAM_AUTHORIZATION", "the user's rights changed", "2");
+        StubGetActiveContractsFailure(rpcException);
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        var error = events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>().Subject;
+        error.ErrorId.Should().Be("STALE_STREAM_AUTHORIZATION");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_leaves_StreamError_ErrorId_null_when_the_fault_carries_no_structured_error()
+    {
+        StubGetLedgerEnd(offset: 10L);
+        StubGetActiveContractsFailure(new RpcException(new Status(StatusCode.Unavailable, "transient down")));
+
+        var client = CreateClient();
+        var events = await CollectAsync(client.SubscribeActiveAsync<FooBar>(ActAs, cancellationToken: TestContext.Current.CancellationToken));
+
+        events.Should().ContainSingle().Subject
+            .Should().BeOfType<AcsSnapshotEntry<FooBar>.StreamError>()
+            .Subject.ErrorId.Should().BeNull(
+                "a transport fault the participant attached no error to reports no code, and none is invented");
     }
 
     [Fact]
@@ -2044,6 +2139,7 @@ public sealed class LedgerClientSubscribeTests : IDisposable
     {
         public DamlRecord ToRecord() => DamlRecord.Create();
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
         public static FooView FromRecord(DamlRecord record) => new();
     }
 
@@ -2058,6 +2154,7 @@ public sealed class LedgerClientSubscribeTests : IDisposable
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
         public static NoPackageNameTemplate FromRecord(DamlRecord record) =>
             new(record.GetRequiredField("owner").As<DamlParty>().Value);
     }

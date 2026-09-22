@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
@@ -46,13 +47,18 @@ public sealed class RestLedgerClientCantonTests : IDisposable
 
     private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "CantonTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(
+                json,
+                context,
+                ("owner", DamlLfJsonDecoders.ReadParty));
         public static TestTemplate FromRecord(DamlRecord record) =>
             new();
     }
@@ -81,7 +87,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
                         "offset": "9",
                         "contractId": "00impl",
                         "templateId": {"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"},
-                        "createArgument": {"fields": [{"label": "amount", "value": {"numeric": "999"}}]},
+                        "createArgument": {"amount": "999"},
                         "interfaceViews": [{{{interfaceViewJson}}}],
                         "witnessParties": ["party::alice"]
                       },
@@ -100,7 +106,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             {
               "interfaceId": {{{ViewedInterfaceIdJson}}},
               "viewStatus": {"code": 0, "message": ""},
-              "viewValue": {"fields": [{"label": "amount", "value": {"numeric": "42.5"}}]}
+              "viewValue": {"amount": "42.5"}
             }
             """));
 
@@ -108,8 +114,10 @@ public sealed class RestLedgerClientCantonTests : IDisposable
             AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
 
         holdings.Should().ContainSingle();
-        holdings[0].Id.Value.Should().Be("00impl");
-        holdings[0].View.Amount.Should().Be(42.5m);
+        holdings[0].Contract.Id.Value.Should().Be("00impl");
+        holdings[0].Contract.View.Amount.Should().Be(42.5m);
+        holdings[0].LastUpdateOffset.Should().Be(LedgerOffset.At(9));
+        holdings[0].SynchronizerId.Should().Be((SynchronizerId)"sync-1");
     }
 
     [Fact]
@@ -462,7 +470,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
                         "reassignmentId": "reassign-1",
                         "reassignmentCounter": "1",
                         "contractId": "00cid",
-                        "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
+                        "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "CantonTemplate"},
                         "source": "sync-a",
                         "target": "sync-b",
                         "witnessParties": ["party::alice"]
@@ -520,7 +528,7 @@ public sealed class RestLedgerClientCantonTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForReassignmentAsync_carries_the_caught_projection_failure_into_the_InfraError_source_exception()
+    public async Task TrySubmitAndWaitForReassignmentAsync_carries_the_caught_projection_failure_into_the_CommittedUndecodable_source_exception()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -536,12 +544,11 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForReassignmentAsync<TestTemplate>(
             submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var infraError = outcome.Should()
-            .BeOfType<ExerciseOutcome<ContractStreamEvent<TestTemplate>>.InfraError>().Subject;
-        infraError.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
-        infraError.Message.Should().StartWith("Could not decode the reassignment in the ledger response:");
-        infraError.Category.Should().BeNull();
-        infraError.SourceException.Should().BeSameAs(logger.Failure);
+        var undecodable = outcome.Should()
+            .BeOfType<ExerciseOutcome<ContractStreamEvent<TestTemplate>>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("upd-1");
+        undecodable.Message.Should().StartWith("Could not decode the reassignment in the ledger response:");
+        undecodable.SourceException.Should().BeSameAs(logger.Failure);
     }
 
     private sealed class LoggerFailingOnItsFirstWrite : ILogger<RestLedgerClient>
@@ -586,8 +593,8 @@ public sealed class RestLedgerClientCantonTests : IDisposable
                       "offset": "7",
                       "contractId": "00holding",
                       "nodeId": 0,
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
-                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "CantonTemplate"},
+                      "createArgument": {"owner": "party::alice"}
                     }
                   }
                 ]

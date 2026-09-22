@@ -10,7 +10,7 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
 using Daml.Runtime.Streams;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 using AssignCommand = Canton.Ledger.Abstractions.AssignCommand;
 using RuntimeCommands = Daml.Runtime.Commands;
@@ -118,8 +118,7 @@ internal sealed class RestReassignmentHarness
         }
 
         var party = new Party(sourceParty);
-        await _lane.Fixture.GrantUserRightsAsync(
-            _lane.Fixture.ValidatorUserId, actAs: [party.Id], cancellationToken: cancellationToken);
+        await _lane.GrantActAsAsync(party.Id, cancellationToken);
 
         var hosted = await _lane.LedgerClient.GetConnectedSynchronizersAsync(party, cancellationToken: cancellationToken);
         if (hosted.Count < 2)
@@ -300,9 +299,13 @@ internal sealed class RestReassignmentHarness
     private static void SkipIfReassignmentFeatureDisabled(ExerciseOutcome<ContractStreamEvent<Asset>> outcome)
     {
         if (outcome is ExerciseOutcome<ContractStreamEvent<Asset>>.DamlError damlError
-            && IsReassignmentFeatureDisabled(damlError.Message)
-            && !MultiSyncReassignmentGate.Required)
+            && IsReassignmentFeatureDisabled(damlError.Message))
         {
+            if (MultiSyncReassignmentGate.Required)
+            {
+                Assert.Fail($"Failing (multi-sync required): {ReassignmentFeatureDisabledSkipMessage}");
+            }
+
             Assert.Skip(ReassignmentFeatureDisabledSkipMessage);
         }
     }

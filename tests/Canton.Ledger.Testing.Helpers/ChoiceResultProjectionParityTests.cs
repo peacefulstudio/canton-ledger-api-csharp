@@ -85,6 +85,21 @@ public abstract class ChoiceResultProjectionParityTests
             .Subject.StatusCode.Should().Be(503);
     }
 
+    [Fact]
+    public void ProjectChoiceResult_passes_a_CommittedUndecodable_outcome_through()
+    {
+        var sourceException = new FormatException("Cannot parse wire Int64 value 'x' as a 64-bit integer.");
+
+        var projected = ProjectChoiceResult<DamlRecord>(
+            new ExerciseOutcome<TransactionResult>.CommittedUndecodable("upd-1", "cannot decode", sourceException),
+            NullDecodingChoice);
+
+        var undecodable = projected.Should().BeOfType<ExerciseOutcome<DamlRecord>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("upd-1");
+        undecodable.Message.Should().Be("cannot decode");
+        undecodable.SourceException.Should().BeSameAs(sourceException);
+    }
+
     private static ExerciseOutcome<TransactionResult>.One Exercised(ChoiceName choice, DamlValue exerciseResult) =>
         new(new TransactionResult(
             "upd-1", LedgerOffset.At(1), [], [], new CommandId("cmd-1"))

@@ -54,20 +54,23 @@ internal static class RestTransactionTreeProjector
             $"the exercise of '{exercised.Choice}' at node id {nodeId} states no last descendant node id, "
             + "so the extent of the subtree it caused is unknowable");
 
-    private static TreeEvent Close(WireExercisedEvent exercised, int nodeId, IReadOnlyList<TreeEvent> children)
+    private static TreeEvent Close(WireExercisedEvent exercised, int nodeId, EquatableArray<TreeEvent> children)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
                 $"ExercisedEvent for contract '{exercised.ContractId}' has no templateId");
 
+        var runtimeTemplateId = RestWireConversions.ToRuntimeIdentifier(templateId);
+        var payloads = RestPayloadDecoder.ExercisePayloadsOf(exercised, runtimeTemplateId);
+
         return new TreeEvent.Exercised(
             TreeShape.EventIdOf(nodeId),
             exercised.ContractId,
-            RestWireConversions.ToRuntimeIdentifier(templateId),
+            runtimeTemplateId,
             exercised.InterfaceId is null ? null : RestWireConversions.ToRuntimeIdentifier(exercised.InterfaceId),
             exercised.Choice,
-            exercised.ChoiceArgument is null ? DamlUnit.Instance : RestValueDecoder.ToDamlValue(exercised.ChoiceArgument),
-            exercised.ExerciseResult is null ? DamlUnit.Instance : RestValueDecoder.ToDamlValue(exercised.ExerciseResult),
+            payloads.Argument,
+            payloads.Result,
             exercised.Consuming ?? false,
             RestWireConversions.ToPartyList(exercised.ActingParties),
             RestWireConversions.ToPartyList(exercised.WitnessParties),
@@ -86,27 +89,24 @@ internal static class RestTransactionTreeProjector
         var templateId = created.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
                 $"CreatedEvent for contract '{created.ContractId}' has no templateId");
-        var createArgument = created.CreateArgument
-            ?? throw MalformedResponse.MissingRequiredField(
-                $"CreatedEvent for contract '{created.ContractId}' has no createArgument");
         var runtimeTemplateId = RestWireConversions.ToRuntimeIdentifier(templateId);
 
         return new TreeEvent.Created(
             TreeShape.EventIdOf(nodeId),
             created.ContractId,
             runtimeTemplateId,
-            RestValueDecoder.ToDamlRecord(createArgument),
+            RestPayloadDecoder.CreateArgumentOf(created, runtimeTemplateId),
             RestWireConversions.ToPartyList(created.WitnessParties),
             RestWireConversions.ToPartyList(created.Signatories),
             RestWireConversions.ToPartyList(created.Observers),
-            RestWireConversions.ContractKeyOf(created, runtimeTemplateId),
+            RestPayloadDecoder.ContractKeyOf(created, runtimeTemplateId),
             created.CreatedAt)
         {
             InterfaceIds = ToInterfaceIds(created),
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(WireCreatedEvent created)
     {
         if (created.InterfaceViews is not { Count: > 0 } views)
         {
@@ -121,7 +121,7 @@ internal static class RestTransactionTreeProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interfaceId");
             interfaceIds.Add(RestWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static int NodeIdOf(WireEvent? evt) =>

@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
     <PackageReference Include="Daml.Runtime" />
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
   </ItemGroup>
 
@@ -23,20 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared with the gRPC/REST integration test projects: the generated bindings and DAR for
-         the Marker template, and for the Asset template with the Holding interface it implements,
-         so the parity bodies exercise the exact same template-family and interface-family round
-         trips across the Fake, REST, and gRPC providers. -->
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
-             Link="Generated\Richtypes\Marker.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Asset.cs"
-             Link="Generated\Richtypes\Asset.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\IHolding.cs"
-             Link="Generated\Richtypes\IHolding.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\HoldingView.cs"
-             Link="Generated\Richtypes\HoldingView.cs" />
-    <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
-          Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\RichTypesDar.cs"
+             Link="Shared\RichTypesDar.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,238 @@
+// Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
+
+using Com.Daml.Ledger.Api.V2;
+using Daml.Runtime.Data;
+using AwesomeAssertions;
+using Xunit;
+using ProtoIdentifier = Com.Daml.Ledger.Api.V2.Identifier;
+using RuntimeCommands = Daml.Runtime.Commands;
+
+namespace Canton.Ledger.Grpc.Client.Tests;
+
+public class GrpcSubscribeRequestBuilderTests
+{
+    private static readonly ProtoIdentifier TemplateId = new()
+    {
+        PackageId = "pkg",
+        ModuleName = "Module",
+        EntityName = "Template",
+    };
+
+    [Fact]
+    public void BuildGetUpdatesRequest_includes_readAs_party_in_FiltersByParty_even_with_single_actAs()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: null, toOffset: null);
+
+        var filtersByParty = request.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
+        filtersByParty.Keys.Should().BeEquivalentTo(["alice", "observer"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildGetUpdatesRequest_uses_the_AcsDelta_shape_for_both_template_and_interface_markers(bool isInterface)
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
+            submitter, TemplateId, fromOffset: null, toOffset: null, isInterface: isInterface);
+
+        request.UpdateFormat.IncludeTransactions.TransactionShape.Should().Be(TransactionShape.AcsDelta);
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_sets_IncludeReassignments_mirroring_the_transaction_template_filter()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: null, toOffset: null);
+
+        var reassignments = request.UpdateFormat.IncludeReassignments;
+        reassignments.Should().NotBeNull();
+        reassignments.FiltersByParty.Keys.Should().BeEquivalentTo(
+            request.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty.Keys);
+        reassignments.FiltersByParty["alice"].Cumulative[0].TemplateFilter.TemplateId.EntityName
+            .Should().Be("Template");
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_sets_IncludeReassignments_with_an_interface_filter_for_interface_markers()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
+            submitter, TemplateId, fromOffset: null, toOffset: null, isInterface: true);
+
+        var cumulative = request.UpdateFormat.IncludeReassignments.FiltersByParty["alice"].Cumulative[0];
+        cumulative.InterfaceFilter.InterfaceId.EntityName.Should().Be("Template");
+        cumulative.InterfaceFilter.IncludeInterfaceView.Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_passes_fromOffset_through_as_BeginExclusive()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: 42L, toOffset: null);
+
+        request.BeginExclusive.Should().Be(42L);
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_sets_EndInclusive_when_toOffset_supplied()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: 10L, toOffset: 20L);
+
+        request.HasEndInclusive.Should().BeTrue();
+        request.EndInclusive.Should().Be(20L);
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_leaves_EndInclusive_unset_when_toOffset_is_null()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: 10L, toOffset: null);
+
+        request.HasEndInclusive.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_defaults_BeginExclusive_to_zero_when_fromOffset_is_null()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: null, toOffset: null);
+
+        request.BeginExclusive.Should().Be(0L);
+    }
+
+    [Fact]
+    public void BuildGetActiveContractsRequest_passes_activeAtOffset_through()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetActiveContractsRequest(submitter, TemplateId, activeAtOffset: 999L);
+
+        request.ActiveAtOffset.Should().Be(999L);
+    }
+
+    [Fact]
+    public void BuildGetActiveContractsRequest_carries_package_name_reference_into_template_filter()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party>());
+        var packageNameTemplateId = new ProtoIdentifier
+        {
+            PackageId = "#richtypes",
+            ModuleName = "RichTypes",
+            EntityName = "RichRecord",
+        };
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetActiveContractsRequest(submitter, packageNameTemplateId, activeAtOffset: 0L);
+
+        request.EventFormat.FiltersByParty["alice"].Cumulative[0].TemplateFilter.TemplateId.PackageId
+            .Should().Be("#richtypes");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BuildGetUpdatesRequest_gives_every_party_its_own_Filters_instance(bool isInterface)
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice", (Party)"bob" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
+            submitter, TemplateId, fromOffset: null, toOffset: null, isInterface: isInterface);
+
+        var filtersByParty = request.UpdateFormat.IncludeTransactions.EventFormat.FiltersByParty;
+        filtersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            TemplateFilter = new TemplateFilter { TemplateId = TemplateId },
+        });
+
+        filtersByParty["bob"].Cumulative.Should().HaveCount(1);
+        filtersByParty["observer"].Cumulative.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void BuildGetUpdatesRequest_gives_reassignments_an_EventFormat_independent_of_the_transaction_one()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(submitter, TemplateId, fromOffset: null, toOffset: null);
+
+        var transactions = request.UpdateFormat.IncludeTransactions.EventFormat;
+        transactions.Verbose = false;
+        transactions.FiltersByParty.Remove("observer");
+        transactions.FiltersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            WildcardFilter = new WildcardFilter(),
+        });
+
+        var reassignments = request.UpdateFormat.IncludeReassignments;
+        reassignments.Verbose.Should().BeTrue();
+        reassignments.FiltersByParty.Keys.Should().BeEquivalentTo(["alice", "observer"]);
+        reassignments.FiltersByParty["alice"].Cumulative.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void BuildTransactionFormat_gives_every_party_its_own_wildcard_Filters_instance()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice", (Party)"bob" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var filtersByParty = GrpcSubscribeRequestBuilder.BuildTransactionFormat(submitter).EventFormat.FiltersByParty;
+        filtersByParty["alice"].Cumulative.Add(new CumulativeFilter
+        {
+            TemplateFilter = new TemplateFilter { TemplateId = TemplateId },
+        });
+
+        filtersByParty["bob"].Cumulative.Should().BeEmpty();
+        filtersByParty["observer"].Cumulative.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildTransactionFormat_covers_every_actAs_and_readAs_party_with_a_wildcard_filter()
+    {
+        var submitter = new RuntimeCommands.SubmitterInfo(
+            new HashSet<Party> { (Party)"alice" },
+            new HashSet<Party> { (Party)"observer" });
+
+        var transactionFormat = GrpcSubscribeRequestBuilder.BuildTransactionFormat(submitter);
+
+        transactionFormat.TransactionShape.Should().Be(TransactionShape.LedgerEffects);
+        var filtersByParty = transactionFormat.EventFormat.FiltersByParty;
+        filtersByParty.Keys.Should().BeEquivalentTo(["alice", "observer"]);
+        filtersByParty.Values.Should().OnlyContain(filters => filters.Cumulative.Count == 0);
+    }
+}

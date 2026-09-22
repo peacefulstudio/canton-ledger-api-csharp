@@ -52,11 +52,11 @@ internal static class GrpcTransactionResultProjector
         return new TransactionResult(
             transaction.UpdateId,
             LedgerWireConversions.ToLedgerOffset(transaction.Offset),
-            createdContracts,
-            archivedContractIds,
+            EquatableArray.Create(createdContracts),
+            EquatableArray.Create(archivedContractIds),
             LedgerWireConversions.ToCommandId(transaction.CommandId))
         {
-            ExercisedEvents = exercisedEvents,
+            ExercisedEvents = EquatableArray.Create(exercisedEvents),
         };
     }
 
@@ -89,7 +89,7 @@ internal static class GrpcTransactionResultProjector
         where TMarker : IDamlType =>
         TransactionResultFolds.Project(
             outcome,
-            result => TransactionResultFolds.ToCreatedContractId<TMarker>(result, MarkerMatcher<TMarker>.Matches));
+            result => TransactionResultFolds.ToCreatedContractId<TMarker>(result, GrpcMarkerMatcher<TMarker>.Matches));
 
     public static ExerciseOutcome<TResult> ProjectChoiceResult<TResult>(
         ExerciseOutcome<TransactionResult> outcome, ChoiceName choice) =>
@@ -97,7 +97,7 @@ internal static class GrpcTransactionResultProjector
             outcome,
             result => TransactionResultFolds.ToChoiceResult<TResult>(result, choice));
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
     {
         if (created.InterfaceViews.Count == 0)
         {
@@ -112,20 +112,26 @@ internal static class GrpcTransactionResultProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
             interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
+
+    internal static Value RequireChoiceArgument(ProtoExercisedEvent exercised) =>
+        exercised.ChoiceArgument
+        ?? throw MalformedResponse.MissingRequiredField(
+            $"ExercisedEvent for contract '{exercised.ContractId}' has no choice_argument");
+
+    internal static Value RequireExerciseResult(ProtoExercisedEvent exercised) =>
+        exercised.ExerciseResult
+        ?? throw MalformedResponse.MissingRequiredField(
+            $"ExercisedEvent for contract '{exercised.ContractId}' has no exercise_result");
 
     private static RuntimeExercisedEvent ToRuntimeExercisedEvent(ProtoExercisedEvent exercised)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
                 $"ExercisedEvent for contract '{exercised.ContractId}' has no template_id");
-        var argument = exercised.ChoiceArgument is null
-            ? DamlUnit.Instance
-            : GrpcValueDecoder.ToDamlValue(exercised.ChoiceArgument);
-        var result = exercised.ExerciseResult is null
-            ? DamlUnit.Instance
-            : GrpcValueDecoder.ToDamlValue(exercised.ExerciseResult);
+        var argument = GrpcValueDecoder.ToDamlValue(RequireChoiceArgument(exercised));
+        var result = GrpcValueDecoder.ToDamlValue(RequireExerciseResult(exercised));
         var interfaceId = exercised.InterfaceId is null
             ? null
             : LedgerWireConversions.ToRuntimeIdentifier(exercised.InterfaceId);

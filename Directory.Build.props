@@ -18,6 +18,7 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.5.0-preview.1</PackageValidationBaselineVersion>
 
     <!-- Package metadata -->
     <Authors>Peaceful Studio OÜ</Authors>
@@ -30,12 +31,12 @@
     <PackageIcon>icon.png</PackageIcon>
 
     <!-- Canton/Daml version - controls which proto version to download -->
-    <CantonVersion>3.5.9</CantonVersion>
+    <CantonVersion>3.5.18</CantonVersion>
 
     <!-- Package versioning. AssemblyVersion/FileVersion derive from $(Version) — the
          release-numeric prefix plus a zero revision — so they can never lag the package
          version again, including when CI overrides Version with a pre-release suffix. -->
-    <Version>0.5.0-preview.1</Version>
+    <Version>0.5.0-preview.2</Version>
     <VersionReleasePrefix>$(Version)</VersionReleasePrefix>
     <VersionReleasePrefix Condition="$(VersionReleasePrefix.Contains('-'))">$(VersionReleasePrefix.Substring(0, $(VersionReleasePrefix.IndexOf('-'))))</VersionReleasePrefix>
     <VersionReleasePrefix Condition="$(VersionReleasePrefix.Contains('+'))">$(VersionReleasePrefix.Substring(0, $(VersionReleasePrefix.IndexOf('+'))))</VersionReleasePrefix>

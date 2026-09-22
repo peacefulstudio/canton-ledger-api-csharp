@@ -1,7 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-using Richtypes;
+using Canton.Ledger.Grpc.Client.Integration.Tests;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Rest.Client.Integration.Tests;
@@ -25,8 +26,7 @@ public class RestReassignmentConformanceTests
 
     private static readonly TimeSpan ObservationTimeout = TimeSpan.FromSeconds(30);
 
-    private static string DarPath() => Path.Combine(
-        AppContext.BaseDirectory, "testdata", "richtypes", "richtypes.dar");
+    private static string DarPath() => RichTypesDar.Path;
 
     [Fact]
     public async Task SubmitReassignmentAsync_round_trips_an_Asset_from_source_to_target()

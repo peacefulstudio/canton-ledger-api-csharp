@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
   </ItemGroup>
 
@@ -18,10 +19,6 @@
     <ProjectReference Include="..\..\src\Canton.Ledger.Grpc.Client\Canton.Ledger.Grpc.Client.csproj" />
     <ProjectReference Include="..\..\src\Canton.Ledger.Pqs.Client\Canton.Ledger.Pqs.Client.csproj" />
     <ProjectReference Include="..\Canton.Ledger.Testing.Localnet\Canton.Ledger.Testing.Localnet.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

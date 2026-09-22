@@ -227,11 +227,11 @@ public class ClientCredentialsOptionsTests
         {
             ClientId = "id",
             ClientSecret = "secret",
-            Domain = "dev-peaceful.eu.auth0.com"
+            Domain = "auth.example.com"
         };
 
         options.TokenGenerationEndpoint
-            .Should().Be(new Uri("https://dev-peaceful.eu.auth0.com/oauth/token"));
+            .Should().Be(new Uri("https://auth.example.com/oauth/token"));
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public class ClientCredentialsOptionsTests
         {
             ClientId = "id",
             ClientSecret = "secret",
-            Domain = "dev-peaceful.eu.auth0.com"
+            Domain = "auth.example.com"
         };
 
         var results = Validate(options);
@@ -257,7 +257,7 @@ public class ClientCredentialsOptionsTests
     [InlineData("https://auth.example.com:8443", "https://auth.example.com:8443/oauth/token")]
     [InlineData("https://auth.example.com/tenant-a", "https://auth.example.com/tenant-a/oauth/token")]
     [InlineData("https://auth.example.com/tenant-a/", "https://auth.example.com/tenant-a/oauth/token")]
-    [InlineData("  dev-peaceful.eu.auth0.com  ", "https://dev-peaceful.eu.auth0.com/oauth/token")]
+    [InlineData("  auth.example.com  ", "https://auth.example.com/oauth/token")]
     public void TokenGenerationEndpoint_composes_from_Domain(string domain, string expected)
     {
         var options = new ClientCredentialsOptions

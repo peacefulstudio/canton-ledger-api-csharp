@@ -15,7 +15,7 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 /// other arm wrapped.
 /// <para>
 /// Getting that asymmetry wrong is invisible at run time. An arm key that does not bind leaves its
-/// payload in the extension bag, both arms read as null, and <c>ContractStreamProjector</c> reports
+/// payload in the extension bag, both arms read as null, and <c>RestContractStreamProjector</c> reports
 /// <c>Unclassified(UnclassifiedKind.Unknown, "empty-reassignment-event")</c> — no exception and no
 /// log, with the reassignment simply gone. Unit tests over hand-written literals cannot catch it
 /// either, because a literal written to the wrong shape agrees with a decoder written to the wrong

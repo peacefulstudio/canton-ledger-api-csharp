@@ -3,12 +3,12 @@
 
 using System.Data.Common;
 using System.Diagnostics;
-using System.Text.Json;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Telemetry;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
+using Daml.Runtime.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -23,21 +23,11 @@ internal sealed partial class PqsClient : IPqsClient
 {
     private static readonly ActivitySource ActivitySource = LedgerActivitySource.Create<PqsClient>();
 
-    internal static readonly JsonSerializerOptions DefaultJsonSerializerOptions = CreateSharedDefaultJsonOptions();
-
-    private static JsonSerializerOptions CreateSharedDefaultJsonOptions()
-    {
-        var options = PqsClientOptions.CreateDefaultJsonSerializerOptions();
-        options.MakeReadOnly(populateMissingResolver: true);
-        return options;
-    }
-
     private const string SelectActiveSql = "SELECT contract_id, payload FROM active(@typeId)";
     private const string PageLimitParameter = "@pageLimit";
     private const string PageOffsetParameter = "@pageOffset";
 
     private readonly PqsClientOptions _options;
-    private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PqsClient> _logger;
     private readonly Func<CancellationToken, ValueTask<NpgsqlConnection>> _openConnectionAsync;
     private readonly Func<NpgsqlCommand, CancellationToken, Task<DbDataReader>> _executeReaderAsync;
@@ -54,7 +44,6 @@ internal sealed partial class PqsClient : IPqsClient
         Func<NpgsqlCommand, CancellationToken, Task<DbDataReader>>? executeReaderAsync = null)
     {
         _options = ValidateOptions(options);
-        _jsonOptions = options.JsonSerializerOptions ?? DefaultJsonSerializerOptions;
         _logger = logger ?? NullLogger<PqsClient>.Instance;
         _openConnectionAsync = openConnectionAsync ?? OpenConnectionFromOptionsAsync;
         _executeReaderAsync = executeReaderAsync ?? ExecuteReaderDirectlyAsync;
@@ -89,7 +78,7 @@ internal sealed partial class PqsClient : IPqsClient
     /// <inheritdoc />
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         return ExecuteQueryManyAsync<T>(
             SelectActiveSql,
@@ -101,7 +90,7 @@ internal sealed partial class PqsClient : IPqsClient
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         PqsPage page,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -121,7 +110,7 @@ internal sealed partial class PqsClient : IPqsClient
             GetDamlTypeId<TInterface>(),
             configureParams: null,
             (contractId, payloadJson) =>
-                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson, _jsonOptions),
+                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson),
             cancellationToken);
 
     /// <inheritdoc />
@@ -138,7 +127,7 @@ internal sealed partial class PqsClient : IPqsClient
             GetDamlTypeId<TInterface>(),
             cmd => AddPageParameters(cmd, page),
             (contractId, payloadJson) =>
-                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson, _jsonOptions),
+                DeserializeInterfaceContract<TInterface, TView>(contractId, payloadJson),
             cancellationToken);
     }
 
@@ -146,7 +135,7 @@ internal sealed partial class PqsClient : IPqsClient
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(
         PqsFilter filter,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
 
@@ -162,7 +151,7 @@ internal sealed partial class PqsClient : IPqsClient
         PqsFilter filter,
         PqsPage page,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(page);
@@ -182,7 +171,7 @@ internal sealed partial class PqsClient : IPqsClient
     public Task<Contract<T>?> QueryOneAsync<T>(
         PqsFilter filter,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
 
@@ -197,7 +186,7 @@ internal sealed partial class PqsClient : IPqsClient
     public Task<Contract<T>?> FetchByIdAsync<T>(
         ContractId<T> contractId,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(contractId);
 
@@ -263,12 +252,12 @@ internal sealed partial class PqsClient : IPqsClient
         string sql,
         Action<NpgsqlCommand>? configureParams,
         CancellationToken cancellationToken)
-        where T : ITemplate =>
+        where T : ITemplate, IDamlRecord<T> =>
         ExecuteProjectingQueryManyAsync(
             sql,
             TemplateExtensions.GetTemplateId<T>(),
             configureParams,
-            (contractId, payloadJson) => DeserializeContract<T>(contractId, payloadJson, _jsonOptions),
+            (contractId, payloadJson) => DeserializeContract<T>(contractId, payloadJson),
             cancellationToken);
 
     private Task<IReadOnlyList<TItem>> ExecuteProjectingQueryManyAsync<TItem>(
@@ -307,7 +296,7 @@ internal sealed partial class PqsClient : IPqsClient
         string sql,
         Action<NpgsqlCommand>? configureParams,
         CancellationToken cancellationToken)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         var templateId = TemplateExtensions.GetTemplateId<T>();
 
@@ -324,7 +313,7 @@ internal sealed partial class PqsClient : IPqsClient
                 {
                     if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                     {
-                        var contract = DeserializeContract<T>(reader.GetString(0), reader.GetString(1), _jsonOptions);
+                        var contract = DeserializeContract<T>(reader.GetString(0), reader.GetString(1));
                         LogQueryOneResult(_logger, "found", templateId);
                         return contract;
                     }
@@ -384,33 +373,16 @@ internal sealed partial class PqsClient : IPqsClient
     internal static bool IsTypeNotFoundError(PostgresException ex) =>
         ex.SqlState == "P0001" && ex.MessageText.StartsWith("Identifier not found:", StringComparison.Ordinal);
 
-    internal static Contract<T> DeserializeContract<T>(
-        string contractId,
-        string payloadJson,
-        JsonSerializerOptions jsonOptions) where T : ITemplate
-    {
-        var payload = JsonSerializer.Deserialize<T>(payloadJson, jsonOptions)
-            ?? throw new InvalidOperationException(
-                $"Failed to deserialize PQS payload for contract '{contractId}' " +
-                $"as template '{typeof(T).FullName ?? typeof(T).Name}'.");
-
-        return new Contract<T>(new ContractId<T>(contractId), payload);
-    }
+    internal static Contract<T> DeserializeContract<T>(string contractId, string payloadJson)
+        where T : ITemplate, IDamlRecord<T> =>
+        new(new ContractId<T>(contractId), T.FromRecord(DamlLfJsonReader.ReadRecord<T>(payloadJson)));
 
     internal static InterfaceContract<TInterface, TView> DeserializeInterfaceContract<TInterface, TView>(
         string contractId,
-        string payloadJson,
-        JsonSerializerOptions jsonOptions)
+        string payloadJson)
         where TInterface : IDamlInterface, IHasView<TView>
-        where TView : IDamlRecord<TView>
-    {
-        var view = JsonSerializer.Deserialize<TView>(payloadJson, jsonOptions)
-            ?? throw new InvalidOperationException(
-                $"Failed to deserialize PQS interface view for contract '{contractId}' " +
-                $"as view '{typeof(TView).FullName ?? typeof(TView).Name}'.");
-
-        return new InterfaceContract<TInterface, TView>(new ContractId<TInterface>(contractId), view);
-    }
+        where TView : IDamlRecord<TView> =>
+        new(new ContractId<TInterface>(contractId), TView.FromRecord(DamlLfJsonReader.ReadRecord<TView>(payloadJson)));
 
     /// <summary>
     /// Builds the package-name-qualified identifier PQS <c>active()</c> expects

@@ -46,7 +46,7 @@ internal static class GrpcTransactionTreeProjector
                 children => Close(evt.Exercised, nodeId, children))
             : new TreeNodeContent.Leaf(ToCreatedNode(evt, nodeId));
 
-    private static TreeEvent Close(ProtoExercisedEvent exercised, int nodeId, IReadOnlyList<TreeEvent> children)
+    private static TreeEvent Close(ProtoExercisedEvent exercised, int nodeId, EquatableArray<TreeEvent> children)
     {
         var templateId = exercised.TemplateId
             ?? throw MalformedResponse.MissingRequiredField(
@@ -58,8 +58,8 @@ internal static class GrpcTransactionTreeProjector
             LedgerWireConversions.ToRuntimeIdentifier(templateId),
             exercised.InterfaceId is null ? null : LedgerWireConversions.ToRuntimeIdentifier(exercised.InterfaceId),
             exercised.Choice,
-            exercised.ChoiceArgument is null ? DamlUnit.Instance : GrpcValueDecoder.ToDamlValue(exercised.ChoiceArgument),
-            exercised.ExerciseResult is null ? DamlUnit.Instance : GrpcValueDecoder.ToDamlValue(exercised.ExerciseResult),
+            GrpcValueDecoder.ToDamlValue(GrpcTransactionResultProjector.RequireChoiceArgument(exercised)),
+            GrpcValueDecoder.ToDamlValue(GrpcTransactionResultProjector.RequireExerciseResult(exercised)),
             exercised.Consuming,
             LedgerWireConversions.ToPartyList(exercised.ActingParties),
             LedgerWireConversions.ToPartyList(exercised.WitnessParties),
@@ -99,7 +99,7 @@ internal static class GrpcTransactionTreeProjector
         };
     }
 
-    private static IReadOnlyList<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
+    private static EquatableArray<RuntimeIdentifier> ToInterfaceIds(ProtoCreatedEvent created)
     {
         if (created.InterfaceViews.Count == 0)
         {
@@ -114,7 +114,7 @@ internal static class GrpcTransactionTreeProjector
                     $"an interface view on CreatedEvent for contract '{created.ContractId}' has no interface_id");
             interfaceIds.Add(LedgerWireConversions.ToRuntimeIdentifier(interfaceId));
         }
-        return interfaceIds;
+        return EquatableArray.Create(interfaceIds);
     }
 
     private static int NodeIdOf(Event evt) => evt.EventCase switch

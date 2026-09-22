@@ -4,7 +4,6 @@
 using Canton.Ledger.Abstractions;
 using Daml.Runtime.Outcomes;
 using Google.Protobuf;
-using Google.Rpc;
 using Grpc.Core;
 using GrpcStatus = Google.Rpc.Status;
 
@@ -34,17 +33,13 @@ internal static class DamlErrorParser
             return new ParsedLedgerError.Unstructured(exception.Status.Detail, statusCode);
         }
 
-        var errorInfo = ExtractErrorInfo(status);
+        var errorInfo = GrpcErrorDetails.FindErrorInfo(status);
         if (errorInfo is null)
         {
             return WithoutErrorInfo(exception.StatusCode, status.Message, statusCode);
         }
 
-        var metadata = new Dictionary<string, string>(errorInfo.Metadata.Count, StringComparer.Ordinal);
-        foreach (var kvp in errorInfo.Metadata)
-        {
-            metadata[kvp.Key] = kvp.Value;
-        }
+        var metadata = GrpcErrorDetails.ToMetadata(errorInfo);
 
         return new ParsedLedgerError.Structured(
             ParsedLedgerError.MapCategory(metadata.TryGetValue(CategoryMetadataKey, out var raw) ? raw : null),
@@ -79,25 +74,5 @@ internal static class DamlErrorParser
         {
             return null;
         }
-    }
-
-    private static ErrorInfo? ExtractErrorInfo(GrpcStatus status)
-    {
-        foreach (var detail in status.Details)
-        {
-            if (detail.Is(ErrorInfo.Descriptor))
-            {
-                try
-                {
-                    return detail.Unpack<ErrorInfo>();
-                }
-                catch (InvalidProtocolBufferException)
-                {
-                    return null;
-                }
-            }
-        }
-
-        return null;
     }
 }

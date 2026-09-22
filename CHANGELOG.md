@@ -21,6 +21,189 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Security
 
+## [0.5.0-preview.2] - 2026-09-22
+
+The second preview of the `0.5.0` window, and three changes dominate it.
+
+  - Payload decoding moves wholesale onto generated code. Every Daml payload the JSON transport and the PQS client read — create arguments, contract keys, choice arguments, exercise results, interface views — is now read against the type generated for it rather than guessed at, so the assembly generated for each Daml package you read must be loaded in the process.
+  - Mutual TLS becomes configurable. One typed options surface carries client identity and private certificate-authority trust, and both ledger transports and the OAuth token client bind their own section of it.
+  - A rejected or unreadable command says why. Completions carry the participant's structured error id and metadata beside the status code, and a command that committed but whose response could not be decoded is its own outcome arm instead of an infrastructure error indistinguishable from one that never committed.
+
+Regenerate your bindings with `dpm codegen-cs` at `0.5.0-preview.3`, and raise your `Daml.Runtime` pin to match: the emitter scopes each type to its Daml module name, so namespaces move, and it emits the static Daml-LF JSON readers the new decode path calls. Bindings emitted at `0.5.0-preview.2` or earlier carry no such reader and will not decode against this release. Read the BREAKING section first — nine records gain or reorder positional members, and the five `StreamError` records among them break signatures `0.5.0-preview.1` already published.
+
+### Added
+
+A typed, transport-neutral mutual-TLS surface.
+
+  - `TlsOptions` in `Canton.Ledger.Kernel.Security` carries client identity and certificate-authority trust in two forms each: a file-path form that binds from `IConfiguration` — `ClientCertificatePemPath` with an optional `ClientCertificateKeyPemPath`, `ClientCertificatePkcs12Path` with an optional `ClientCertificatePkcs12Password`, `CertificateAuthorityBundlePemPath` — and an already-loaded form set in code, `ClientCertificate` and `CertificateAuthorities`.
+  - It implements `IValidatableObject`, so a host wiring `ValidateDataAnnotations().ValidateOnStart()` is told at startup that it named a key with no certificate, a password with no PKCS#12 file, two sources for one slot, a loaded client certificate with no private key, or an empty custom trust store.
+  - A blank PEM key path reads as absent, so a combined certificate-and-key PEM is a single path. PEM and PKCS#12 identities keep their bundled intermediate certificates, so a peer trusting only the root can build the presented chain.
+  - `IsConfigured` answers whether the instance asks for anything at all, so a host can skip registration rather than wire a no-op; a member that names no material on its own does not make it true.
+  - Certificate-store lookup by thumbprint or subject, and rotation callbacks, are deliberately out of scope.
+  - What it produces internally is `SslClientAuthenticationOptions` and nothing else: a configured identity lands on `ClientCertificateContext`, configured authorities become a `CertificateChainPolicy` with `X509ChainTrustMode.CustomRootTrust`, and with no authorities configured no chain policy is installed so the operating-system trust store still applies. No `RemoteCertificateValidationCallback` is ever installed — one returning `true` disables validation rather than redirecting it.
+
+`TlsOptions.RevocationMode` makes peer revocation checking configurable, where the chain policy hardcoded `X509RevocationMode.NoCheck`.
+
+  - It accepts `NoCheck`, `Offline` and `Online`, and rejects an undefined numeric configuration value before the handler is built.
+  - It defaults to `NoCheck`, not `X509ChainPolicy`'s own default of `Online`, because the authorities configured here are typically a private CA publishing no reachable OCSP or CRL endpoint — against which an online check hangs for the fetch attempt on every connection and then fails the handshake anyway.
+  - It governs only when certificate authorities are configured, because it rides the chain policy that custom root trust requires. A value other than `NoCheck` with no authority source is rejected at validation rather than left silently inert.
+  - It exists because .NET reads revocation from the chain policy once one is present and stops consulting `SslClientAuthenticationOptions.CertificateRevocationCheckMode`, so a host setting that member itself is silently overridden whenever CA trust is configured. That override is undocumented; this member is the reachable way to ask.
+
+`LedgerClientOptions.Tls` presents a client certificate and trusts a private CA on the gRPC channel.
+
+  - `LedgerClientOptions` nests `TlsOptions` by value as `Tls`, exactly as it nests `RetryOptions` as `Retry`, so the file-path forms bind from a `Canton:Ledger:Tls` section and the loaded forms are set in code.
+  - All three gRPC entry points gain it together: `AddLedgerClient`, `AddAdminClient` and `AddLedgerRawGrpc` build their channel through one factory and bind the same unnamed options, so any combination of them presents the same certificate and trusts the same authorities, with no per-registration knob to diverge them.
+  - An unconfigured `Tls` attaches no certificate and no chain policy, so an existing consumer's channel keeps the trust decisions it already made: server authentication against the operating system trust store, no client certificate. It is not a no-op, though — the channel's handler now always carries an `SslClientAuthenticationOptions` built from `Tls`, and on the no-certificate path that object disables TLS session resumption. That is the mechanism of the credential-cache fix under **Security**, so a consumer who never configured TLS renegotiates where it used to resume.
+  - `Validate` recurses into `Tls` as it already does into `Retry`, so naming two client-certificate sources, a key with no certificate, or TLS material against a plaintext `http` `GrpcAddress` is refused at startup rather than at the first handshake.
+  - `ConfigureChannel` still wins, and that is now stated on it, along with the trap the ordering hides: Microsoft's own gRPC client-certificate sample assigns an `HttpClientHandler` to `GrpcChannelOptions.HttpHandler`, replacing the handler this client built rather than adjusting it, so a hook copied from that sample silently drops `KeepAlivePingDelay` and `KeepAlivePingTimeout` along with the typed TLS. Configure the handler the client built; do not assign a new one.
+
+`RestLedgerClientOptions.Tls` wires the same surface into the JSON Ledger API client.
+
+  - The nested `TlsOptions` is applied to the client's named `HttpClient`, so `Canton:Rest:Tls:ClientCertificatePkcs12Path` and `Canton:Rest:Tls:CertificateAuthorityBundlePemPath` bind from configuration like every other member.
+  - `Validate` recurses as it does for `Retry`, so incoherent TLS material, or a configured `Tls` paired with a plaintext `http` `HttpAddress`, is refused at startup.
+  - The handler action is inserted whether or not `Tls` is configured — again the mechanism of the fix under **Security**. It reuses the builder's `SocketsHttpHandler` when one is already set and constructs one otherwise, so this named client now always presents a `SocketsHttpHandler` where the `IHttpClientFactory` default `HttpClientHandler` used to stand. A plaintext `http` endpoint never consults the TLS options, but its primary handler type changes too, and a consumer composing its own handler on this named client should expect the SDK's action to run either way.
+  - A host that configures the named client itself still wins, whichever registration comes first: the typed material is applied by an action inserted at the *head* of the handler-builder action list, while every `AddHttpClient` extension appends to that same list, so the SDK's action runs first and the host's, running afterwards over a settable `PrimaryHandler`, overrides it.
+  - Two places that guarantee stops, both stated on the named client: a host that itself post-configures the same options name and also inserts at the head reverts to dependency-injection registration order between the two, and an `IHttpMessageHandlerBuilderFilter` that assigns `PrimaryHandler` before calling the next filter keeps its handler's non-TLS settings while its `SslClientAuthenticationOptions` are replaced wholesale.
+  - The common accidental case degrades safely: `UseSocketsHttpHandler` merges into the handler already in place and keeps the typed TLS, so reaching for it to set a proxy or a connection limit costs nothing. Only `ConfigurePrimaryHttpMessageHandler(Func<HttpMessageHandler>)`, which means "I am taking over the handler", drops it — and no warning is raised when both are supplied, because a delegate's contents cannot be inspected.
+  - `PooledConnectionLifetime` is preserved rather than quietly lost. It is what keeps a long-lived client honouring DNS rotation, and the factory stamps it on its default handler before the builder actions run; the action reuses that handler in place when it already is a `SocketsHttpHandler`, and sets the lifetime explicitly on one it constructs itself, where a freshly built handler would default to infinite.
+
+The OAuth token client gets its own TLS, and an explicit provider now replaces the unauthenticated fallback.
+
+  - `ClientCredentialsOptions.Tls` configures the token client independently of either ledger transport, so the client-secret POST can present its own certificate and trust a private identity-provider CA. Its path forms bind from `Canton:Auth:Tls`, its loaded forms stay code-only, and it validates at startup with the rest of the options.
+  - Configured auth TLS requires an effective `https` token endpoint and rejects plaintext `http` even where `AllowInsecureTokenEndpoint` is set, because identity and trust configuration cannot apply over plaintext transport.
+  - A TLS-configured ledger client now fails options validation at startup when `AddCantonAuth` installs the client-credentials provider and `ClientCredentialsOptions.Tls` is left unconfigured. No ledger TLS is inherited: one authentication singleton can serve both transports, so adopting either transport's material would be arbitrary.
+  - `AddCantonAuth` and `AddCantonStaticAuth` replace only the exact unkeyed no-op token provider a client registration installs, so calling either *after* registering a client now selects the explicit provider instead of being ignored. Keyed registrations stay independent, and a custom unkeyed provider already in place stays selected without being resolved or constructed — and skips the cross-TLS validation above.
+
+`RuntimeCommands.ExerciseByKeyCommand` is sendable on both transports.
+
+  - The generator emits a by-key exercise builder for every choice on a keyed template, and both command builders rejected the result with `NotSupportedException` at submission time — a call that compiled and then threw.
+  - gRPC fills the `exercise_by_key` arm of the command union and REST fills its `ExerciseByKeyCommand` member, each encoding the key through the same value encoder the choice argument already goes through.
+  - No signature changes and no new surface: a by-key exercise is submitted through `CommandsSubmission` like any other command.
+
+### Changed — BREAKING
+
+Every REST payload decodes against its generated Daml type, and the `Raw.Value` / `Raw.Record` read arms stop binding.
+
+  - A participant only ever sends idiomatic Daml-LF JSON, in which `{"party":"alice::ns1"}` is a record with a field named `party`. Read into the wire-tagged shape, a record whose field happened to be named `text`, `party`, `numeric`, `date`, `list`, `fields` or `recordId` decoded silently wrong or failed a whole page.
+  - Read arms are now all `null` and the raw JSON sits under `AdditionalProperties["idiomatic"]`; a value read that way serializes back as that JSON, so it can be forwarded into a command unchanged. **Read `AdditionalProperties["idiomatic"]` instead of the arms.**
+  - Create arguments, contract keys, choice arguments, exercise results and interface views are each read against the type generated for their template, choice or interface, on every read — the point reads, transaction and tree submissions, typed streams and the active-contract snapshot alike.
+  - The generated type is found by the payload's identifier: an exact package id first, then the single loaded type declaring the same module and entity. **Load the assembly generated for every Daml package whose payloads you read over REST.** A payload whose type is not loaded, or is claimed by more than one loaded type, throws `TemplateTypeRequiredException` naming the identifier; so does a contract key on a template whose loaded code declares no key, and a choice exercised through an interface no loaded generated interface declares.
+  - Nothing is guessed any more. The untyped read inferred `Party`, `ContractId` and `Enum` as `DamlText`, fabricating values; that inference is gone, and a payload the Daml type refuses is a `MalformedResponseException`.
+  - An exercise with no choice argument or exercise result, and a created event with no create argument, is now `MalformedResponseException` on both transports rather than a made-up `DamlUnit` or empty record. Only an absent property counts as missing, so an explicit JSON `null` — a top-level `Optional` `None` — still reaches the typed decode.
+  - Each refusal surfaces per path: point reads and transaction or tree projections throw it, typed streams yield it in band as an `Unclassified` decode failure, and after a successful submit it comes back as the new `CommittedUndecodable` outcome arm described below.
+  - Top-level lists, optionals (nested ones included), text maps, tuples and `Either` all decode: `{}` for a text-map choice is an empty map rather than unit, and `[]` for a list choice is an empty list.
+
+PQS payloads decode through the same reader, strictly, and the JSON-options surface is deleted.
+
+  - `PqsClient` reads each row's payload with the generated reader instead of `JsonSerializer.Deserialize`, for template payloads and interface views alike.
+  - The payload-returning template methods gain `where T : ITemplate, IDamlRecord<T>` — `QueryAsync<T>` in its four shapes, `QueryOneAsync<T>`, `FetchByIdAsync<T>`, and the matching fake and builder members. `ExistsAsync<T>` returns no payload and is unchanged. Generated types already satisfy it; a hand-written type must implement the reader and `FromRecord` itself.
+  - `PqsClientOptions.JsonSerializerOptions` and `PqsClientOptions.CreateDefaultJsonSerializerOptions()` are **deleted rather than deprecated**, because they configured only payload deserialization and an option silently ignored would be worse than a compile error. Delete any assignment to the former and any converter kept only for it — including the variant converter factory `0.5.0-preview.1` shipped the factory for; the generated reader decodes Daml variants, optionals and numerics itself.
+  - Decoding is strict, and an undecodable row throws `JsonException` where it used to throw `InvalidOperationException` — catch accordingly. A payload omitting an optional field's key fails naming the field, so do not run PQS with `--target-encoding-excludenulls`; a bare JSON number where an `Int64` or `Numeric` is expected is refused, PQS storing both as JSON strings by default; and a `null` payload is refused.
+  - The reader's limits are the row ceilings — 16 MiB of input, 100,000 JSON nodes, nesting depth 128 — with no knob to change them.
+
+**`CompletionStreamEvent.StreamError` reorders two positional slots, breaking a signature `0.5.0-preview.1` already published.**
+
+  - It was `(int StatusCode, string Message, DamlErrorCategory? Category = null, Exception? SourceException = null, string? ErrorId = null)`, with the error id appended last because it was built ahead of upstream's own equivalent. It is now `(int StatusCode, string Message, DamlErrorCategory? Category = null, string? ErrorId = null, Exception? SourceException = null)`, matching the fourth-slot position every sibling stream-error record upstream now uses.
+  - The `ContractEvents.StreamError` and `LedgerEvents.StreamError` builders in `Canton.Ledger.Testing` take the same order, with the same slots swapped.
+  - A consumer already pinned to `0.5.0-preview.1` is affected. `new CompletionStreamEvent.StreamError(status, message, category, exception)` now binds the exception to a `string?` and fails with `CS1503`.
+  - Name the argument — `SourceException: exception`, or `sourceException: exception` on the two builders — or supply the error id positionally ahead of it. A call using only the first two or three positional arguments is unaffected.
+  - A five-element positional pattern or deconstruction binds its fourth and fifth elements the other way round. With typed subpatterns that is a compile error; with `var` subpatterns it compiles and the two quietly swap meaning, so check any you have.
+  - Both clients now populate the error id, the interface streams included, so switching on it replaces matching on the message text.
+
+**The four stream-error records the contract, interface and active-contract streams yield gain a fourth slot in the same place, and this breaks signatures `0.5.0-preview.1` already published.**
+
+  - `ContractStreamEvent<T>.StreamError`, `AcsSnapshotEntry<T>.StreamError`, `InterfaceStreamEvent<TInterface, TView>.StreamError` and `InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError` each went from `(int StatusCode, string Message, DamlErrorCategory? Category, Exception? SourceException)` to `(int StatusCode, string Message, DamlErrorCategory? Category, string? ErrorId, Exception? SourceException)`.
+  - `new ContractStreamEvent<T>.StreamError(status, message, category, exception)` now binds the exception to a `string?` and fails with `CS1503`. Name the argument — `SourceException: exception` — or supply the error id positionally ahead of it. A call using only the first two or three positional arguments is unaffected.
+  - Four-element deconstruction and four-element positional patterns no longer match; each record deconstructs into five. A five-element `var` pattern written against the old order compiles and binds the error id and the exception the wrong way round, so check any you have.
+  - `ErrorId` is `null` when the fault carried no structured error to decode. Read it as an identity rather than parsing it; `Category` and `StatusCode` are too coarse to separate two faults needing opposite handling, and `Message` is participant prose.
+
+`Completion` and `CompletionStatus` each gain two required trailing members, so constructing either is `CS7036`.
+
+  - `Completion` gains `long PaidTrafficCost` — the confirmation-request cost the submission paid, in bytes, `0` where the participant reports none — and `TraceContext? TraceContext`, the W3C `traceparent` and `tracestate` it propagated, `null` where it propagated neither. The new `TraceContext(string Traceparent, string? Tracestate)` record rejects a null, empty or whitespace traceparent on construction and on `with`.
+  - `CompletionStatus` gains `string? ErrorId` and `IReadOnlyDictionary<string, string> Metadata`, decoded from the structured error a participant packs into its status details. **A rejected command now names why it was rejected** — `CONTRACT_NOT_FOUND`, `PARTY_NOT_KNOWN_ON_LEDGER` and the rest — where the completion stream reported only a status code and a caller had to parse the message string to tell one rejection from another.
+  - The two members match what a parsed error already carries, so the same failure observed on a completion and on a call reports the same id and the same metadata map.
+  - Both transports project all four members identically.
+  - Pass `PaidTrafficCost: 0, TraceContext: null` and `ErrorId: null, Metadata: new Dictionary<string, string>()` where you construct these records; `with` and member reads are unaffected, and deconstruction gains two elements on each. Code that builds a `Completion` reflectively, or through `System.Text.Json` constructor binding, must supply the new members.
+  - Only the structured-error detail is projected. Every other detail type is skipped, and nothing reports that one was present. Decoding never throws on wire data: no details, no structured error among them, or one that does not decode all reach you as a null id and an empty map, with the code and message projected as before. `Metadata` is never null — a null argument reads as an empty map — and it compares by entries rather than by reference, so two statuses carrying equal metadata are equal whatever order the wire produced the keys in.
+
+A committed transaction whose response cannot be decoded is its own outcome arm, not an infrastructure error.
+
+  - `ExerciseOutcome<T>` gains `CommittedUndecodable(string? UpdateId, string Message, Exception SourceException)`, and both transports report it wherever a submission was acknowledged — a 2xx over REST, an OK response over gRPC — but the response could not be read.
+  - Before, gRPC reported these as an infrastructure error with status `Internal` and REST with status 500, which a caller could not tell from a command that never committed. **Do not resubmit on this arm.** `UpdateId` is set whenever the response decoded far enough to read it; read the committed transaction back by it instead.
+  - A `switch` over `ExerciseOutcome<T>` must handle the new arm. Code that treated a 500 or an `Internal` infrastructure error as a possibly-committed decode failure should match this instead.
+  - `OneOrThrow` throws with the commit state `Committed`, the update id and the source exception as `InnerException`. `ThrowIfError` treats the arm as success, because only the response that caller discards was unreadable. The throwing submission paths are unchanged.
+  - On gRPC the submission span records it as an error with no status code, the call itself having succeeded.
+
+The upstream repin to `0.5.0-preview.3` is not source-compatible with `0.5.0-preview.1`. The listed changes were introduced at `0.5.0-preview.2`; `0.5.0-preview.3` adds the generated `__ReadDamlLfJson` readers the REST and PQS decode paths call. Bindings emitted at `0.5.0-preview.2` carry no such reader and will not decode against this release.
+
+  - Generated bindings relocate: the emitter scopes each type to its Daml module name instead of a name fabricated from the package, so a type that lived under `Richtypes` is now `RichTypes`. Regeneration is mandatory — a `using` naming the old namespace is `CS0246`.
+  - Collection-typed record members move from `IReadOnlyList<T>` to `EquatableArray<T>`, a value-type wrapper that copies on construction and compares by content: the stream events' witness-party lists, the transaction result's created-contract and archived-id lists, and the matching `Canton.Ledger.Testing` builder parameters. A collection expression at the call site is unaffected; a pre-built list or array reference wraps in `EquatableArray.Create(...)`.
+  - `Completion.ActAs` follows the same retyping. It is declared here rather than upstream, so nothing forced it — but both transports already built it from the helper that produces the witness-party lists, so leaving it would have meant one member comparing by reference beside an identical one comparing by content.
+  - `ExerciseOutcome<T>.Many` drops its `Count` parameter, derives the count from the ids, and throws below two of them — `Many` exists to report more than one match, and `None` and `One` are the arms for zero and one. `LedgerOutcomes.Many<T>(2, ["cid-1", "cid-2"])` becomes `LedgerOutcomes.Many<T>(["cid-1", "cid-2"])`.
+  - `ExerciseOutcome<T>.DamlError.Metadata` is a defensive copy compared by content, where it wrapped what it was given and compared by reference. Two errors built from equal dictionaries are now equal, and mutating the source no longer changes the error after the fact. A test asserting the metadata is the same instance now fails — assert equivalence instead.
+
+`ICantonLedgerClient.QueryActiveAsync<TInterface, TView>` returns `IReadOnlyList<ActiveContract<InterfaceContract<TInterface, TView>>>` instead of bare interface contracts.
+
+  - Each row preserves the contract's last-update offset and synchronizer id from the snapshot.
+  - Replace `row.Id` and `row.View` with `row.Contract.Id` and `row.Contract.View`, and read the offset from `row.LastUpdateOffset`.
+  - That per-contract offset is descriptive; it is not the terminal checkpoint needed to resume the snapshot.
+
+`OptionsServiceCollectionExtensions.AddValidatedOptions<TOptions>()` is now `internal`.
+
+  - It was a registration detail used only by `AddLedgerClient`, `AddPqsClient` and `AddRestLedgerClient`, and callers of those entry points are unaffected.
+  - Both overloads are one line of standard options wiring, so write the one you used inline: `services.AddOptions<TOptions>().Bind(section).ValidateOnStart()` for the `IConfiguration` form, `services.AddOptions<TOptions>().Configure(configure).ValidateOnStart()` for the delegate form.
+  - Neither supplied validation rules of its own; they returned the `OptionsBuilder<TOptions>` for you to chain onto. Keep exactly the validation chain you already had, and do not add `ValidateDataAnnotations()` if you were not already calling it — an options type carrying data-annotation attributes it never had to satisfy would start failing your host at startup.
+
+### Changed
+
+- Dependency minimums move. `Daml.Runtime` and `Daml.Ledger.Abstractions` go from `0.5.0-preview.1` to `0.5.0-preview.3`; `Refit` from `15.2.0` to `16.1.0`; `OpenTelemetry` from `1.18.0` to `1.19.1`; `Grpc.Net.Client` from `2.83.0` to `2.84.0`; `Google.Protobuf` from `3.36.1` to `3.36.2`; every `Microsoft.Extensions.*` reference from `10.0.11` to `10.0.12`; and `Polly.Core` from `8.7.0` to `8.8.0`.
+  - A consumer holding an explicit lower pin on any of these must raise it, or the restore reports a downgrade.
+  - The `Refit` move is a major version only because upstream builds its .NET 11 assemblies without runtime-async; the `net10.0` public API is unchanged and the raw Refit surface regenerates byte-identical.
+  - `Npgsql` and `Npgsql.OpenTelemetry` are unchanged at `10.0.3`.
+
+### Fixed
+
+- `RuntimeCommands.CreateAndExerciseCommand` is sendable on both transports, closing the same gap the by-key command closed.
+  - It is public API on the pinned runtime, and both builders rejected it with `NotSupportedException` at submission time — reachable only by a hand-written consumer, the generator emitting no create-and-exercise builder of its own.
+  - gRPC fills the `create_and_exercise` arm and REST its `CreateAndExerciseCommand` member. The create arguments are a record rather than a value, unlike every other command's choice argument, so they are encoded with the record encoder the plain create already uses.
+- A keyed template's contract key arriving as idiomatic bare-scalar JSON no longer loses a REST stream window or reports a false write-side failure.
+  - The wire converter deserialized every value, contract keys included, into the wire-tagged shape, so a participant's bare `"alice::1220ab…"` for a `Party`-typed key threw before any decoder saw it.
+  - On the read side that cost the entire stream window the moment one contract's key hit it, every event being classified through the same converter. On the write side a create that had committed came back as an infrastructure error with status 500.
+  - The converter now stashes an unparsed scalar or array token verbatim, and every path that reads a contract key routes it through the key reader the loaded generated template carries.
+- An interface stream over REST decodes the implementing template's contract key.
+  - A created event read through an interface carries the concrete template id, but key decoding inspected only the interface marker — and interface markers declare no template key, so an idiomatic key took the untyped decoder, failed, and degraded that row to unclassified.
+  - The projector now resolves the loaded implementing template by the event's identifier and decodes against its declared key type. Template streams and events without keys are unchanged.
+- `InterfaceContract` no longer discards the contract key on an interface active-contract read.
+  - The snapshot entry already carried the decoded key beside the id and payload, but only those two reached the contract, so a keyed contract read through `QueryActiveAsync` came back with no way to read the key it was queried by.
+  - `InterfaceContract` gains a `Key` init property. It is additive: the existing two-parameter deconstruction and every positional construction already compiled against `0.5.0-preview.1` are unchanged.
+- `TryExerciseAsync<TResult>` and `TryCreateAsync<TTemplate>` over REST decode against the requested type instead of failing before the typed path runs.
+  - Every event's payload was decoded untyped before the choice-result or created-contract fold could apply the caller's own type, so a choice returning the idiomatic, compact JSON a live participant actually sends threw during submission itself — regardless of whether `TResult` could have decoded it.
+  - The matching exercised choice's result, matched by choice name, and the matching created contract's payload, matched by template, are routed through the typed reader.
+  - A payload that cannot be decoded against the requested type comes back as a `CommittedUndecodable` outcome carrying the reason and the `UpdateId`, rather than being decoded as something else. The command committed — read the transaction by its `UpdateId` instead of resubmitting.
+  - A `TResult` with no Daml mapping at all, such as `Uri` for a numeric result, is a separate case worth knowing before you upgrade: the typed fold runs after the response envelope, so it throws `NotSupportedException` out of `TryExerciseAsync` rather than returning an outcome. The command has still committed, so do not treat that exception as an uncommitted call and resubmit.
+- A bare empty exercise result, `{}`, resolves against the choice's own Daml type instead of being read as unit unconditionally.
+  - A live participant sends `{}` for a unit-valued result — present, not absent — and it was read as unit whatever the choice actually returns, so a choice returning a genuinely empty record or an empty text map was decoded as unit too: a decode failure quietly became confident wrong data.
+  - The generated choice descriptor resolves the shape now, as it does every other REST payload: a unit-returning choice decodes to unit, an empty record to an empty record, and an empty text map to an empty text map.
+  - LocalNet conformance coverage pins the unit case against a live participant.
+- A gRPC contract stream reports an undecodable contract key as a `MalformedResponseException`.
+  - The stream projector decoded a created event's key without the wrapper its three sibling paths use, so a key the converter refused was logged as a bare `InvalidOperationException` or `NotSupportedException` instead of an exception naming what failed to decode.
+  - The stream entry is still unclassified with a decode-failure kind; only the logged cause changes.
+- `FakeLedgerClient.CompletionStreamAsync` honours `beginExclusiveOffset`.
+  - The fake replayed every staged completion on every call whatever offset the caller passed, so a consumer testing its own reopen loop could not catch resuming from the wrong offset: replaying an already-observed completion looked identical to resuming past it, which no participant can produce.
+  - Staged events are now filtered to those strictly past the offset, and a window opened past the last staged offset yields nothing and ends — matching how the contract-stream offset window on this fake already behaved.
+  - The signature is unchanged; only a caller that passed a non-zero offset and relied on the replay sees a different, now-correct result.
+- `PqsHealthCheck` uses the DI-registered `NpgsqlDataSource` when one is present, matching `PqsClient`.
+  - When a host registers a `NpgsqlDataSource` through DI whose endpoint or credentials differ from `PqsClientOptions.ConnectionString`, `PqsHealthCheck.OpenConnectionAsync` previously opened a connection directly from `ConnectionString` rather than from that data source. The readiness probe could therefore report healthy for the wrong database, or report unhealthy for a working client. `PqsHealthCheck` now resolves its connection from the DI-registered source when one is present, exactly as `PqsClient` does.
+
+### Security
+
+- A TLS connection configured with no client certificate no longer presents one that another connection in the same process configured.
+  - On Windows, `SslStream` hands a handshake configuring no client identity the credential structure an earlier handshake in the same process built around one, so a server asking for client authentication received the other connection's certificate. This was measured on windows-amd64, where a handshake configuring no certificate presented the certificate an unrelated handshake had used.
+  - It is `dotnet/runtime#134180`, open against milestone 12.0.0 and sitting below this library's TLS surface; `dotnet/runtime#28586` records that no supported managed API isolates credentials per connection.
+  - The no-client-certificate path now disables TLS resumption, which participates in the credential cache key, so those handshakes get a cache entry no certificate-bearing handshake ever writes to. Certificate-bearing connections are unchanged, and the guard runs on every platform so the shipped path is the one the test suite exercises.
+  - It is reached only by a process opening two differently-configured TLS connections, and it covers a connection whose TLS options are left unconfigured: every transport now builds its `SslClientAuthenticationOptions` unconditionally rather than only when something is configured, so a connection at its defaults lands in the certificate-less cache entry. No certificate and no chain policy are attached where none was configured.
+  - One visible consequence: the REST client and the token client now always present a `SocketsHttpHandler` as their primary handler, where an unconfigured TLS surface previously left the factory's default `HttpClientHandler` in place.
+
 ## [0.5.0-preview.1] - 2026-09-08
 
 This is the breaking release of the preview window, and three changes dominate it.

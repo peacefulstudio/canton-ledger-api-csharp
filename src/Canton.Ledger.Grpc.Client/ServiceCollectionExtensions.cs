@@ -4,6 +4,7 @@
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client.Raw;
 using Canton.Ledger.Kernel.Authentication;
+using Canton.Ledger.Kernel.Authentication.TokenGeneration;
 using Canton.Ledger.Kernel.DependencyInjection;
 using Daml.Ledger.Abstractions;
 using Microsoft.Extensions.Configuration;
@@ -33,12 +34,13 @@ public static class ServiceCollectionExtensions
     /// validated at startup, so half-configured auth (e.g. <c>ClientSecret</c> set without
     /// <c>ClientId</c>) fails loudly instead of silently falling back to unauthenticated.
     /// When no auth values are present the clients run unauthenticated via
-    /// <see cref="ITokenProvider.None"/>. Any pre-existing <see cref="ITokenProvider"/>
-    /// registration (e.g. from <c>AddCantonStaticAuth</c>) wins and suppresses
-    /// <c>Canton:Auth</c> binding entirely, so leftover auth config cannot fail startup
-    /// when an explicit provider has been chosen. Prefer this over the per-client overloads
-    /// so consumers and their deployment config (env vars, Helm charts, appsettings) agree
-    /// on a single canonical wiring.
+    /// <see cref="ITokenProvider.None"/>. The exact unkeyed <see cref="ITokenProvider.None"/>
+    /// fallback installed by an earlier client registration does not suppress auth binding.
+    /// Any other pre-existing unkeyed <see cref="ITokenProvider"/> registration (e.g. from
+    /// <c>AddCantonStaticAuth</c>) wins and suppresses <c>Canton:Auth</c> binding entirely, so
+    /// leftover auth config cannot fail startup when an explicit provider has been chosen.
+    /// Prefer this over the per-client overloads so consumers and their deployment config
+    /// (env vars, Helm charts, appsettings) agree on a single canonical wiring.
     /// </remarks>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">The root configuration (sections read by convention).</param>
@@ -51,7 +53,9 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         var auth = configuration.GetSection("Canton:Auth");
-        if (HasAnyConfiguredValue(auth) && !services.Any(d => d.ServiceType == typeof(ITokenProvider)))
+        if (HasAnyConfiguredValue(auth) && !services.Any(d => d.ServiceType == typeof(ITokenProvider)
+            && !d.IsKeyedService
+            && !ReferenceEquals(d.ImplementationInstance, ITokenProvider.None)))
             services.AddCantonAuth(auth);
 
         AddLedgerOptions(services, configuration.GetSection("Canton:Ledger"));
@@ -345,6 +349,7 @@ public static class ServiceCollectionExtensions
         services.AddValidatedOptions<LedgerClientOptions>(configuration)
             .ValidateDataAnnotations();
 
+        AddAuthTlsValidation(services);
         services.TryAddSingleton(ITokenProvider.None);
     }
 
@@ -353,6 +358,35 @@ public static class ServiceCollectionExtensions
         services.AddValidatedOptions<LedgerClientOptions>(configure)
             .ValidateDataAnnotations();
 
+        AddAuthTlsValidation(services);
         services.TryAddSingleton(ITokenProvider.None);
+    }
+
+    private static void AddAuthTlsValidation(IServiceCollection services)
+    {
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<LedgerClientOptions>, AuthTlsOptionsValidator>());
+    }
+
+    private sealed class AuthTlsOptionsValidator(
+        IServiceProvider serviceProvider,
+        IOptions<ClientCredentialsOptions> authOptions) : IValidateOptions<LedgerClientOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, LedgerClientOptions options)
+        {
+            if (name != Options.DefaultName)
+                return ValidateOptionsResult.Skip;
+
+            if (serviceProvider.GetService<ClientCredentialsRegistration>() is null)
+                return ValidateOptionsResult.Success;
+
+            return options.Tls.IsConfigured
+                && !authOptions.Value.Tls.IsConfigured
+                    ? ValidateOptionsResult.Fail(
+                        "LedgerClientOptions.Tls is configured while client-credentials authentication "
+                        + "uses an unconfigured ClientCredentialsOptions.Tls. Configure TLS separately "
+                        + "for the token endpoint.")
+                    : ValidateOptionsResult.Success;
+        }
     }
 }

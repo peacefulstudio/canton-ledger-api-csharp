@@ -4,7 +4,7 @@
 openapi: 3.0.3
 info:
     title: Canton Ledger API (proto-derived)
-    version: 3.5.9
+    version: 3.5.18
 paths:
     /v2/commands/async/submit:
         post:

@@ -22,7 +22,10 @@ public static class ExerciseOutcomeExtensions
     /// <c>Operation</c> extension property. A <see cref="ExerciseOutcome{T}.DamlError"/>
     /// outcome surfaces its category, error id, and metadata on the exception; an
     /// <see cref="ExerciseOutcome{T}.InfraError"/> outcome surfaces its transport status
-    /// code and source exception.
+    /// code and source exception. A <see cref="ExerciseOutcome{T}.CommittedUndecodable"/> outcome
+    /// throws with <see cref="LedgerOperationException.CommitState"/> of
+    /// <see cref="CommitState.Committed"/> and, when the response was decoded far enough to read
+    /// one, the committed transaction's <see cref="LedgerOperationException.UpdateId"/>.
     /// </summary>
     /// <param name="outcome">The outcome to unwrap.</param>
     /// <param name="operationName">
@@ -46,6 +49,7 @@ public static class ExerciseOutcomeExtensions
                 .WithOperation(operationName),
             ExerciseOutcome<T>.DamlError damlError => throw damlError.ToException(operationName),
             ExerciseOutcome<T>.InfraError infraError => throw infraError.ToException(operationName),
+            ExerciseOutcome<T>.CommittedUndecodable undecodable => throw undecodable.ToException(operationName),
             _ => throw new LedgerOperationException(
                     $"{operationName}: unexpected outcome {outcome.GetType().Name}.")
                 .WithOperation(operationName),
@@ -76,8 +80,9 @@ public static class ExerciseOutcomeExtensions
     /// Throws a contextual <see cref="LedgerOperationException"/> for a
     /// <see cref="ExerciseOutcome{T}.DamlError"/> or
     /// <see cref="ExerciseOutcome{T}.InfraError"/> outcome and returns silently otherwise —
-    /// for callers that discard the result and treat <c>One</c>, <c>None</c>, and
-    /// <c>Many</c> alike as success.
+    /// for callers that discard the result and treat <c>One</c>, <c>None</c>, <c>Many</c>, and
+    /// <c>CommittedUndecodable</c> alike as success: the command committed, and only the response
+    /// this caller discards could not be decoded.
     /// </summary>
     /// <param name="outcome">The outcome to check.</param>
     /// <param name="operationName">
@@ -115,6 +120,15 @@ public static class ExerciseOutcomeExtensions
                 $"{operationName}: infrastructure error [{error.StatusCode}]: {error.Message}",
                 error.StatusCode,
                 error.Category,
+                error.SourceException)
+            .WithOperation(operationName);
+
+    private static LedgerOperationException ToException<T>(
+        this ExerciseOutcome<T>.CommittedUndecodable error,
+        string operationName) =>
+        new LedgerOperationException(
+                $"{operationName}: committed but undecodable: {error.Message}",
+                error.UpdateId,
                 error.SourceException)
             .WithOperation(operationName);
 }

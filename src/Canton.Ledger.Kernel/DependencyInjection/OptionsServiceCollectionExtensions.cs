@@ -10,7 +10,7 @@ namespace Canton.Ledger.Kernel.DependencyInjection;
 /// <summary>
 /// Shared helpers for registering options that are bound and validated eagerly at startup.
 /// </summary>
-public static class OptionsServiceCollectionExtensions
+internal static class OptionsServiceCollectionExtensions
 {
     /// <summary>
     /// Registers <typeparamref name="TOptions"/>, binds it from <paramref name="configuration"/>, and

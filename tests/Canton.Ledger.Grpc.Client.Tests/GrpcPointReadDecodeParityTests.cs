@@ -55,6 +55,8 @@ public sealed class GrpcPointReadDecodeParityTests : PointReadDecodeParityTests
                 ContractId = "00aa",
                 TemplateId = TemplateId,
                 Choice = "Accept",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 LastDescendantNodeId = 0,
             };
             exercised.ActingParties.Add(string.Empty);

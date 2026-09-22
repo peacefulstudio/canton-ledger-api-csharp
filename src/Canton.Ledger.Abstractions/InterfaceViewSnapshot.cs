@@ -11,7 +11,7 @@ namespace Canton.Ledger.Abstractions;
 
 internal static class InterfaceViewSnapshot
 {
-    public static async Task<IReadOnlyList<InterfaceContract<TInterface, TView>>> DrainAsync<TInterface, TView>(
+    public static async Task<IReadOnlyList<ActiveContract<InterfaceContract<TInterface, TView>>>> DrainAsync<TInterface, TView>(
         IAsyncEnumerable<InterfaceAcsSnapshotEntry<TInterface, TView>> snapshot,
         CancellationToken cancellationToken)
         where TInterface : IDamlInterface, IHasView<TView>
@@ -19,14 +19,21 @@ internal static class InterfaceViewSnapshot
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        var contracts = new List<InterfaceContract<TInterface, TView>>();
+        var contracts = new List<ActiveContract<InterfaceContract<TInterface, TView>>>();
         var reachedCheckpoint = false;
 
         await foreach (var entry in snapshot.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
             if (entry is InterfaceAcsSnapshotEntry<TInterface, TView>.Created created)
             {
-                contracts.Add(new InterfaceContract<TInterface, TView>(created.ContractId, created.Payload));
+                contracts.Add(
+                    new ActiveContract<InterfaceContract<TInterface, TView>>(
+                        new InterfaceContract<TInterface, TView>(created.ContractId, created.Payload)
+                        {
+                            Key = created.Key,
+                        },
+                        created.Offset,
+                        created.SynchronizerId));
                 continue;
             }
 

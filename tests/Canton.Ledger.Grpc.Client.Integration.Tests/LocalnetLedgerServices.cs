@@ -34,6 +34,7 @@ internal static class LocalnetLedgerServices
             .AddSingleton<ITokenProvider>(new LocalnetTokenProvider(fixture.TokenProvider.GetAccessTokenAsync))
             .AddLedgerClient(Configure)
             .AddAdminClient(Configure)
+            .AddLedgerRawGrpc(Configure)
             .BuildServiceProvider();
     }
 

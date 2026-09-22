@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Daml.Ledger.Abstractions" />
+    <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
   </ItemGroup>
 
@@ -20,19 +21,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared with Canton.Ledger.Grpc.Client.Integration.Tests: the Marker and Asset templates'
-         DAR and generated bindings, so both transports' conformance tests exercise the same
-         create/exercise/reassignment round trips against the same on-ledger templates. -->
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Marker.cs"
-             Link="Generated\Richtypes\Marker.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\HoldingView.cs"
-             Link="Generated\Richtypes\HoldingView.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\IHolding.cs"
-             Link="Generated\Richtypes\IHolding.cs" />
-    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\Generated\Richtypes\Asset.cs"
-             Link="Generated\Richtypes\Asset.cs" />
-    <None Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\testdata\richtypes\richtypes.dar"
-          Link="testdata\richtypes\richtypes.dar" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Canton.Ledger.Grpc.Client.Integration.Tests\RichTypesDar.cs"
+             Link="Shared\RichTypesDar.cs" />
   </ItemGroup>
 
 </Project>

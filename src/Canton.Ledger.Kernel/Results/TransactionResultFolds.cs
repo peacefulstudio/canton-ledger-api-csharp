@@ -25,6 +25,9 @@ internal static class TransactionResultFolds
                 damlError.Category, damlError.ErrorId, damlError.Message, damlError.Metadata),
             ExerciseOutcome<TransactionResult>.InfraError infraError => new ExerciseOutcome<TProjection>.InfraError(
                 infraError.StatusCode, infraError.Message, infraError.Category, infraError.SourceException),
+            ExerciseOutcome<TransactionResult>.CommittedUndecodable undecodable =>
+                new ExerciseOutcome<TProjection>.CommittedUndecodable(
+                    undecodable.UpdateId, undecodable.Message, undecodable.SourceException),
             _ => throw new InvalidOperationException($"Unhandled outcome: {outcome.GetType().Name}"),
         };
     }
@@ -47,7 +50,7 @@ internal static class TransactionResultFolds
         {
             0 => new ExerciseOutcome<ContractId<TMarker>>.None(),
             1 => new ExerciseOutcome<ContractId<TMarker>>.One(new ContractId<TMarker>(matches[0])),
-            _ => new ExerciseOutcome<ContractId<TMarker>>.Many(matches.Count, matches),
+            _ => new ExerciseOutcome<ContractId<TMarker>>.Many(EquatableArray.Create(matches)),
         };
     }
 

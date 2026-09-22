@@ -28,7 +28,7 @@ public sealed class FakePqsClientBuilder
     /// <typeparam name="T">The Daml template type the contracts are for.</typeparam>
     /// <returns>The same builder, for chaining.</returns>
     public FakePqsClientBuilder WithQueryResults<T>(params Contract<T>[] contracts)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(contracts);
         _templateResults[typeof(T)] = contracts.ToArray();

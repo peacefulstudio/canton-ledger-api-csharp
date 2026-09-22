@@ -22,7 +22,7 @@ public sealed class RestContractStreamProjectorParityTests : ContractStreamProje
     {
         var response = await ActiveContractsResponseAsync(scenario);
 
-        return ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+        return RestContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
     }
 
     protected override async Task<IReadOnlyList<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>>> ProjectActiveContractEntryAsInterfaceAsync(
@@ -30,13 +30,13 @@ public sealed class RestContractStreamProjectorParityTests : ContractStreamProje
     {
         var response = await ActiveContractsResponseAsync(scenario);
 
-        return InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
+        return RestInterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
     }
 
     protected override Task<IReadOnlyList<ContractStreamEvent<TemplateMarker>>> ProjectTransactionEventsAsync(
         TransactionEventScenario scenario)
     {
-        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = ContractStreamProjector
+        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = RestContractStreamProjector
             .ProjectTransactionEvents<TemplateMarker>(UpdateFrom(TransactionJson(scenario)).Transaction).ToList();
         return Task.FromResult(projected);
     }
@@ -44,7 +44,7 @@ public sealed class RestContractStreamProjectorParityTests : ContractStreamProje
     protected override Task<IReadOnlyList<ContractStreamEvent<TemplateMarker>>> ProjectReassignmentEventsAsync(
         ReassignmentEventScenario scenario)
     {
-        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = ContractStreamProjector
+        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = RestContractStreamProjector
             .ProjectReassignmentEvents<TemplateMarker>(UpdateFrom(ReassignmentJson(scenario)).Reassignment).ToList();
         return Task.FromResult(projected);
     }
@@ -103,6 +103,8 @@ public sealed class RestContractStreamProjectorParityTests : ContractStreamProje
                     "contractId": "{{ActiveContractScenario.ContractId}}",
                     {{TemplateIdField(scenario.EntityName, scenario.OmitTemplateId)}}
                     "choice": "{{TransactionEventScenario.ChoiceName}}",
+                    "choiceArgument": {},
+                    "exerciseResult": {},
                     "consuming": true,
                     "witnessParties": []
                   }
@@ -339,20 +341,8 @@ public sealed class RestContractStreamProjectorParityTests : ContractStreamProje
     private static string PayloadRecordJson(string value) =>
         $$"""
         {
-          "fields": [
-            {
-              "label": "{{ActiveContractScenario.OwnerFieldName}}",
-              "value": {
-                "party": "{{ActiveContractScenario.OwnerParty}}"
-              }
-            },
-            {
-              "label": "{{ActiveContractScenario.PayloadFieldName}}",
-              "value": {
-                "text": "{{value}}"
-              }
-            }
-          ]
+          "{{ActiveContractScenario.OwnerFieldName}}": "{{ActiveContractScenario.OwnerParty}}",
+          "{{ActiveContractScenario.PayloadFieldName}}": "{{value}}"
         }
         """;
 }

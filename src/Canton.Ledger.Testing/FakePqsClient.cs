@@ -46,7 +46,7 @@ public sealed class FakePqsClient : IPqsClient
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(CancellationToken cancellationToken = default)
-        where T : ITemplate =>
+        where T : ITemplate, IDamlRecord<T> =>
         Task.FromResult(StagedContracts<T>());
 
     /// <summary>
@@ -55,7 +55,7 @@ public sealed class FakePqsClient : IPqsClient
     /// re-sort by contract id — so stage contracts in the order pages should surface them.
     /// </summary>
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(PqsPage page, CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(page);
         return Task.FromResult(Slice(StagedContracts<T>(), page));
@@ -85,7 +85,7 @@ public sealed class FakePqsClient : IPqsClient
 
     /// <inheritdoc />
     public Task<IReadOnlyList<Contract<T>>> QueryAsync<T>(PqsFilter filter, CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
         return Task.FromResult(StagedContracts<T>());
@@ -100,7 +100,7 @@ public sealed class FakePqsClient : IPqsClient
         PqsFilter filter,
         PqsPage page,
         CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(page);
@@ -109,7 +109,7 @@ public sealed class FakePqsClient : IPqsClient
 
     /// <inheritdoc />
     public Task<Contract<T>?> QueryOneAsync<T>(PqsFilter filter, CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(filter);
         var staged = StagedContracts<T>();
@@ -118,7 +118,7 @@ public sealed class FakePqsClient : IPqsClient
 
     /// <inheritdoc />
     public Task<Contract<T>?> FetchByIdAsync<T>(ContractId<T> contractId, CancellationToken cancellationToken = default)
-        where T : ITemplate
+        where T : ITemplate, IDamlRecord<T>
     {
         ArgumentNullException.ThrowIfNull(contractId);
         return Task.FromResult(StagedContracts<T>().FirstOrDefault(c => c.Id.Equals(contractId)));

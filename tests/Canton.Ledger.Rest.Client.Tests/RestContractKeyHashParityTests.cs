@@ -1,16 +1,17 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Testing.Helpers;
 using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
 using WireCreatedEvent = Canton.Ledger.Rest.Client.Raw.CreatedEvent;
 using WireEvent = Canton.Ledger.Rest.Client.Raw.Event;
 using WireIdentifier = Canton.Ledger.Rest.Client.Raw.Identifier;
 using WireInterfaceView = Canton.Ledger.Rest.Client.Raw.InterfaceView;
 using WireRecord = Canton.Ledger.Rest.Client.Raw.Record;
-using WireRecordField = Canton.Ledger.Rest.Client.Raw.RecordField;
 using WireStatus = Canton.Ledger.Rest.Client.Raw.Status;
 using WireTransaction = Canton.Ledger.Rest.Client.Raw.Transaction;
 using WireValue = Canton.Ledger.Rest.Client.Raw.Value;
@@ -29,12 +30,12 @@ public sealed class RestContractKeyHashParityTests : ContractKeyHashParityTests
     };
 
     private static ContractKey? ContractStreamKey() =>
-        ContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(KeyedTransaction())
+        RestContractStreamProjector.ProjectTransactionEvents<TemplateMarker>(KeyedTransaction())
             .Should().ContainSingle().Subject
             .Should().BeOfType<ContractStreamEvent<TemplateMarker>.Created>().Subject.Key;
 
     private static ContractKey? InterfaceStreamKey() =>
-        InterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(KeyedTransaction())
+        RestInterfaceStreamProjector.ProjectTransactionEvents<InterfaceMarker, InterfaceMarkerView>(KeyedTransaction())
             .Should().ContainSingle().Subject
             .Should().BeOfType<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>.Created>().Subject.Key;
 
@@ -63,7 +64,7 @@ public sealed class RestContractKeyHashParityTests : ContractKeyHashParityTests
         ContractId = "00keyed",
         TemplateId = TemplateId,
         CreateArgument = OwnerRecord(),
-        ContractKey = new WireValue { Party = KeyParty },
+        ContractKey = FromDamlLfJson<WireValue>("\"alice::ns1\""),
         ContractKeyHash = ProjectedKeyHash,
         InterfaceViews = [ComputedInterfaceView()],
         WitnessParties = [KeyParty],
@@ -76,15 +77,12 @@ public sealed class RestContractKeyHashParityTests : ContractKeyHashParityTests
         ViewValue = AmountRecord(),
     };
 
-    private static WireRecord OwnerRecord() => new()
-    {
-        Fields = [new WireRecordField { Label = "owner", Value = new WireValue { Party = KeyParty } }],
-    };
+    private static WireRecord OwnerRecord() => FromDamlLfJson<WireRecord>("""{"owner": "alice::ns1"}""");
 
-    private static WireRecord AmountRecord() => new()
-    {
-        Fields = [new WireRecordField { Label = "amount", Value = new WireValue { Text = "view-value" } }],
-    };
+    private static WireRecord AmountRecord() => FromDamlLfJson<WireRecord>("""{"amount": "view-value"}""");
+
+    private static T FromDamlLfJson<T>(string lfJson) =>
+        JsonSerializer.Deserialize<T>(lfJson, RestRefitSettings.SerializerOptions)!;
 
     private static WireIdentifier TemplateId => new()
     {
