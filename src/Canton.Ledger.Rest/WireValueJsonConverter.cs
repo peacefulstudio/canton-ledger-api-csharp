@@ -8,14 +8,16 @@ using Canton.Ledger.Rest.Client.Raw;
 namespace Canton.Ledger.Rest.Client;
 
 /// <summary>
-/// Serializes the generated wire <see cref="Value"/> as Daml-LF JSON on the command submission path.
-/// Reading is left as our specification declares it, because decoding Daml-LF JSON back into an arm
-/// needs the template's Daml type — <c>{"owner":"alice::1220ab"}</c> does not say whether
-/// <c>owner</c> is a <c>Party</c> or a <c>Text</c>.
+/// Serializes the generated wire <see cref="Value"/> as Daml-LF JSON on the command submission path,
+/// and keeps a read value's raw Daml-LF JSON text under <see cref="WireValueNames.Idiomatic"/> without
+/// binding any arm. A participant only ever sends Daml-LF JSON, and decoding it needs the Daml type —
+/// <c>{"owner":"alice::1220ab"}</c> does not say whether <c>owner</c> is a <c>Party</c> or a
+/// <c>Text</c>, and <c>{"text":"hello"}</c> is a record with a field named <c>text</c>, not a
+/// <c>Text</c> arm.
 /// </summary>
 /// <remarks>
 /// Not retired by digital-asset/canton#527; the Daml-LF JSON encoding is type-directed and cannot be
-/// expressed in any OpenAPI schema. Deserialization arrives with the read path.
+/// expressed in any OpenAPI schema.
 /// </remarks>
 internal sealed class WireValueJsonConverter : JsonConverter<Value>
 {
@@ -23,8 +25,13 @@ internal sealed class WireValueJsonConverter : JsonConverter<Value>
     public override bool HandleNull => true;
 
     /// <inheritdoc />
-    public override Value Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        WireShapeJsonReader.Read<Value>(ref reader, options)!;
+    public override Value Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var idiomaticValue = JsonDocument.ParseValue(ref reader);
+        var value = new Value();
+        value.AdditionalProperties[WireValueNames.Idiomatic] = idiomaticValue.RootElement.GetRawText();
+        return value;
+    }
 
     /// <inheritdoc />
     public override void Write(Utf8JsonWriter writer, Value value, JsonSerializerOptions options)

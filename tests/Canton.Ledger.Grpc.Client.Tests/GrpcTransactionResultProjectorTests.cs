@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Canton.Ledger.Abstractions;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
@@ -253,5 +254,45 @@ public class GrpcTransactionResultProjectorTests
         public static DamlTypeDescriptor DamlTypeId =>
             throw new NotSupportedException(
                 "BareDamlType is a degenerate test double: it implements IDamlType but is neither a template nor an interface.");
+    }
+
+    [Fact]
+    public void Project_throws_a_malformed_response_for_an_exercised_event_without_a_choice_argument()
+    {
+        var exercised = ExercisedWithUnitPayloads();
+        exercised.ChoiceArgument = null;
+
+        var act = () => GrpcTransactionResultProjector.Project(TransactionWith(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00holding' has no choice_argument, though the Ledger API marks the field as required.");
+    }
+
+    [Fact]
+    public void Project_throws_a_malformed_response_for_an_exercised_event_without_an_exercise_result()
+    {
+        var exercised = ExercisedWithUnitPayloads();
+        exercised.ExerciseResult = null;
+
+        var act = () => GrpcTransactionResultProjector.Project(TransactionWith(exercised));
+
+        act.Should().Throw<MalformedResponseException>().Which.Message.Should().Be(
+            "Malformed response from ledger: ExercisedEvent for contract '00holding' has no exercise_result, though the Ledger API marks the field as required.");
+    }
+
+    private static ProtoExercisedEvent ExercisedWithUnitPayloads() => new()
+    {
+        ContractId = "00holding",
+        TemplateId = new ProtoIdentifier { PackageId = "impl-pkg", ModuleName = "Token.Holding", EntityName = "Holding" },
+        Choice = "Archive",
+        ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+        ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+    };
+
+    private static Transaction TransactionWith(ProtoExercisedEvent exercised)
+    {
+        var transaction = new Transaction { UpdateId = "u-exercised", Offset = 1L };
+        transaction.Events.Add(new Event { Exercised = exercised });
+        return transaction;
     }
 }

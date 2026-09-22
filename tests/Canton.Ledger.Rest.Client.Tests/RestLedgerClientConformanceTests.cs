@@ -1,10 +1,12 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Canton.Ledger.Abstractions;
 using Daml.Ledger.Abstractions;
 using Daml.Ledger.Abstractions.Testing.Conformance;
 using Daml.Runtime;
@@ -30,7 +32,7 @@ public class RestLedgerClientConformanceTests : LedgerClientConformanceTests<Res
         return new CommandIdConformanceFixture(
             client,
             (writer, commandId) => writer.TryExerciseAsync<DamlUnit>(ArchiveProbe, Reader, commandId: commandId),
-            (writer, commandId) => writer.TryCreateAsync(new RestConformanceProbe("party::alice"), Reader, commandId: commandId),
+            (writer, commandId) => writer.TryCreateAsync(new RestConformanceProbe((Party)"party::alice"), Reader, commandId: commandId),
             () => ValueTask.FromResult(participant.RecordedCommandId));
     }
 
@@ -71,7 +73,7 @@ internal sealed class RecordingSubmissionHandler : HttpMessageHandler
                   "nodeId": 0,
                   "contractId": "00probe",
                   "templateId": {{{ProbeTemplateIdJson}}},
-                  "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]},
+                  "createArgument": {"owner": "party::alice"},
                   "witnessParties": ["party::alice"]
                 }
               },
@@ -82,11 +84,11 @@ internal sealed class RecordingSubmissionHandler : HttpMessageHandler
                   "contractId": "00probe",
                   "templateId": {{{ProbeTemplateIdJson}}},
                   "choice": "Archive",
-                  "choiceArgument": {"unit": {}},
+                  "choiceArgument": {},
                   "actingParties": ["party::alice"],
                   "consuming": true,
                   "witnessParties": ["party::alice"],
-                  "exerciseResult": {"unit": {}}
+                  "exerciseResult": {}
                 }
               }
             ]
@@ -122,7 +124,7 @@ internal sealed class RecordingSubmissionHandler : HttpMessageHandler
 
 /// <summary>The Daml marker the conformance scenario's snapshot and streams are filtered to.</summary>
 /// <param name="Owner">The party the probe contract is issued to.</param>
-public sealed record RestConformanceProbe(string Owner) : ITemplate, IDamlRecord<RestConformanceProbe>
+public sealed record RestConformanceProbe([property: DamlFieldAttribute("owner")] Party Owner) : ITemplate, IDamlRecord<RestConformanceProbe>
 {
     /// <inheritdoc cref="ITemplate" />
     public static RuntimeIdentifier TemplateId { get; } = new("conformance-pkg", "Conformance.Probe", "Probe");
@@ -140,12 +142,29 @@ public sealed record RestConformanceProbe(string Owner) : ITemplate, IDamlRecord
     public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
 
     /// <inheritdoc cref="ITemplate" />
-    public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty(Owner)));
+    public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", Owner.ToDamlValue()));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+        TestRecordReader.Read(
+            json,
+            context,
+            ("owner", DamlLfJsonDecoders.ReadParty));
     /// <summary>Creates a probe from the wire record a created event carries.</summary>
     /// <returns>The probe the record decodes to.</returns>
     public static RestConformanceProbe FromRecord(DamlRecord record) =>
-        new(record.GetRequiredField("owner").As<DamlParty>().Value);
+        new(Party.FromDamlValue(record.GetRequiredField("owner").As<DamlParty>()));
+
+    /// <summary>The consuming Archive choice the conformance scenario exercises on the probe.</summary>
+    public static Choice<RestConformanceProbe, DamlUnit, DamlUnit> ChoiceArchive { get; } = new()
+    {
+        Name = new ChoiceName("Archive"),
+        Consuming = true,
+        ArgumentEncoder = unit => unit,
+        ResultDecoder = result => result.As<DamlUnit>(),
+        ArgumentDecoder = value => value.As<DamlUnit>(),
+        ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+        ResultJsonReader = DamlLfJsonDecoders.ReadUnit,
+    };
 }
 
 /// <summary>
@@ -283,7 +302,7 @@ internal sealed class ConformanceParticipantHandler : HttpMessageHandler
         offset = offset.ToString(CultureInfo.InvariantCulture),
         contractId,
         templateId,
-        createArgument = new { fields = new[] { new { label = "owner", value = new { party = "party::alice" } } } },
+        createArgument = new { owner = "party::alice" },
         witnessParties = Witnesses,
     };
 
@@ -308,11 +327,11 @@ internal sealed class ConformanceParticipantHandler : HttpMessageHandler
             contractId = "00probe",
             templateId = ProbeTemplateId,
             choice = "Archive",
-            choiceArgument = new { record = new { fields = Array.Empty<object>() } },
+            choiceArgument = new { },
             actingParties = Witnesses,
             consuming = true,
             witnessParties = Witnesses,
-            exerciseResult = new { unit = new { } },
+            exerciseResult = new { },
         },
     };
 }

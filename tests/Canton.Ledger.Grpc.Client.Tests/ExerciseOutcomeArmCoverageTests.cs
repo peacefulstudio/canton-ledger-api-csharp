@@ -11,6 +11,7 @@ public class ExerciseOutcomeArmCoverageTests
 {
     private static readonly string[] RecordedArms =
     [
+        nameof(ExerciseOutcome<object>.CommittedUndecodable),
         nameof(ExerciseOutcome<object>.DamlError),
         nameof(ExerciseOutcome<object>.InfraError),
         nameof(ExerciseOutcome<object>.Many),

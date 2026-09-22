@@ -13,11 +13,19 @@ internal sealed partial class RestLedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// The participant reports the hierarchy implicitly, as node ids on the events of the ordinary
     /// ledger-effects response: each exercise states the highest node id in the subtree it caused, so
     /// the subtree rooted at an exercise is exactly that node-id interval and the tree is rebuilt from
     /// one response rather than a second request. Node-id gaps left by the participant's own party
     /// filtering are normal and tolerated.
+    /// </para>
+    /// <para>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="submission"/> is <see langword="null"/>.</exception>
     public Task<ExerciseOutcome<TransactionTree>> TrySubmitAndWaitForTransactionTreeAsync(

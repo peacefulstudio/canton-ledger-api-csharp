@@ -3,7 +3,7 @@
 
 using Canton.Ledger.Testing.Localnet;
 using Peaceful.Canton.Localnet.Testing;
-using Richtypes;
+using Daml.Codegen.Testing.Conformance.RichTypes;
 using Xunit;
 
 namespace Canton.Ledger.Grpc.Client.Integration.Tests;

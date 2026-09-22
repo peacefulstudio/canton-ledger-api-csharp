@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
@@ -109,6 +111,7 @@ public sealed class LedgerUnboundedStreamingParityTests
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
         public static Holding FromRecord(DamlRecord record) =>
             new();
     }

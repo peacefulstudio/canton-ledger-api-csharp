@@ -158,7 +158,7 @@ public sealed class LedgerClientReassignmentWriteTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForReassignmentAsync_records_an_undecodable_response_as_an_activity_error()
+    public async Task TrySubmitAndWaitForReassignmentAsync_reports_an_undecodable_response_as_CommittedUndecodable_and_records_an_activity_error()
     {
         StubSubmitAndWaitForReassignment(new ProtoV2.SubmitAndWaitForReassignmentResponse());
 
@@ -170,18 +170,18 @@ public sealed class LedgerClientReassignmentWriteTests : IDisposable
         var outcome = await CreateClient()
             .TrySubmitAndWaitForReassignmentAsync<TemplateMarker>(submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var infra = outcome.Should()
-            .BeOfType<ExerciseOutcome<ContractStreamEvent<TemplateMarker>>.InfraError>().Subject;
-        infra.StatusCode.Should().Be((int)StatusCode.Internal);
-        infra.Message.Should().StartWith("Could not decode the reassignment in the ledger response");
-        infra.SourceException.Should().BeOfType<NullReferenceException>();
+        var undecodable = outcome.Should()
+            .BeOfType<ExerciseOutcome<ContractStreamEvent<TemplateMarker>>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().BeNull();
+        undecodable.Message.Should().StartWith("Could not decode the reassignment in the ledger response");
+        undecodable.SourceException.Should().BeOfType<NullReferenceException>();
 
         var activity = capture.Activities.Should()
             .ContainSingle(a => a.OperationName.EndsWith(
                 nameof(ICantonLedgerClient.TrySubmitAndWaitForReassignmentAsync), StringComparison.Ordinal))
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
-        activity.GetTagItem(ActivityHelper.RpcGrpcStatusCode).Should().Be((int)StatusCode.Internal);
+        activity.GetTagItem(ActivityHelper.ErrorType).Should().Be("CommittedUndecodable");
     }
 
     private static ProtoV2.SubmitAndWaitForReassignmentResponse Reassigned(ProtoV2.UnassignedEvent unassigned) =>

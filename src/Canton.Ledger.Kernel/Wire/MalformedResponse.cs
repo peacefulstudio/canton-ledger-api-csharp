@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text.Json;
 using Canton.Ledger.Abstractions;
 
 namespace Canton.Ledger.Kernel.Wire;
@@ -36,7 +37,7 @@ internal static class MalformedResponse
         new($"the transaction at {lookupDescription} could not be decoded: {DetailOf(decodeFailure)}", decodeFailure);
 
     private static bool IsUndecodableWireValue(Exception exception) =>
-        exception is ArgumentException or InvalidOperationException or NotSupportedException
+        exception is ArgumentException or InvalidOperationException or NotSupportedException or JsonException
         && !IsWireDecodeFailure(exception);
 
     private static string DetailOf(Exception decodeFailure) =>

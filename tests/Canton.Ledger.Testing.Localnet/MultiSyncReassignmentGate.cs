@@ -11,7 +11,7 @@ namespace Canton.Ledger.Testing.Localnet;
 /// regression that disables cross-synchronizer reassignment — there, a skip must not read as a
 /// pass.
 /// </summary>
-public static class MultiSyncReassignmentGate
+internal static class MultiSyncReassignmentGate
 {
     public const string RequireEnvironmentVariable = "CANTON_REASSIGNMENT_REQUIRE_MULTI_SYNC";
 

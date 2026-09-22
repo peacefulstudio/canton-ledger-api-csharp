@@ -1,6 +1,7 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
@@ -16,15 +17,12 @@ using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 namespace Canton.Ledger.Rest.Client.Tests;
 
 /// <summary>
-/// Pins the interim behavior of the quarantined REST exercise path: the bytes it submits,
-/// which no live test covers while the quarantine holds; a transaction carrying an
-/// ArchivedEvent and no ExercisedEvent, which the participant returned under the ACS-delta
-/// default the client no longer requests and which must still fail loudly if it ever
-/// arrives; and the ledger-effects transaction measured live, whose choiceArgument and
-/// exerciseResult arrive as an untyped empty wire Value. The quarantined suites are
-/// <c>RestLedgerWriterConformanceTests</c> and <c>RestLedgerWriterParityTests</c>; when the
-/// decode fix lands and either response pin breaks, lift the quarantine and close the
-/// tracking issue.
+/// Pins the REST exercise path's behavior on two shapes a live participant is known to send:
+/// the bytes it submits; a transaction carrying an ArchivedEvent and no ExercisedEvent, which
+/// the participant returned under the ACS-delta default the client no longer requests and
+/// which must still fail loudly if it ever arrives; and a ledger-effects transaction whose
+/// choiceArgument and exerciseResult arrive as <c>{}</c>, the Daml-LF JSON encoding of Unit,
+/// decoded against the choice's declared Unit types.
 /// </summary>
 public sealed class RestExerciseQuarantinePinTests : IDisposable
 {
@@ -42,15 +40,28 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
 
     private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "QuarantinePinTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, []);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(json, context);
         public static TestTemplate FromRecord(DamlRecord record) =>
             new();
+
+        public static Choice<TestTemplate, DamlUnit, DamlUnit> ChoiceArchive { get; } = new()
+        {
+            Name = new ChoiceName("Archive"),
+            Consuming = true,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = result => result.As<DamlUnit>(),
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = DamlLfJsonDecoders.ReadUnit,
+        };
     }
 
     private RestLedgerClient Client() => new(_factory, Options.Create(new RestLedgerClientOptions
@@ -61,7 +72,7 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
     private static ExerciseCommand ArchiveCommand() => ExerciseCommand.For(
         new ContractId<TestTemplate>("00marker"), new ChoiceName("Archive"), DamlRecord.Create());
 
-    private const string UntypedExerciseResultTransaction =
+    private const string UnitExerciseResultTransaction =
         """
         {
           "transaction": {
@@ -73,7 +84,7 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
                 "ExercisedEvent": {
                   "offset": "7",
                   "contractId": "00marker",
-                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
+                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "QuarantinePinTemplate"},
                   "choice": "Archive",
                   "choiceArgument": {},
                   "actingParties": ["party::alice"],
@@ -110,30 +121,26 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
 
         decodeFailure.Message.Should().Be("Transaction contains no exercised event for choice 'Archive'.");
         SubmittedTransactionShape().Should().Be("TRANSACTION_SHAPE_LEDGER_EFFECTS",
-            "the exercise path asks for ledger effects so the ExercisedEvent is present at all; "
-            + "the remaining quarantine cause is the untyped payload decode");
+            "the exercise path asks for ledger effects so the ExercisedEvent is present at all");
     }
 
     [Fact]
-    public async Task TryExerciseAsync_returns_InfraError_when_the_ledger_effects_exerciseResult_arrives_as_an_untyped_empty_Value()
+    public async Task TryExerciseAsync_returns_One_with_Unit_when_the_ledger_effects_exerciseResult_arrives_as_an_empty_object()
     {
-        _transport.WithResponse(HttpStatusCode.OK, UntypedExerciseResultTransaction);
+        _transport.WithResponse(HttpStatusCode.OK, UnitExerciseResultTransaction);
         var client = Client();
 
         var outcome = await client.TryExerciseAsync<DamlUnit>(
             ArchiveCommand(), Alice, cancellationToken: TestContext.Current.CancellationToken);
 
-        var infraError = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.InfraError>().Subject;
-        infraError.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
-        infraError.Message.Should().Be(
-            "Server returned a malformed transaction: Malformed response from ledger: "
-            + "Received a wire Value with no recognisable sum case set.");
+        var one = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.One>().Subject;
+        one.Result.Should().Be(DamlUnit.Instance);
     }
 
     [Fact]
     public async Task TryExerciseAsync_submits_the_choice_against_the_contract_the_command_names()
     {
-        _transport.WithResponse(HttpStatusCode.OK, UntypedExerciseResultTransaction);
+        _transport.WithResponse(HttpStatusCode.OK, UnitExerciseResultTransaction);
         var client = Client();
 
         await client.TryExerciseAsync<DamlUnit>(
@@ -148,12 +155,11 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
         command.EnumerateObject().Select(arm => arm.Name).Should().Equal("ExerciseCommand");
 
         var exercise = command.GetProperty("ExerciseCommand");
-        exercise.GetProperty("templateId").GetString().Should().Be("pkg:Module:Template");
+        exercise.GetProperty("templateId").GetString().Should().Be("pkg:Module:QuarantinePinTemplate");
         exercise.GetProperty("contractId").GetString().Should().Be("00marker");
         exercise.GetProperty("choice").GetString().Should().Be("Archive");
         exercise.GetProperty("choiceArgument").GetRawText().Should().Be("{}",
-            "the request side already writes LF-JSON, so an empty choice argument goes out in the "
-            + "same untyped shape the response side cannot read back");
+            "the request side writes Daml-LF JSON, so a Unit choice argument goes out as an empty object");
     }
 
     private string? SubmittedTransactionShape()

@@ -136,7 +136,7 @@ public sealed class LedgerClientOutcomeTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransaction_returns_InfraError_when_created_event_misses_template_id()
+    public async Task TrySubmitAndWaitForTransaction_returns_CommittedUndecodable_when_created_event_misses_template_id()
     {
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
         transaction.Events.Add(new Event
@@ -148,14 +148,14 @@ public sealed class LedgerClientOutcomeTests : IDisposable
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        infra.StatusCode.Should().Be((int)StatusCode.Internal);
-        infra.Message.Should().Contain("template_id");
-        infra.SourceException.Should().BeOfType<MalformedResponseException>();
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("u-1");
+        undecodable.Message.Should().Contain("template_id");
+        undecodable.SourceException.Should().BeOfType<MalformedResponseException>();
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransaction_returns_InfraError_when_exercise_result_Numeric_exceeds_decimal_range()
+    public async Task TrySubmitAndWaitForTransaction_returns_CommittedUndecodable_when_exercise_result_Numeric_exceeds_decimal_range()
     {
         var transaction = new Transaction { UpdateId = "u-1", Offset = 1L };
         transaction.Events.Add(new Event
@@ -165,6 +165,7 @@ public sealed class LedgerClientOutcomeTests : IDisposable
                 ContractId = "00exer",
                 TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
                 Choice = "Accept",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = LedgerClientTestFixtures.OutOfDecimalRangeNumeric(),
             },
         });
@@ -173,10 +174,10 @@ public sealed class LedgerClientOutcomeTests : IDisposable
         var client = CreateClient();
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(MakeFooBarCreate(), cancellationToken: TestContext.Current.CancellationToken);
 
-        var infra = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        infra.StatusCode.Should().Be((int)StatusCode.Internal);
-        infra.Message.Should().Contain("Numeric");
-        infra.SourceException.Should().BeOfType<FormatException>();
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("u-1");
+        undecodable.Message.Should().Contain("Numeric");
+        undecodable.SourceException.Should().BeOfType<FormatException>();
     }
 
     [Fact]

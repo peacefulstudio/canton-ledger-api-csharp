@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Com.Daml.Ledger.Api.V2;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -119,6 +121,7 @@ internal sealed record FooBar(string Owner) : ITemplate, IDamlRecord<FooBar>
     public DamlRecord ToRecord() => DamlRecord.Create(
         DamlField.Create("owner", new DamlParty(Owner)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static FooBar FromRecord(DamlRecord record) =>
         new(record.GetRequiredField("owner").As<DamlParty>().Value);
 }

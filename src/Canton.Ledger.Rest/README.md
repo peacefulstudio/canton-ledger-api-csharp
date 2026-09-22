@@ -44,8 +44,8 @@ extracted Maven protos against the upstream tree before exporting patches.
 Exactly the artifacts `src/Canton.Ledger.Grpc/DownloadProtos.targets` already fetches,
 SHA-256-pinned there:
 
-- `com.daml:ledger-api-proto:3.5.9` (`$(CantonVersion)`)
-- `com.daml:ledger-api-value-proto:3.5.9`
+- `com.daml:ledger-api-proto:3.5.18` (`$(CantonVersion)`)
+- `com.daml:ledger-api-value-proto:3.5.18`
 - `com.google.api.grpc:proto-google-common-protos:2.58.0`
 
 ### Patch set

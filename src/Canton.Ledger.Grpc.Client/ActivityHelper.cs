@@ -18,6 +18,7 @@ internal static class ActivityHelper
     internal const string ServerPort = SemanticConventions.ServerPort;
     internal const string RpcGrpcStatusCode = "rpc.grpc.status_code";
     internal const string ErrorType = SemanticConventions.ErrorType;
+    internal const string CommittedUndecodableErrorType = "CommittedUndecodable";
 
     internal const int DefaultHttpsPort = 443;
     internal const int DefaultHttpPort = 80;
@@ -102,6 +103,14 @@ internal static class ActivityHelper
         activity.SetStatus(ActivityStatusCode.Error, message);
         activity.SetTag(RpcGrpcStatusCode, statusCode);
         activity.SetTag(ErrorType, StatusCodeName(statusCode));
+    }
+
+    public static void RecordCommittedUndecodable(this Activity? activity, string message)
+    {
+        if (activity is null) return;
+
+        activity.SetStatus(ActivityStatusCode.Error, message);
+        activity.SetTag(ErrorType, CommittedUndecodableErrorType);
     }
 
     private static string StatusCodeName(int statusCode) =>

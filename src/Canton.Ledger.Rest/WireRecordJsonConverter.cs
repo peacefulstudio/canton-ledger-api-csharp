@@ -9,14 +9,16 @@ namespace Canton.Ledger.Rest.Client;
 
 /// <summary>
 /// Serializes the generated wire <see cref="Record"/> as Daml-LF JSON on the command submission path,
-/// the shape contract payloads and record-valued choice arguments take. Reading is left as our
-/// specification declares it, because decoding Daml-LF JSON back into labelled fields needs the
-/// template's Daml type — <c>{"owner":"alice::1220ab"}</c> does not say whether <c>owner</c> is a
-/// <c>Party</c> or a <c>Text</c>.
+/// the shape contract payloads and record-valued choice arguments take, and keeps a read record's raw
+/// Daml-LF JSON text under <see cref="WireValueNames.Idiomatic"/> without binding
+/// <see cref="Record.Fields"/> or <see cref="Record.RecordId"/>. A participant only ever sends
+/// Daml-LF JSON, and decoding it back into labelled fields needs the template's Daml type —
+/// <c>{"owner":"alice::1220ab"}</c> does not say whether <c>owner</c> is a <c>Party</c> or a
+/// <c>Text</c>, and <c>{"fields":"hello"}</c> is a record with a field named <c>fields</c>.
 /// </summary>
 /// <remarks>
 /// Not retired by digital-asset/canton#527; the Daml-LF JSON encoding is type-directed and cannot be
-/// expressed in any OpenAPI schema. Deserialization arrives with the read path.
+/// expressed in any OpenAPI schema.
 /// </remarks>
 internal sealed class WireRecordJsonConverter : JsonConverter<Record>
 {
@@ -24,8 +26,15 @@ internal sealed class WireRecordJsonConverter : JsonConverter<Record>
     public override bool HandleNull => true;
 
     /// <inheritdoc />
-    public override Record Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        WireShapeJsonReader.Read<Record>(ref reader, options)!;
+    public override Record Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType is JsonTokenType.Null) return null!;
+
+        using var idiomaticRecord = JsonDocument.ParseValue(ref reader);
+        var record = new Record();
+        record.AdditionalProperties[WireValueNames.Idiomatic] = idiomaticRecord.RootElement.GetRawText();
+        return record;
+    }
 
     /// <inheritdoc />
     public override void Write(Utf8JsonWriter writer, Record value, JsonSerializerOptions options)

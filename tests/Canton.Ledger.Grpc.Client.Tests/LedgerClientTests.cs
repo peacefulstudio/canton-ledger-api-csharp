@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using System.Reflection;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Kernel.Authentication;
@@ -414,7 +416,7 @@ public sealed class LedgerClientTests : IDisposable
     }
 
     [Fact]
-    public async Task TryExerciseAsync_returns_InfraError_when_response_has_no_Transaction()
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_response_has_no_Transaction()
     {
         var response = new SubmitAndWaitForTransactionResponse();
 
@@ -426,13 +428,14 @@ public sealed class LedgerClientTests : IDisposable
 
         var outcome = await client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        var infra = outcome.Should().BeOfType<ExerciseOutcome<object>.InfraError>().Subject;
-        infra.StatusCode.Should().Be((int)StatusCode.Internal);
-        infra.Message.Should().Contain("no Transaction");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<object>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().BeNull();
+        undecodable.Message.Should().Contain("no Transaction");
+        undecodable.SourceException.Should().NotBeNull();
     }
 
     [Fact]
-    public async Task TryExerciseAsync_returns_One_when_ExercisedEvent_has_no_ExerciseResult()
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_the_ExercisedEvent_has_no_exercise_result()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -442,6 +445,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
             }
         });
 
@@ -456,7 +460,11 @@ public sealed class LedgerClientTests : IDisposable
         var outcome = await client.TryExerciseAsync<object>(
             exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        outcome.Should().BeOfType<ExerciseOutcome<object>.One>();
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<object>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("update-456");
+        undecodable.Message.Should().Be(
+            "The command committed, but its transaction could not be decoded: Malformed response from ledger: ExercisedEvent for contract '00contract123' has no exercise_result, though the Ledger API marks the field as required.");
+        undecodable.SourceException.Should().BeOfType<MalformedResponseException>();
     }
 
     [Fact]
@@ -470,6 +478,8 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
             }
         });
 
@@ -498,6 +508,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Accept",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { ContractId = "00newcontract456" }
             }
         });
@@ -527,6 +538,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
             }
         });
@@ -557,6 +569,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
             }
         });
@@ -590,6 +603,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
             }
         });
@@ -649,6 +663,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Bump",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
             }
         });
@@ -659,6 +674,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00childcontract456",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Bump",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Google.Protobuf.WellKnownTypes.Empty() }
             }
         });
@@ -853,7 +869,7 @@ public sealed class LedgerClientTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_InfraError_when_the_node_ids_cannot_form_a_tree()
+    public async Task TrySubmitAndWaitForTransactionTreeAsync_returns_CommittedUndecodable_when_the_node_ids_cannot_form_a_tree()
     {
         var transaction = new Transaction { UpdateId = "update-broken", Offset = 7L };
         transaction.Events.Add(TreeCreated(nodeId: 3, "00late"));
@@ -866,8 +882,10 @@ public sealed class LedgerClientTests : IDisposable
             new RuntimeCommands.SubmitterInfo(new HashSet<Party> { ActAs }),
             cancellationToken: TestContext.Current.CancellationToken);
 
-        outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.InfraError>()
-            .Which.Message.Should().Contain("node ids must strictly ascend");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<TransactionTree>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("update-broken");
+        undecodable.Message.Should().Contain("node ids must strictly ascend");
+        undecodable.SourceException.Should().BeOfType<MalformedTransactionTreeException>();
     }
 
     private void StubSubmitAndWaitForTransaction(
@@ -890,6 +908,7 @@ public sealed class LedgerClientTests : IDisposable
                 ContractId = "00target",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "ExecuteSwap",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = new ProtoValue { Unit = new Empty() },
             },
         });
@@ -920,6 +939,7 @@ public sealed class LedgerClientTests : IDisposable
         public DamlRecord ToRecord() => DamlRecord.Create(
             DamlField.Create("owner", new DamlParty(Owner)));
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
         public static TestTemplate FromRecord(DamlRecord record) =>
             new(record.GetRequiredField("owner").As<DamlParty>().Value);
     }

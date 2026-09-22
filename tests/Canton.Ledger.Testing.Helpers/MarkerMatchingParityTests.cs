@@ -10,8 +10,8 @@ using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
 namespace Canton.Ledger.Testing.Helpers;
 
 /// <summary>
-/// Behavioural parity suite over marker matching, run against every transport's
-/// <c>MarkerMatcher</c> through one shared set of test bodies. It pins the decisions both
+/// Behavioural parity suite over marker matching, run against each transport's
+/// marker matcher (<c>GrpcMarkerMatcher</c>, <c>RestMarkerMatcher</c>) through one shared set of test bodies. It pins the decisions both
 /// transports must agree on: that a marker is matched by module and entity name regardless of
 /// package, that an interface marker is matched only through an identity the event implements,
 /// that an unassigned event needs no client-side interface check because the participant's

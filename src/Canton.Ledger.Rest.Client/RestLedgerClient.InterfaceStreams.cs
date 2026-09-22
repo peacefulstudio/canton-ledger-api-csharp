@@ -108,13 +108,13 @@ internal sealed partial class RestLedgerClient
         if (window.Fault is { } fault)
         {
             yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
             yield break;
         }
 
         foreach (var entry in window.Entries)
         {
-            foreach (var projected in InterfaceStreamProjector.ProjectActiveContractEntry<TInterface, TView>(
+            foreach (var projected in RestInterfaceStreamProjector.ProjectActiveContractEntry<TInterface, TView>(
                 entry, _logger, effectiveOffset))
             {
                 yield return ToInterfaceAcsSnapshotEntry<TInterface, TView>(projected);
@@ -139,7 +139,7 @@ internal sealed partial class RestLedgerClient
             if (read.Fault is { } fault)
             {
                 yield return new InterfaceStreamEvent<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -162,7 +162,7 @@ internal sealed partial class RestLedgerClient
     {
         if (update.Update?.Transaction is { } transaction)
         {
-            foreach (var projected in InterfaceStreamProjector.ProjectTransactionEvents<TInterface, TView>(
+            foreach (var projected in RestInterfaceStreamProjector.ProjectTransactionEvents<TInterface, TView>(
                 transaction, _logger))
             {
                 yield return projected;
@@ -170,7 +170,7 @@ internal sealed partial class RestLedgerClient
         }
         else if (update.Update?.Reassignment is { } reassignment)
         {
-            foreach (var projected in InterfaceStreamProjector.ProjectReassignmentEvents<TInterface, TView>(
+            foreach (var projected in RestInterfaceStreamProjector.ProjectReassignmentEvents<TInterface, TView>(
                 reassignment, _logger))
             {
                 yield return projected;

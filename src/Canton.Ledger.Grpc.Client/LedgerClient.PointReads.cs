@@ -23,7 +23,7 @@ internal sealed partial class LedgerClient
         var request = new GetUpdateByOffsetRequest
         {
             Offset = offset,
-            UpdateFormat = SubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
+            UpdateFormat = GrpcSubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
         };
 
         return _invoker.InvokeTracedAsync<LedgerClient, GetUpdateResponse, TransactionResult>(
@@ -53,7 +53,7 @@ internal sealed partial class LedgerClient
         var request = new GetUpdateByIdRequest
         {
             UpdateId = updateId,
-            UpdateFormat = SubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
+            UpdateFormat = GrpcSubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
         };
 
         return _invoker.InvokeTracedAsync<LedgerClient, GetUpdateResponse, TransactionResult>(
@@ -83,7 +83,7 @@ internal sealed partial class LedgerClient
         var request = new GetUpdateByOffsetRequest
         {
             Offset = offset,
-            UpdateFormat = SubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
+            UpdateFormat = GrpcSubscribeRequestBuilder.BuildTransactionUpdateFormat(submitter),
         };
 
         return _invoker.InvokeTracedAsync<LedgerClient, GetUpdateResponse, TransactionTree>(

@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -9,7 +11,7 @@ namespace Canton.Ledger.Testing.Tests;
 
 internal sealed record DemoHolding(
     [property: DamlFieldAttribute("owner")] Party Owner,
-    [property: DamlFieldAttribute("amount")] decimal Amount) : ITemplate
+    [property: DamlFieldAttribute("amount")] decimal Amount) : ITemplate, IDamlRecord<DemoHolding>
 {
     public static Identifier TemplateId { get; } = new("test-pkg", "MiniDemo.Holding", "Holding");
     public static string PackageId => "test-pkg";
@@ -21,6 +23,7 @@ internal sealed record DemoHolding(
         DamlField.Create("owner", new DamlParty((string)Owner)),
         DamlField.Create("amount", new DamlNumeric(Amount)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static DemoHolding FromRecord(DamlRecord record) => new(
         new Party(((DamlParty)record.GetRequiredField("owner")).Value),
         ((DamlNumeric)record.GetRequiredField("amount")).Value);
@@ -36,6 +39,7 @@ internal sealed record OtherHolding(Party Owner) : ITemplate, IDamlRecord<OtherH
 
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty((string)Owner)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static OtherHolding FromRecord(DamlRecord record) =>
         new(new Party(((DamlParty)record.GetRequiredField("owner")).Value));
 }
@@ -56,6 +60,7 @@ internal sealed record DemoHoldingView([property: DamlFieldAttribute("amount")] 
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static DemoHoldingView FromRecord(DamlRecord record) =>
         new(record.GetRequiredField("amount").As<DamlNumeric>().Value);
 }
@@ -76,6 +81,7 @@ internal sealed record KeyedHoldingView([property: DamlFieldAttribute("amount")]
 {
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("amount", new DamlNumeric(Amount)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static KeyedHoldingView FromRecord(DamlRecord record) =>
         new(((DamlNumeric)record.Fields.ToDictionary(field => field.Label, field => field.Value)["amount"]).Value);
 }

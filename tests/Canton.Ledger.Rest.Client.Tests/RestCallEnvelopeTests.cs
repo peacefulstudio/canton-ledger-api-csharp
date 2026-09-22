@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using System.Net;
 using System.Text;
 using AwesomeAssertions;
@@ -24,6 +26,12 @@ public sealed class RestCallEnvelopeTests : IDisposable
     private static readonly TimeSpan ReadDeadline = TimeSpan.FromMilliseconds(50);
 
     private readonly List<StubHttpClientFactory> _factories = [];
+
+    private static readonly HashSet<string> ReportedAsCommittedUndecodable =
+    [
+        nameof(RestLedgerClient.TrySubmitAndWaitForTransactionAsync),
+        nameof(RestLedgerClient.TrySubmitAndWaitForReassignmentAsync),
+    ];
 
     private static readonly EnvelopedCall[] EnvelopedCalls =
     [
@@ -182,9 +190,7 @@ public sealed class RestCallEnvelopeTests : IDisposable
 
         var failure = await InvokeAsync(ClientWith(transport), operation);
 
-        failure.StatusCode.Should().Be(
-            (int)HttpStatusCode.InternalServerError,
-            "a thrown failure and a reported one must classify an undecodable body identically");
+        AssertClassifiedAsUndecodable(operation, failure, "an undecodable body");
         failure.Message.Should().StartWith(expectedPrefix);
     }
 
@@ -197,9 +203,7 @@ public sealed class RestCallEnvelopeTests : IDisposable
 
         var failure = await InvokeAsync(ClientWith(transport), operation);
 
-        failure.StatusCode.Should().Be(
-            (int)HttpStatusCode.InternalServerError,
-            "a thrown failure and a reported one must classify an absent body identically");
+        AssertClassifiedAsUndecodable(operation, failure, "an absent body");
         failure.Message.Should().Be(expectedMessage);
     }
 
@@ -220,6 +224,25 @@ public sealed class RestCallEnvelopeTests : IDisposable
     private static RecordingHttpHandler TimedOutTransport() =>
         new RecordingHttpHandler().WithTransportException(
             new TaskCanceledException("timed out", new TimeoutException()));
+
+    private static void AssertClassifiedAsUndecodable(string operation, CallFailure failure, string what)
+    {
+        if (ReportedAsCommittedUndecodable.Contains(operation))
+        {
+            failure.CommittedUndecodable.Should().BeTrue(
+                $"{what} after a 2xx means the command committed, so a reported outcome is CommittedUndecodable");
+            failure.StatusCode.Should().BeNull();
+            failure.UpdateId.Should().BeNull("the body was not decoded far enough to read an update id");
+            failure.SourceException.Should().NotBeNull();
+        }
+        else
+        {
+            failure.CommittedUndecodable.Should().BeFalse();
+            failure.StatusCode.Should().Be(
+                (int)HttpStatusCode.InternalServerError,
+                $"a thrown failure classifies {what} as an internal error");
+        }
+    }
 
     private static async Task<CallFailure> InvokeAsync(RestLedgerClient client, string operation)
     {
@@ -247,6 +270,12 @@ public sealed class RestCallEnvelopeTests : IDisposable
 
     private static CallFailure Reported<TResult>(ExerciseOutcome<TResult> outcome)
     {
+        if (outcome is ExerciseOutcome<TResult>.CommittedUndecodable undecodable)
+        {
+            return new CallFailure(
+                null, undecodable.Message, null, true, undecodable.UpdateId, undecodable.SourceException);
+        }
+
         var infraError = outcome.Should().BeOfType<ExerciseOutcome<TResult>.InfraError>().Subject;
         return new CallFailure(infraError.StatusCode, infraError.Message, infraError.Category);
     }
@@ -268,7 +297,13 @@ public sealed class RestCallEnvelopeTests : IDisposable
             factory, Options.Create(new RestLedgerClientOptions { HttpAddress = "http://localhost:7575" }));
     }
 
-    private readonly record struct CallFailure(int? StatusCode, string Message, DamlErrorCategory? Category);
+    private readonly record struct CallFailure(
+        int? StatusCode,
+        string Message,
+        DamlErrorCategory? Category,
+        bool CommittedUndecodable = false,
+        string? UpdateId = null,
+        Exception? SourceException = null);
 
     private sealed record EnvelopedCall(
         string Operation, string MissingBodyMessage, string MalformedBodyPrefix);
@@ -293,13 +328,18 @@ public sealed class RestCallEnvelopeTests : IDisposable
 
     private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "EnvelopeTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
         public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(
+                json,
+                context,
+                ("owner", DamlLfJsonDecoders.ReadParty));
         public static TestTemplate FromRecord(DamlRecord record) =>
             new();
     }

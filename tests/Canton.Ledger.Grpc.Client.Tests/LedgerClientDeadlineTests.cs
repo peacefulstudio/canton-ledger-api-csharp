@@ -551,6 +551,8 @@ public sealed class LedgerClientDeadlineTests : IDisposable
                 ContractId = "00contract123",
                 TemplateId = new ProtoIdentifier { PackageId = "pkg", ModuleName = "Module", EntityName = "Template" },
                 Choice = "Archive",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
             }
         });
         return Ok(new ProtoV2.SubmitAndWaitForTransactionResponse { Transaction = transaction });

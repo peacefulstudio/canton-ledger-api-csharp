@@ -1,0 +1,488 @@
+// Copyright 2026 Peaceful Studio OÜ
+// SPDX-License-Identifier: Apache-2.0
+
+using Daml.Runtime.Serialization;
+using System.Text.Json;
+using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
+using Daml.Runtime;
+using Daml.Runtime.Contracts;
+using Daml.Runtime.Data;
+using Xunit;
+using RuntimeCommands = Daml.Runtime.Commands;
+using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
+using ProtoValue = Com.Daml.Ledger.Api.V2.Value;
+
+namespace Canton.Ledger.Grpc.Client.Tests;
+
+public class GrpcCommandBuilderTests
+{
+    private interface ITestInterface : IDamlInterface, IHasView<TestInterfaceView>
+    {
+        static Identifier IDamlInterface.InterfaceId => InterfaceId;
+        public static new Identifier InterfaceId { get; } = new("ipkg", "IModule", "IEntity");
+        static string IDamlInterface.PackageId => "ipkg";
+        static string IDamlInterface.PackageName => "interface-package";
+        static Version IDamlInterface.PackageVersion => new(0, 1, 0);
+
+        static DamlTypeDescriptor IDamlType.DamlTypeId =>
+            new(InterfaceId, DamlTypeKind.Interface, "interface-package");
+    }
+
+    private sealed record TestInterfaceView : IDamlRecord, IDamlRecord<TestInterfaceView>
+    {
+        public DamlRecord ToRecord() => DamlRecord.Create();
+
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
+        public static TestInterfaceView FromRecord(DamlRecord record) => new();
+    }
+
+    private static readonly Party Alice = new("party::alice");
+    private static readonly RuntimeCommands.CommandId TestCommandId = new("test-cmd");
+    private static readonly RuntimeIdentifier DisclosedTemplateId = new("disclosed-pkg", "Disclosed", "Contract");
+    private static readonly SynchronizerId Source = new("sync::source");
+    private static readonly SynchronizerId Target = new("sync::target");
+
+    private static GrpcCommandBuilder Builder(string? userId = "test-user") =>
+        new(new LedgerClientOptions { GrpcAddress = "https://localhost:5001", UserId = userId });
+
+    private static RuntimeCommands.CreateCommand Create() =>
+        new(new RuntimeIdentifier("pkg", "Module", "Template"), new DamlRecord(null, []));
+
+    private static RuntimeCommands.ExerciseCommand Exercise(string choice = "Archive", string cid = "00contract123") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new ContractId<LedgerClientTests.TestTemplate>(cid),
+            new RuntimeCommands.ChoiceName(choice),
+            DamlUnit.Instance);
+
+    private static RuntimeCommands.ExerciseCommand InterfaceExercise(
+        string choice = "Transfer", string cid = "00interfacecontract") =>
+        RuntimeCommands.ExerciseCommand.For<ITestInterface>(
+            new ContractId<ITestInterface>(cid),
+            new RuntimeCommands.ChoiceName(choice),
+            DamlRecord.Create(DamlField.Create("newOwner", new DamlParty("party::bob"))));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByKey(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    private static RuntimeCommands.ExerciseByKeyCommand ExerciseByScalarKey(
+        string choice = "Transfer", string steward = "party::steward") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlParty(steward),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    private static readonly DateTimeOffset LedgerTimeBound =
+        new(2026, 9, 2, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void BuildCommands_maps_a_relative_min_ledger_time_to_min_ledger_time_rel()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Relative(TimeSpan.FromSeconds(5)));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.MinLedgerTimeRel.Should().NotBeNull(
+            "a caller's do-not-commit-before bound is dropped on the floor while the field stays unset");
+        commands.MinLedgerTimeRel.ToTimeSpan().Should().Be(TimeSpan.FromSeconds(5));
+        commands.MinLedgerTimeAbs.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_maps_an_absolute_min_ledger_time_to_min_ledger_time_abs()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithMinLedgerTime(new RuntimeCommands.MinLedgerTime.Absolute(LedgerTimeBound));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.MinLedgerTimeAbs.Should().NotBeNull();
+        commands.MinLedgerTimeAbs.ToDateTimeOffset().Should().Be(LedgerTimeBound);
+        commands.MinLedgerTimeRel.Should().BeNull("the two bounds are mutually exclusive on the wire");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_both_min_ledger_time_bounds_unset_when_the_submission_imposes_none()
+    {
+        var commands = Builder().BuildCommands(
+            RuntimeCommands.CommandsSubmission.Single(Create()).WithActAs(Alice));
+
+        commands.MinLedgerTimeAbs.Should().BeNull();
+        commands.MinLedgerTimeRel.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildCommands_sets_command_id_and_workflow_id()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(new RuntimeCommands.CommandId("cmd-123"))
+            .WithWorkflowId(new RuntimeCommands.WorkflowId("workflow-456"));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.CommandId.Should().Be("cmd-123");
+        commands.WorkflowId.Should().Be("workflow-456");
+        commands.UserId.Should().Be("test-user");
+        commands.ActAs.Should().ContainSingle().Which.Should().Be("party::alice");
+    }
+
+    [Fact]
+    public void BuildCommands_generates_command_id_when_not_provided()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create()).WithActAs(Alice);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.CommandId.Should().NotBeNullOrEmpty();
+        Guid.TryParse(commands.CommandId, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildCommands_adds_create_command()
+    {
+        var createCommand = new RuntimeCommands.CreateCommand(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(
+                new RuntimeIdentifier("pkg", "Module", "Template"),
+                [new DamlField("owner", new DamlParty("party::alice"))]));
+
+        var submission = RuntimeCommands.CommandsSubmission.Single(createCommand)
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.Commands_.Should().ContainSingle();
+        commands.Commands_[0].Create.Should().NotBeNull();
+        commands.Commands_[0].Create.TemplateId.ModuleName.Should().Be("Module");
+        commands.Commands_[0].Create.TemplateId.EntityName.Should().Be("Template");
+    }
+
+    [Fact]
+    public void BuildCommands_adds_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Exercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.Commands_.Should().ContainSingle();
+        commands.Commands_[0].Exercise.Should().NotBeNull();
+        commands.Commands_[0].Exercise.ContractId.Should().Be("00contract123");
+        commands.Commands_[0].Exercise.Choice.Should().Be("Archive");
+    }
+
+    [Fact]
+    public void BuildCommands_pins_the_interface_id_on_an_interface_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(InterfaceExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exercise = commands.Commands_.Should().ContainSingle().Subject.Exercise;
+        exercise.Should().NotBeNull();
+        exercise.TemplateId.PackageId.Should().Be("ipkg");
+        exercise.TemplateId.ModuleName.Should().Be("IModule");
+        exercise.TemplateId.EntityName.Should().Be("IEntity");
+        exercise.ContractId.Should().Be("00interfacecontract");
+        exercise.Choice.Should().Be("Transfer");
+
+        var argumentField = exercise.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_adds_exercise_by_key_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exerciseByKey = commands.Commands_.Should().ContainSingle().Subject.ExerciseByKey;
+        exerciseByKey.Should().NotBeNull();
+        exerciseByKey.TemplateId.PackageId.Should().Be("pkg");
+        exerciseByKey.TemplateId.ModuleName.Should().Be("Module");
+        exerciseByKey.TemplateId.EntityName.Should().Be("Template");
+        exerciseByKey.Choice.Should().Be("Transfer");
+
+        var keyField = exerciseByKey.ContractKey.Record.Fields.Should().ContainSingle().Subject;
+        keyField.Label.Should().Be("owner");
+        keyField.Value.Party.Should().Be("party::alice");
+
+        var argumentField = exerciseByKey.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        argumentField.Label.Should().Be("newOwner");
+        argumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_writes_a_bare_scalar_exercise_by_key_key_as_the_scalar_itself()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(ExerciseByScalarKey())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var exerciseByKeyScalar = commands.Commands_.Should().ContainSingle().Subject.ExerciseByKey;
+        exerciseByKeyScalar.Should().NotBeNull();
+        var contractKey = exerciseByKeyScalar!.ContractKey;
+        contractKey.SumCase.Should().Be(
+            ProtoValue.SumOneofCase.Party,
+            "a template keyed on a bare scalar is emitted with a KeyEncoder that hands the naked "
+            + "DamlValue over, never a single-field record wrapping it");
+        contractKey.Party.Should().Be("party::steward");
+    }
+
+    private static RuntimeCommands.CreateAndExerciseCommand CreateAndExercise(
+        string choice = "Transfer", string owner = "party::alice") =>
+        new(
+            new RuntimeIdentifier("pkg", "Module", "Template"),
+            new DamlRecord(null, [new DamlField("owner", new DamlParty(owner))]),
+            new RuntimeCommands.ChoiceName(choice),
+            new DamlRecord(null, [new DamlField("newOwner", new DamlParty("party::bob"))]));
+
+    [Fact]
+    public void BuildCommands_adds_a_create_and_exercise_command()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(CreateAndExercise())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        var createAndExercise = commands.Commands_.Should().ContainSingle().Subject.CreateAndExercise;
+        createAndExercise.Should().NotBeNull();
+        createAndExercise.TemplateId.PackageId.Should().Be("pkg");
+        createAndExercise.TemplateId.ModuleName.Should().Be("Module");
+        createAndExercise.TemplateId.EntityName.Should().Be("Template");
+        createAndExercise.Choice.Should().Be("Transfer");
+
+        var createArgumentField = createAndExercise.CreateArguments.Fields.Should().ContainSingle().Subject;
+        createArgumentField.Label.Should().Be("owner");
+        createArgumentField.Value.Party.Should().Be("party::alice");
+
+        var choiceArgumentField = createAndExercise.ChoiceArgument.Record.Fields.Should().ContainSingle().Subject;
+        choiceArgumentField.Label.Should().Be("newOwner");
+        choiceArgumentField.Value.Party.Should().Be("party::bob");
+    }
+
+    [Fact]
+    public void BuildCommands_includes_read_as_parties()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithReadAs((Party)"party::observer1", (Party)"party::observer2")
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.ReadAs.Should().HaveCount(2);
+        commands.ReadAs.Should().Contain("party::observer1");
+        commands.ReadAs.Should().Contain("party::observer2");
+    }
+
+    [Fact]
+    public void BuildCommands_pins_synchronizer_id_from_submission()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithSynchronizerId(new SynchronizerId("sync::pinned"));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.SynchronizerId.Should().Be("sync::pinned");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_synchronizer_id_unset_when_submission_has_none()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.SynchronizerId.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildCommands_maps_disclosed_contracts_onto_the_wire()
+    {
+        var blob = new byte[] { 0x01, 0x02, 0x03, 0xFA };
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithDisclosedContracts(new RuntimeCommands.DisclosedContract(
+                "00disclosed", new RuntimeIdentifier("disclosed-pkg", "Disclosed", "Contract"), blob));
+
+        var commands = Builder().BuildCommands(submission);
+
+        var disclosed = commands.DisclosedContracts.Should().ContainSingle().Subject;
+        disclosed.ContractId.Should().Be("00disclosed");
+        disclosed.TemplateId.PackageId.Should().Be("disclosed-pkg");
+        disclosed.TemplateId.ModuleName.Should().Be("Disclosed");
+        disclosed.TemplateId.EntityName.Should().Be("Contract");
+        disclosed.CreatedEventBlob.ToByteArray().Should().Equal(blob);
+    }
+
+    [Fact]
+    public void BuildCommands_maps_every_disclosed_contract_in_submission_order()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId)
+            .WithDisclosedContracts(
+                new RuntimeCommands.DisclosedContract("00first", DisclosedTemplateId, new byte[] { 0x01 }),
+                new RuntimeCommands.DisclosedContract("00second", DisclosedTemplateId, new byte[] { 0x02 }));
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Select(c => c.ContractId).Should().Equal("00first", "00second");
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_disclosed_contracts_empty_when_submission_has_none()
+    {
+        var submission = RuntimeCommands.CommandsSubmission.Single(Create())
+            .WithActAs(Alice)
+            .WithCommandId(TestCommandId);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildCommands_leaves_disclosed_contracts_empty_when_submission_carries_an_empty_collection()
+    {
+        var submission = new RuntimeCommands.CommandsSubmission(
+            [Create()], ActAs: [Alice], CommandId: TestCommandId, DisclosedContracts: []);
+
+        var commands = Builder().BuildCommands(submission);
+
+        commands.DisclosedContracts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_maps_an_unassign_with_source_and_target()
+    {
+        var submission = ReassignmentSubmission
+            .Of(new UnassignCommand("00contract", Source, Target), Alice)
+            .WithCommandId(new RuntimeCommands.CommandId("cmd-1"));
+
+        var commands = Builder().BuildReassignmentCommands(submission);
+
+        commands.CommandId.Should().Be("cmd-1");
+        commands.Submitter.Should().Be("party::alice");
+        commands.UserId.Should().Be("test-user");
+        var unassign = commands.Commands.Should().ContainSingle().Subject.UnassignCommand;
+        unassign.ContractId.Should().Be("00contract");
+        unassign.Source.Should().Be("sync::source");
+        unassign.Target.Should().Be("sync::target");
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_maps_an_assign_with_reassignment_id_source_and_target()
+    {
+        var submission = ReassignmentSubmission
+            .Of(new AssignCommand("reassign-42", Source, Target), Alice)
+            .WithCommandId(new RuntimeCommands.CommandId("cmd-2"))
+            .WithWorkflowId(new RuntimeCommands.WorkflowId("wf-2"));
+
+        var commands = Builder().BuildReassignmentCommands(submission);
+
+        commands.WorkflowId.Should().Be("wf-2");
+        var assign = commands.Commands.Should().ContainSingle().Subject.AssignCommand;
+        assign.ReassignmentId.Should().Be("reassign-42");
+        assign.Source.Should().Be("sync::source");
+        assign.Target.Should().Be("sync::target");
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_mints_command_id_and_submission_id_when_omitted()
+    {
+        var submission = ReassignmentSubmission.Of(
+            new UnassignCommand("00contract", Source, Target), Alice);
+
+        var commands = Builder().BuildReassignmentCommands(submission);
+
+        Guid.TryParse(commands.CommandId, out _).Should().BeTrue();
+        Guid.TryParse(commands.SubmissionId, out _).Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_projects_a_supplied_submission_id_unchanged()
+    {
+        var submission = ReassignmentSubmission
+            .Of(new AssignCommand("reassign-1", Source, Target), Alice)
+            .WithSubmissionId("sub-1");
+
+        var commands = Builder().BuildReassignmentCommands(submission);
+
+        commands.SubmissionId.Should().Be("sub-1");
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_rejects_an_unassign_with_an_empty_contract_id_naming_the_field()
+    {
+        var submission = ReassignmentSubmission.Of(
+            new UnassignCommand("", Source, Target), Alice);
+
+        var act = () => Builder().BuildReassignmentCommands(submission);
+
+        act.Should().Throw<ArgumentException>()
+            .Which.ParamName.Should().Be("unassign contract id");
+    }
+
+    [Fact]
+    public void BuildReassignmentCommands_rejects_an_assign_with_an_empty_reassignment_id_naming_the_field()
+    {
+        var submission = ReassignmentSubmission.Of(
+            new AssignCommand("", Source, Target), Alice);
+
+        var act = () => Builder().BuildReassignmentCommands(submission);
+
+        act.Should().Throw<ArgumentException>()
+            .Which.ParamName.Should().Be("assign reassignment id");
+    }
+
+    public static TheoryData<string, IReassignmentCommand> DefaultSynchronizerIdCommands => new()
+    {
+        { "unassign Source", new UnassignCommand("00contract", default, Target) },
+        { "unassign Target", new UnassignCommand("00contract", Source, default) },
+        { "assign Source", new AssignCommand("reassign-1", default, Target) },
+        { "assign Target", new AssignCommand("reassign-1", Source, default) },
+    };
+
+    [Theory]
+    [MemberData(nameof(DefaultSynchronizerIdCommands))]
+    public void BuildReassignmentCommands_rejects_a_default_SynchronizerId_before_building_the_proto(
+        string position, IReassignmentCommand command)
+    {
+        var submission = ReassignmentSubmission.Of(command, Alice);
+
+        var act = () => Builder().BuildReassignmentCommands(submission);
+
+        act.Should().Throw<InvalidOperationException>(
+                $"an uninitialized {position} synchronizer id cannot silently reach the wire")
+            .WithMessage("*default (uninitialized) SynchronizerId*");
+    }
+}

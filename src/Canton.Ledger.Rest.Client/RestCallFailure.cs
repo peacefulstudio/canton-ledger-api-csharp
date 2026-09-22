@@ -15,5 +15,5 @@ internal abstract record RestCallFailure
 
     internal sealed record Transport(int StatusCode, string Message, Exception Cause) : RestCallFailure;
 
-    internal sealed record Undecodable(string Message, Exception? Cause) : RestCallFailure;
+    internal sealed record Undecodable(string Message, Exception? Cause, string? UpdateId) : RestCallFailure;
 }

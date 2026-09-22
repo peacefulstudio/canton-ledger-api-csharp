@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using AwesomeAssertions;
 using Canton.Ledger.Abstractions;
 using Canton.Ledger.Grpc.Client;
@@ -38,6 +40,7 @@ public class LedgerMinLedgerTimeParityTests
 
         public DamlRecord ToRecord() => new(TemplateId, []);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
         public static ParityTemplate FromRecord(DamlRecord record) => new();
     }
 
@@ -51,7 +54,7 @@ public class LedgerMinLedgerTimeParityTests
     }
 
     private static Com.Daml.Ledger.Api.V2.Commands OverGrpc(RuntimeCommands.CommandsSubmission submission) =>
-        new CommandBuilder(new LedgerClientOptions { GrpcAddress = "https://localhost:5001", UserId = "u" })
+        new GrpcCommandBuilder(new LedgerClientOptions { GrpcAddress = "https://localhost:5001", UserId = "u" })
             .BuildCommands(submission);
 
     private static Rest.Client.Raw.Commands OverRest(RuntimeCommands.CommandsSubmission submission) =>

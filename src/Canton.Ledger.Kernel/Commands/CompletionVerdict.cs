@@ -11,10 +11,13 @@ internal static class CompletionVerdict
         Completion completion,
         int? statusCode,
         string? statusMessage,
+        string? errorId,
+        IReadOnlyDictionary<string, string> errorMetadata,
         string? updateId) =>
         statusCode is null or 0
             ? new CompletionStreamEvent.CommandAccepted(completion, updateId ?? string.Empty)
             : new CompletionStreamEvent.CommandRejected(
                 completion,
-                new CompletionStatus(statusCode.Value, statusMessage ?? string.Empty));
+                new CompletionStatus(
+                    statusCode.Value, statusMessage ?? string.Empty, errorId, errorMetadata));
 }

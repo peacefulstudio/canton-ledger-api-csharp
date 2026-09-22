@@ -46,7 +46,7 @@ internal sealed partial class LedgerClient
 
         return SubscribeInterfaceAsyncCore<TInterface, TView>(
             submitter,
-            MarkerMatcher<TInterface>.StreamFilterIdentifier(),
+            GrpcMarkerMatcher<TInterface>.StreamFilterIdentifier(),
             fromOffset?.Value,
             toOffset?.Value,
             TransactionShape.AcsDelta,
@@ -72,7 +72,7 @@ internal sealed partial class LedgerClient
 
         return SubscribeInterfaceAsyncCore<TInterface, TView>(
             submitter,
-            MarkerMatcher<TInterface>.StreamFilterIdentifier(),
+            GrpcMarkerMatcher<TInterface>.StreamFilterIdentifier(),
             fromOffset?.Value,
             toOffset?.Value,
             TransactionShape.LedgerEffects,
@@ -103,7 +103,7 @@ internal sealed partial class LedgerClient
 
         return SubscribeActiveInterfaceAsyncCore<TInterface, TView>(
             submitter,
-            MarkerMatcher<TInterface>.StreamFilterIdentifier(),
+            GrpcMarkerMatcher<TInterface>.StreamFilterIdentifier(),
             activeAtOffset?.Value,
             cancellationToken);
     }
@@ -124,7 +124,7 @@ internal sealed partial class LedgerClient
         activity?.SetTag(LedgerActivityTagNames.CantonFromOffset, fromOffset);
         activity.SetSubmitterTags(submitter);
 
-        var request = SubscribeRequestBuilder.BuildGetUpdatesRequest(
+        var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
             interfaceFilterId,
             fromOffset,
@@ -149,7 +149,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(TInterface).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new InterfaceStreamEvent<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -170,7 +170,7 @@ internal sealed partial class LedgerClient
         switch (response.UpdateCase)
         {
             case GetUpdatesResponse.UpdateOneofCase.Transaction:
-                foreach (var projected in InterfaceStreamProjector.ProjectTransactionEvents<TInterface, TView>(
+                foreach (var projected in GrpcInterfaceStreamProjector.ProjectTransactionEvents<TInterface, TView>(
                     response.Transaction, _logger))
                 {
                     yield return projected;
@@ -181,7 +181,7 @@ internal sealed partial class LedgerClient
                     LedgerOffset.At(response.OffsetCheckpoint.Offset));
                 break;
             case GetUpdatesResponse.UpdateOneofCase.Reassignment:
-                foreach (var projected in InterfaceStreamProjector.ProjectReassignmentEvents<TInterface, TView>(
+                foreach (var projected in GrpcInterfaceStreamProjector.ProjectReassignmentEvents<TInterface, TView>(
                     response.Reassignment, _logger))
                 {
                     yield return projected;
@@ -210,7 +210,7 @@ internal sealed partial class LedgerClient
             ?? (await GetLedgerEndForSnapshotAsync(cancellationToken).ConfigureAwait(false)).Offset;
         var sharedHeaders = await _invoker.GetHeadersAsync(cancellationToken).ConfigureAwait(false);
 
-        var request = SubscribeRequestBuilder.BuildGetActiveContractsRequest(
+        var request = GrpcSubscribeRequestBuilder.BuildGetActiveContractsRequest(
             submitter, interfaceFilterId, effectiveOffset, SubscribesAsAnInterface);
 
         LogSubscribeActiveStarted(_logger, typeof(TInterface).Name, effectiveOffset);
@@ -230,7 +230,7 @@ internal sealed partial class LedgerClient
             {
                 LogSubscribeStreamError(_logger, typeof(TInterface).Name, (StatusCode)fault.StatusCode, fault.Message);
                 yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -241,7 +241,7 @@ internal sealed partial class LedgerClient
                 yield break;
             }
 
-            foreach (var projected in InterfaceStreamProjector.ProjectActiveContractEntry<TInterface, TView>(
+            foreach (var projected in GrpcInterfaceStreamProjector.ProjectActiveContractEntry<TInterface, TView>(
                 stream.Current, _logger, LedgerOffset.At(effectiveOffset)))
             {
                 if (projected is InterfaceStreamEvent<TInterface, TView>.Unclassified unclassified)

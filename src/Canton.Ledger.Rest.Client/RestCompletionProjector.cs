@@ -8,6 +8,7 @@ using Canton.Ledger.Kernel.Wire;
 using RuntimeCommands = Daml.Runtime.Commands;
 using WireCompletion = Canton.Ledger.Rest.Client.Raw.Completion;
 using WireSynchronizerTime = Canton.Ledger.Rest.Client.Raw.SynchronizerTime;
+using WireTraceContext = Canton.Ledger.Rest.Client.Raw.TraceContext;
 
 namespace Canton.Ledger.Rest.Client;
 
@@ -22,10 +23,14 @@ internal static class RestCompletionProjector
     {
         ArgumentNullException.ThrowIfNull(completion);
 
+        var errorInfo = RestErrorDetails.FindErrorInfo(completion.Status?.Details);
+
         return CompletionVerdict.Classify(
             ToCompletion(completion),
             completion.Status?.Code,
             completion.Status?.Message,
+            NullIfEmpty(RestErrorDetails.ReadErrorId(errorInfo)),
+            RestErrorDetails.ToMetadata(errorInfo),
             completion.UpdateId);
     }
 
@@ -41,7 +46,16 @@ internal static class RestCompletionProjector
             : null,
         NullIfEmpty(completion.DeduplicationPeriod?.DeduplicationDuration) is { } deduplicationDuration
             ? ParseProtobufDuration(deduplicationDuration)
-            : null);
+            : null,
+        NullIfEmpty(completion.PaidTrafficCost) is { } paidTrafficCost
+            ? RestWireConversions.ParsePaidTrafficCost(paidTrafficCost)
+            : 0L,
+        ToTraceContext(completion.TraceContext));
+
+    private static TraceContext? ToTraceContext(WireTraceContext? traceContext) =>
+        traceContext is { Traceparent: { } traceparent } && !string.IsNullOrWhiteSpace(traceparent)
+            ? new TraceContext(traceparent, NullIfEmpty(traceContext.Tracestate))
+            : null;
 
     private static SynchronizerTime ToSynchronizerTime(WireSynchronizerTime? synchronizerTime) =>
         synchronizerTime is null

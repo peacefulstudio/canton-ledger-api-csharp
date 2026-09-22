@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Daml.Ledger.Abstractions;
 using Daml.Ledger.Abstractions.Testing.Conformance;
 using Daml.Runtime;
@@ -92,6 +94,7 @@ public sealed record ConformanceProbe(Party Owner) : ITemplate, IDamlRecord<Conf
     /// <inheritdoc cref="ITemplate" />
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty((string)Owner)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     /// <summary>Creates a probe from the wire record a created event carries.</summary>
     /// <returns>The probe the record decodes to.</returns>
     public static ConformanceProbe FromRecord(DamlRecord record) =>

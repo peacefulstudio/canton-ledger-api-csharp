@@ -1,7 +1,10 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using AwesomeAssertions;
+using Daml.Runtime;
 using Daml.Runtime.Data;
 using Xunit;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
@@ -135,9 +138,23 @@ public class RestValueEncoderTests
             null,
             [new DamlField("tags", new DamlList([new DamlText("a"), new DamlText("b")]))]);
 
-        var wire = RestValueEncoder.ToWireRecord(original);
-        var decoded = RestValueDecoder.ToDamlRecord(wire);
+        var wireJson = JsonSerializer.Serialize(RestValueEncoder.ToWireRecord(original), RestRefitSettings.SerializerOptions);
+        var wire = JsonSerializer.Deserialize<Raw.Record>(wireJson, RestRefitSettings.SerializerOptions)!;
+        var decoded = RestValueDecoder.ToDamlRecord<TagsRecord>(wire);
 
         decoded.Should().BeEquivalentTo(original, options => options.PreferringRuntimeMemberTypes());
+    }
+
+    private sealed record TagsRecord(
+        [property: DamlFieldAttribute("tags")] IReadOnlyList<string> Tags) : IDamlRecord<TagsRecord>
+    {
+        public DamlRecord ToRecord() => throw new NotSupportedException();
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(
+                json,
+                context,
+                ("tags", (element, elementContext) => DamlLfJsonDecoders.ReadList(element, elementContext, DamlLfJsonDecoders.ReadText)));
+
+        public static TagsRecord FromRecord(DamlRecord record) => throw new NotSupportedException();
     }
 }

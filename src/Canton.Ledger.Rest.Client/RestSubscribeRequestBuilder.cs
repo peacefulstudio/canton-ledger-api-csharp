@@ -131,7 +131,7 @@ internal static class RestSubscribeRequestBuilder
 
     private static WireFilters BuildFilters<T>()
         where T : IDamlType =>
-        MarkerMatcher<T>.IsInterface ? BuildInterfaceFilters<T>() : BuildTemplateFilters<T>();
+        RestMarkerMatcher<T>.IsInterface ? BuildInterfaceFilters<T>() : BuildTemplateFilters<T>();
 
     private static WireFilters BuildTemplateFilters<T>()
         where T : IDamlType =>
@@ -143,7 +143,7 @@ internal static class RestSubscribeRequestBuilder
                 {
                     IdentifierFilter = new WireIdentifierFilter
                     {
-                        TemplateFilter = new WireTemplateFilter { TemplateId = MarkerMatcher<T>.FilterIdentifier },
+                        TemplateFilter = new WireTemplateFilter { TemplateId = RestMarkerMatcher<T>.FilterIdentifier },
                     },
                 },
             ],
@@ -161,7 +161,7 @@ internal static class RestSubscribeRequestBuilder
                     {
                         InterfaceFilter = new WireInterfaceFilter
                         {
-                            InterfaceId = MarkerMatcher<T>.FilterIdentifier,
+                            InterfaceId = RestMarkerMatcher<T>.FilterIdentifier,
                             IncludeInterfaceView = true,
                         },
                     },

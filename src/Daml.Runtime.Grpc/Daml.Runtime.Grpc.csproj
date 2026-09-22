@@ -15,6 +15,7 @@
   <ItemGroup>
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 

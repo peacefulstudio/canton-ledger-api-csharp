@@ -1,6 +1,8 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
+using System.Text.Json;
 using Daml.Runtime;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
@@ -21,6 +23,7 @@ internal sealed record DemoAsset(Party Issuer, Party Owner, string Name, decimal
         DamlField.Create("name", new DamlText(Name)),
         DamlField.Create("amount", new DamlNumeric(Amount)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static DemoAsset FromRecord(DamlRecord record)
     {
         var issuer = ((DamlParty)record.GetRequiredField("issuer")).Value;
@@ -41,6 +44,7 @@ internal sealed record OtherAsset(Party Owner) : ITemplate, IDamlRecord<OtherAss
 
     public DamlRecord ToRecord() => DamlRecord.Create(DamlField.Create("owner", new DamlParty((string)Owner)));
 
+    public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) => throw new NotSupportedException();
     public static OtherAsset FromRecord(DamlRecord record) =>
         new(new Party(record.GetRequiredField("owner").As<DamlParty>().Value));
 }

@@ -63,7 +63,7 @@ public class SubmissionClientTests
             new LedgerCallInvoker(_options, _tokenProvider),
             _commandService,
             _commandSubmissionService,
-            new CommandBuilder(_options),
+            new GrpcCommandBuilder(_options),
             _options,
             logger ?? NullLogger<LedgerClient>.Instance,
             pointReadByOffset ?? ((_, _, _) => throw new InvalidOperationException("point read not expected")),
@@ -228,6 +228,8 @@ public class SubmissionClientTests
             ContractId = "00target",
             TemplateId = TestTemplateId,
             Choice = choice,
+            ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+            ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
             Consuming = consuming,
         },
     };

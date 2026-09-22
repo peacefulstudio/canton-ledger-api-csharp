@@ -3,9 +3,11 @@
 
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using AwesomeAssertions;
 using Canton.Ledger.Rest.Client.Raw;
+using Daml.Runtime;
 using Daml.Runtime.Data;
 using Daml.Runtime.Serialization;
 using Xunit;
@@ -59,11 +61,19 @@ public class DamlLfJsonWriterTests
             JsonValueKind.String, "an Int64 outside the double-safe range loses precision as a JSON number");
         field.GetString().Should().Be("42");
 
-        var wireRecord = new Record();
-        wireRecord.AdditionalProperties["count"] = field;
+        var wireRecord = JsonSerializer.Deserialize<Record>(written, RestRefitSettings.SerializerOptions)!;
 
-        RestValueDecoder.ToDamlRecord(wireRecord).Fields.Should().ContainSingle()
+        RestValueDecoder.ToDamlRecord<CountRecord>(wireRecord).Fields.Should().ContainSingle()
             .Which.Value.Should().Be(new DamlInt64(42));
+    }
+
+    private sealed record CountRecord([property: DamlFieldAttribute("count")] long Count) : IDamlRecord<CountRecord>
+    {
+        public DamlRecord ToRecord() => throw new NotSupportedException();
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(json, context, ("count", DamlLfJsonDecoders.ReadInt64));
+
+        public static CountRecord FromRecord(DamlRecord record) => throw new NotSupportedException();
     }
 
     [Fact]
@@ -245,6 +255,35 @@ public class DamlLfJsonWriterTests
         act.Should().Throw<JsonException>().WithMessage("*no arm*");
     }
 
+    [Theory]
+    [InlineData("\"alice::1220ab\"")]
+    [InlineData("""{"party":"alice::1220ab"}""")]
+    [InlineData("""{"owner":"alice::1220ab","amount":"10.5","tags":["a","b"]}""")]
+    [InlineData("{}")]
+    public void WireValueJsonConverter_writes_a_read_Value_back_as_the_Daml_LF_JSON_it_was_read_from(string lfJson)
+    {
+        var read = JsonSerializer.Deserialize<Value>(lfJson, DamlLfOptions)!;
+
+        var written = JsonSerializer.Serialize(read, DamlLfOptions);
+
+        JsonNode.DeepEquals(JsonNode.Parse(written), JsonNode.Parse(lfJson)).Should().BeTrue(
+            $"a Value read from a participant must be forwardable, but {lfJson} was written as {written}");
+    }
+
+    [Theory]
+    [InlineData("""{"owner":"alice::1220ab"}""")]
+    [InlineData("""{"fields":[{"label":"owner","value":{"party":"alice::1220ab"}}],"recordId":"r"}""")]
+    [InlineData("{}")]
+    public void WireRecordJsonConverter_writes_a_read_Record_back_as_the_Daml_LF_JSON_it_was_read_from(string lfJson)
+    {
+        var read = JsonSerializer.Deserialize<Record>(lfJson, DamlLfOptions)!;
+
+        var written = JsonSerializer.Serialize(read, DamlLfOptions);
+
+        JsonNode.DeepEquals(JsonNode.Parse(written), JsonNode.Parse(lfJson)).Should().BeTrue(
+            $"a Record read from a participant must be forwardable, but {lfJson} was written as {written}");
+    }
+
     [Fact]
     public void WriteRecord_writes_a_Record_with_no_fields_as_an_empty_object() =>
         WriteRecord(new Record()).Should().Be("{}");
@@ -335,23 +374,26 @@ public class DamlLfJsonWriterTests
     }
 
     [Fact]
-    public void WireValueJsonConverter_reads_a_Value_in_the_shape_our_specification_declares()
+    public void WireValueJsonConverter_keeps_a_read_Value_as_raw_Daml_LF_JSON_without_binding_an_arm()
     {
         var value = JsonSerializer.Deserialize<Value>("""{"party":"alice::1220ab"}""", DamlLfOptions);
 
-        value!.Party.Should().Be("alice::1220ab");
+        value!.Party.Should().BeNull("a Daml-LF JSON object keyed party is a record with a field named party");
+        value.AdditionalProperties.Should().ContainSingle()
+            .Which.Should().Be(new KeyValuePair<string, object>("idiomatic", """{"party":"alice::1220ab"}"""));
     }
 
     [Fact]
-    public void WireRecordJsonConverter_reads_a_Record_whose_nested_Value_is_also_left_unconverted()
+    public void WireRecordJsonConverter_keeps_a_read_Record_as_raw_Daml_LF_JSON_without_binding_its_fields()
     {
         var record = JsonSerializer.Deserialize<Record>(
             """{"fields":[{"label":"owner","value":{"party":"alice::1220ab"}}]}""",
             DamlLfOptions);
 
-        record!.Fields.Should().ContainSingle();
-        record.Fields.Single().Label.Should().Be("owner");
-        record.Fields.Single().Value.Party.Should().Be("alice::1220ab");
+        record!.Fields.Should().BeNull("a Daml-LF JSON object keyed fields is a record with a field named fields");
+        record.AdditionalProperties.Should().ContainSingle()
+            .Which.Should().Be(new KeyValuePair<string, object>(
+                "idiomatic", """{"fields":[{"label":"owner","value":{"party":"alice::1220ab"}}]}"""));
     }
 
     [Fact]

@@ -259,6 +259,7 @@ public sealed class LedgerClientRetryTests : IDisposable
                 ContractId = "00exer",
                 TemplateId = new ProtoIdentifier { PackageId = "test-pkg", ModuleName = "Sample.Foo", EntityName = "FooBar" },
                 Choice = "Accept",
+                ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                 ExerciseResult = LedgerClientTestFixtures.OutOfDecimalRangeNumeric(),
             },
         });

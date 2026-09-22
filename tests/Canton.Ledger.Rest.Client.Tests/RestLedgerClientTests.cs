@@ -1,14 +1,18 @@
 // Copyright 2026 Peaceful Studio OÜ
 // SPDX-License-Identifier: Apache-2.0
 
+using Daml.Runtime.Serialization;
 using System.Net;
 using System.Text.Json;
 using AwesomeAssertions;
+using Canton.Ledger.Abstractions;
+using Daml.Ledger.Abstractions;
 using Daml.Runtime;
 using Daml.Runtime.Commands;
 using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Outcomes;
+using Daml.Runtime.Stdlib;
 using Microsoft.Extensions.Options;
 using Xunit;
 using RuntimeIdentifier = Daml.Runtime.Data.Identifier;
@@ -37,17 +41,60 @@ public sealed class RestLedgerClientTests : IDisposable
         return factory;
     }
 
-    private sealed record TestTemplate : ITemplate, IDamlRecord<TestTemplate>
+    private sealed record TestTemplate([property: DamlFieldAttribute("owner")] Party Owner) : ITemplate, IDamlRecord<TestTemplate>
     {
-        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "Template");
+        public TestTemplate()
+            : this(Alice)
+        {
+        }
+
+        public static RuntimeIdentifier TemplateId { get; } = new("pkg", "Module", "LedgerClientTemplate");
         public static string PackageId => "pkg";
         public static string PackageName => "pkg-name";
         public static Version PackageVersion { get; } = new(0, 1, 0);
         public static DamlTypeDescriptor DamlTypeId { get; } = new(TemplateId, DamlTypeKind.Template, PackageName);
-        public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Alice.ToDamlValue())]);
+        public DamlRecord ToRecord() => new(TemplateId, [new DamlField("owner", Owner.ToDamlValue())]);
 
+        public static DamlRecord __ReadDamlLfJson(JsonElement json, DamlLfJsonDecodeContext context) =>
+            TestRecordReader.Read(
+                json,
+                context,
+                ("owner", DamlLfJsonDecoders.ReadParty));
         public static TestTemplate FromRecord(DamlRecord record) =>
-            new();
+            new(Party.FromDamlValue(record.GetRequiredField("owner").As<DamlParty>()));
+
+        public static Choice<TestTemplate, DamlUnit, Party> ChoiceGetOwner { get; } = new()
+        {
+            Name = new ChoiceName("GetOwner"),
+            Consuming = false,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = result => Party.FromDamlValue(result.As<DamlParty>()),
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = DamlLfJsonDecoders.ReadParty,
+        };
+
+        public static Choice<TestTemplate, DamlUnit, Optional<Party>> ChoiceFindOwner { get; } = new()
+        {
+            Name = new ChoiceName("FindOwner"),
+            Consuming = false,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = _ => new Optional<Party>.None(),
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = (json, context) => DamlLfJsonDecoders.ReadOptional(json, context, DamlLfJsonDecoders.ReadParty),
+        };
+
+        public static Choice<TestTemplate, DamlUnit, IReadOnlyList<ContractId<TestTemplate>>> ChoiceSplitHoldings { get; } = new()
+        {
+            Name = new ChoiceName("SplitHoldings"),
+            Consuming = true,
+            ArgumentEncoder = unit => unit,
+            ResultDecoder = _ => [],
+            ArgumentDecoder = value => value.As<DamlUnit>(),
+            ArgumentJsonReader = DamlLfJsonDecoders.ReadUnit,
+            ResultJsonReader = (json, context) => DamlLfJsonDecoders.ReadList(json, context, DamlLfJsonDecoders.ReadContractId),
+        };
     }
 
     private RestLedgerClient ClientWith(RecordingHttpHandler transport, string? userId = null) =>
@@ -175,8 +222,8 @@ public sealed class RestLedgerClientTests : IDisposable
                       "offset": "7",
                       "contractId": "00holding",
                       "nodeId": 0,
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
-                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "createArgument": {"owner": "party::alice"}
                     }
                   }
                 ]
@@ -202,7 +249,7 @@ public sealed class RestLedgerClientTests : IDisposable
         commands.GetProperty("userId").GetString().Should().Be("test-user");
         commands.GetProperty("actAs")[0].GetString().Should().Be("party::alice");
         commands.GetProperty("commands")[0].GetProperty("CreateCommand").GetProperty("templateId")
-            .GetString().Should().Be("pkg:Module:Template");
+            .GetString().Should().Be("pkg:Module:LedgerClientTemplate");
     }
 
     [Fact]
@@ -249,7 +296,7 @@ public sealed class RestLedgerClientTests : IDisposable
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionAsync_returns_an_InfraError_outcome_for_a_malformed_transaction_body()
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_a_CommittedUndecodable_outcome_for_a_malformed_transaction_body()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -268,12 +315,13 @@ public sealed class RestLedgerClientTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
             submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.SourceException.Should().NotBeNull();
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionAsync_returns_an_InfraError_outcome_for_a_created_event_missing_its_template_id()
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_a_CommittedUndecodable_outcome_for_a_created_event_missing_its_template_id()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -288,7 +336,7 @@ public sealed class RestLedgerClientTests : IDisposable
                       "offset": "1",
                       "contractId": "00holding",
                       "nodeId": 0,
-                      "createArgument": {"fields": []}
+                      "createArgument": {}
                     }
                   }
                 ]
@@ -301,13 +349,14 @@ public sealed class RestLedgerClientTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
             submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
         error.Message.Should().Contain("templateId");
+        error.SourceException.Should().BeOfType<MalformedResponseException>();
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionAsync_returns_an_InfraError_outcome_for_a_created_event_with_a_record_field_missing_its_value()
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_a_CommittedUndecodable_outcome_for_a_created_event_whose_createArgument_cannot_be_decoded()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
@@ -322,8 +371,8 @@ public sealed class RestLedgerClientTests : IDisposable
                       "offset": "1",
                       "contractId": "00holding",
                       "nodeId": 0,
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
-                      "createArgument": {"fields": [{"label": "owner"}]}
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "createArgument": {"owner": [null]}
                     }
                   }
                 ]
@@ -336,13 +385,14 @@ public sealed class RestLedgerClientTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
             submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
-        error.Message.Should().Contain("owner");
+        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Contain("Expected JSON String at 'TestTemplate.owner' but found Array");
+        error.SourceException.Should().NotBeNull();
     }
 
     [Fact]
-    public async Task TrySubmitAndWaitForTransactionAsync_returns_an_InfraError_outcome_for_a_malformed_json_response_body()
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_a_CommittedUndecodable_outcome_for_a_malformed_json_response_body()
     {
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, "{not valid json");
         var client = ClientWith(transport);
@@ -351,8 +401,9 @@ public sealed class RestLedgerClientTests : IDisposable
         var outcome = await client.TrySubmitAndWaitForTransactionAsync(
             submission, cancellationToken: TestContext.Current.CancellationToken);
 
-        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.InfraError>().Subject;
-        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().BeNull("the body was not decoded far enough to read an update id");
+        error.SourceException.Should().NotBeNull();
     }
 
     [Fact]
@@ -493,8 +544,8 @@ public sealed class RestLedgerClientTests : IDisposable
                       "offset": "1",
                       "contractId": "00holding",
                       "nodeId": 0,
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
-                      "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "createArgument": {"owner": "party::alice"}
                     }
                   }
                 ]
@@ -525,13 +576,13 @@ public sealed class RestLedgerClientTests : IDisposable
                     "ExercisedEvent": {
                       "offset": "1",
                       "contractId": "00holding",
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
                       "choice": "GetOwner",
-                      "choiceArgument": {"unit": {}},
+                      "choiceArgument": {},
                       "actingParties": ["party::alice"],
                       "consuming": false,
                       "witnessParties": ["party::alice"],
-                      "exerciseResult": {"party": "party::alice"}
+                      "exerciseResult": "party::alice"
                     }
                   }
                 ]
@@ -549,6 +600,165 @@ public sealed class RestLedgerClientTests : IDisposable
         one.Result.Should().Be(Alice);
     }
 
+    private const string MissingTemplateExercisedTransactionResponse =
+        """
+        {
+          "transaction": {
+            "updateId": "upd-1",
+            "offset": "1",
+            "events": [
+              {
+                "ExercisedEvent": {
+                  "offset": "1",
+                  "contractId": "00holding",
+                  "templateId": {"packageId": "missing-pkg", "moduleName": "Missing.Module", "entityName": "Missing"},
+                  "choice": "GetOwner",
+                  "choiceArgument": {},
+                  "actingParties": ["party::alice"],
+                  "consuming": false,
+                  "witnessParties": ["party::alice"],
+                  "exerciseResult": "party::alice"
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    private const string MissingTemplateCreatedTransactionResponse =
+        """
+        {
+          "transaction": {
+            "updateId": "upd-1",
+            "offset": "1",
+            "events": [
+              {
+                "CreatedEvent": {
+                  "offset": "1",
+                  "contractId": "00holding",
+                  "nodeId": 0,
+                  "templateId": {"packageId": "missing-pkg", "moduleName": "Missing.Module", "entityName": "Missing"},
+                  "createArgument": {"owner": "party::alice"}
+                }
+              }
+            ]
+          }
+        }
+        """;
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_the_exercised_template_has_no_loaded_generated_type()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, MissingTemplateExercisedTransactionResponse);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("GetOwner"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<Party>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<Party>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Be(
+            "The command committed, but its transaction could not be decoded: No generated type is loaded for choice 'GetOwner' of 'missing-pkg:Missing.Module:Missing'; load exactly one assembly generated for its Daml package before reading this payload over the JSON Ledger API.");
+        error.SourceException.Should().BeOfType<TemplateTypeRequiredException>()
+            .Which.TypeId.Should().Be("missing-pkg:Missing.Module:Missing");
+    }
+
+    [Fact]
+    public async Task TryCreateAsync_returns_CommittedUndecodable_when_the_created_template_has_no_loaded_generated_type()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, MissingTemplateCreatedTransactionResponse);
+        var client = ClientWith(transport);
+
+        var outcome = await client.TryCreateAsync(
+            new TestTemplate(), Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Be(
+            "The command committed, but its transaction could not be decoded: No generated type is loaded for 'missing-pkg:Missing.Module:Missing'; load exactly one assembly generated for its Daml package before reading this payload over the JSON Ledger API.");
+        error.SourceException.Should().BeOfType<TemplateTypeRequiredException>()
+            .Which.TypeId.Should().Be("missing-pkg:Missing.Module:Missing");
+    }
+
+    [Fact]
+    public async Task TrySubmitAndWaitForTransactionAsync_returns_CommittedUndecodable_when_the_created_template_has_no_loaded_generated_type()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, MissingTemplateCreatedTransactionResponse);
+        var client = ClientWith(transport);
+        var submission = CommandsSubmission.Single(CreateCommand.For(new TestTemplate())).WithActAs(Alice);
+
+        var outcome = await client.TrySubmitAndWaitForTransactionAsync(
+            submission, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<TransactionResult>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Be(
+            "The command committed, but its transaction could not be decoded: No generated type is loaded for 'missing-pkg:Missing.Module:Missing'; load exactly one assembly generated for its Daml package before reading this payload over the JSON Ledger API.");
+        error.SourceException.Should().BeOfType<TemplateTypeRequiredException>();
+    }
+
+    [Fact]
+    public async Task OneOrThrowAsync_over_TryExerciseAsync_throws_a_LedgerOperationException_carrying_the_refusal_after_the_commit()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, MissingTemplateExercisedTransactionResponse);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("GetOwner"), DamlUnit.Instance);
+
+        var thrown = await Record.ExceptionAsync(() => client.TryExerciseAsync<Party>(
+                command, Alice, cancellationToken: TestContext.Current.CancellationToken)
+            .OneOrThrowAsync("GetOwner"));
+
+        var failure = thrown.Should().BeOfType<LedgerOperationException>().Subject;
+        failure.Message.Should().Be(
+            "GetOwner: committed but undecodable: The command committed, but its transaction could not be decoded: No generated type is loaded for choice 'GetOwner' of 'missing-pkg:Missing.Module:Missing'; load exactly one assembly generated for its Daml package before reading this payload over the JSON Ledger API.");
+        failure.InnerException.Should().BeOfType<TemplateTypeRequiredException>();
+        failure.UpdateId.Should().Be("upd-1");
+        failure.CommitState.Should().Be(CommitState.Committed);
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_decodes_a_top_level_list_choice_result_as_a_DamlList()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "ExercisedEvent": {
+                      "offset": "1",
+                      "contractId": "00holding",
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "choice": "SplitHoldings",
+                      "choiceArgument": {},
+                      "actingParties": ["party::alice"],
+                      "consuming": true,
+                      "witnessParties": ["party::alice"],
+                      "exerciseResult": ["00abc"]
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("SplitHoldings"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<DamlList>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var list = outcome.Should().BeOfType<ExerciseOutcome<DamlList>.One>().Subject.Result;
+        list.Values.Should().HaveCount(1);
+        list.Values[0].Should().BeOfType<DamlContractId>().Which.Value.Should().Be("00abc");
+    }
+
     private const string ExercisedTransactionResponse =
         """
         {
@@ -560,13 +770,13 @@ public sealed class RestLedgerClientTests : IDisposable
                 "ExercisedEvent": {
                   "offset": "1",
                   "contractId": "00holding",
-                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
+                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
                   "choice": "GetOwner",
-                  "choiceArgument": {"unit": {}},
+                  "choiceArgument": {},
                   "actingParties": ["party::alice"],
                   "consuming": false,
                   "witnessParties": ["party::alice"],
-                  "exerciseResult": {"party": "party::alice"}
+                  "exerciseResult": "party::alice"
                 }
               }
             ]
@@ -585,8 +795,8 @@ public sealed class RestLedgerClientTests : IDisposable
                 "CreatedEvent": {
                   "offset": "1",
                   "contractId": "00holding",
-                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "Template"},
-                  "createArgument": {"fields": [{"label": "owner", "value": {"party": "party::alice"}}]}
+                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                  "createArgument": {"owner": "party::alice"}
                 }
               }
             ]
@@ -668,11 +878,11 @@ public sealed class RestLedgerClientTests : IDisposable
         commands.GetProperty("actAs")[0].GetString().Should().Be("party::alice");
         commands.GetProperty("workflowId").GetString().Should().Be("create-testtemplate");
         commands.GetProperty("commands")[0].GetProperty("CreateCommand").GetProperty("templateId")
-            .GetString().Should().Be("pkg:Module:Template");
+            .GetString().Should().Be("pkg:Module:LedgerClientTemplate");
     }
 
     [Fact]
-    public async Task TryCreateAsync_returns_an_InfraError_outcome_when_the_response_carries_no_transaction()
+    public async Task TryCreateAsync_returns_a_CommittedUndecodable_outcome_when_the_response_carries_no_transaction()
     {
         var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, "{}");
         var client = ClientWith(transport);
@@ -680,9 +890,11 @@ public sealed class RestLedgerClientTests : IDisposable
         var outcome = await client.TryCreateAsync(
             new TestTemplate(), Alice, cancellationToken: TestContext.Current.CancellationToken);
 
-        var error = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.InfraError>().Subject;
-        error.StatusCode.Should().Be((int)HttpStatusCode.InternalServerError);
+        var error = outcome.Should().BeOfType<ExerciseOutcome<ContractId<TestTemplate>>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().BeNull();
         error.Message.Should().Be("Server returned a successful response but no transaction was present.");
+        error.SourceException.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Be("Server returned a successful response but no transaction was present.");
     }
 
     [Fact]
@@ -715,5 +927,126 @@ public sealed class RestLedgerClientTests : IDisposable
         body.RootElement.TryGetProperty("transactionFormat", out _).Should().BeFalse(
             "the plain submit path must keep the server-default ACS-delta shape so "
             + "ArchivedContractIds stays populated");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_decodes_an_explicit_null_exercise_result_as_an_empty_DamlOptional()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "ExercisedEvent": {
+                      "offset": "1",
+                      "contractId": "00holding",
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "choice": "FindOwner",
+                      "choiceArgument": {},
+                      "actingParties": ["party::alice"],
+                      "consuming": false,
+                      "witnessParties": ["party::alice"],
+                      "exerciseResult": null
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("FindOwner"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<DamlOptional>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        outcome.Should().BeOfType<ExerciseOutcome<DamlOptional>.One>()
+            .Which.Result.Value.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_the_malformed_transaction_CommittedUndecodable_when_an_optional_exercise_result_is_absent()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "ExercisedEvent": {
+                      "offset": "1",
+                      "contractId": "00holding",
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "choice": "FindOwner",
+                      "choiceArgument": {},
+                      "actingParties": ["party::alice"],
+                      "consuming": false,
+                      "witnessParties": ["party::alice"]
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("FindOwner"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<Optional<Party>>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<Optional<Party>>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Be(
+            "Server returned a malformed transaction: Malformed response from ledger: ExercisedEvent for contract '00holding' has no exerciseResult, though the Ledger API marks the field as required.");
+        error.SourceException.Should().BeOfType<MalformedResponseException>();
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_the_malformed_transaction_CommittedUndecodable_when_the_exercised_event_has_no_exercise_result()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK,
+            """
+            {
+              "transaction": {
+                "updateId": "upd-1",
+                "offset": "1",
+                "events": [
+                  {
+                    "ExercisedEvent": {
+                      "offset": "1",
+                      "contractId": "00holding",
+                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                      "choice": "GetOwner",
+                      "choiceArgument": {},
+                      "actingParties": ["party::alice"],
+                      "consuming": false,
+                      "witnessParties": ["party::alice"]
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("GetOwner"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<Party>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var error = outcome.Should().BeOfType<ExerciseOutcome<Party>.CommittedUndecodable>().Subject;
+        error.UpdateId.Should().Be("upd-1");
+        error.Message.Should().Be(
+            "Server returned a malformed transaction: Malformed response from ledger: ExercisedEvent for contract '00holding' has no exerciseResult, though the Ledger API marks the field as required.");
+        error.SourceException.Should().BeOfType<MalformedResponseException>();
     }
 }

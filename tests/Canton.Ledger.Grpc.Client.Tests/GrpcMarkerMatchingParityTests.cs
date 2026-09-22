@@ -16,8 +16,8 @@ public sealed class GrpcMarkerMatchingParityTests : MarkerMatchingParityTests
 {
     protected override bool IsInterfaceMarker(DamlTypeKind marker) => marker switch
     {
-        DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.IsInterface,
-        DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.IsInterface,
+        DamlTypeKind.Template => GrpcMarkerMatcher<TemplateMarker>.IsInterface,
+        DamlTypeKind.Interface => GrpcMarkerMatcher<InterfaceMarker>.IsInterface,
         _ => throw new ArgumentOutOfRangeException(nameof(marker)),
     };
 
@@ -25,8 +25,8 @@ public sealed class GrpcMarkerMatchingParityTests : MarkerMatchingParityTests
     {
         var identifier = marker switch
         {
-            DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.StreamFilterIdentifier(),
-            DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.StreamFilterIdentifier(),
+            DamlTypeKind.Template => GrpcMarkerMatcher<TemplateMarker>.StreamFilterIdentifier(),
+            DamlTypeKind.Interface => GrpcMarkerMatcher<InterfaceMarker>.StreamFilterIdentifier(),
             _ => throw new ArgumentOutOfRangeException(nameof(marker)),
         };
         return new RuntimeIdentifier(identifier.PackageId, identifier.ModuleName, identifier.EntityName);
@@ -41,8 +41,8 @@ public sealed class GrpcMarkerMatchingParityTests : MarkerMatchingParityTests
 
     protected override bool MatchesCreatedContract(DamlTypeKind marker, CreatedContract created) => marker switch
     {
-        DamlTypeKind.Template => MarkerMatcher<TemplateMarker>.Matches(created),
-        DamlTypeKind.Interface => MarkerMatcher<InterfaceMarker>.Matches(created),
+        DamlTypeKind.Template => GrpcMarkerMatcher<TemplateMarker>.Matches(created),
+        DamlTypeKind.Interface => GrpcMarkerMatcher<InterfaceMarker>.Matches(created),
         _ => throw new ArgumentOutOfRangeException(nameof(marker)),
     };
 
@@ -50,10 +50,10 @@ public sealed class GrpcMarkerMatchingParityTests : MarkerMatchingParityTests
         where TMarker : Daml.Runtime.IDamlType =>
         scenario.Event switch
         {
-            MarkerWireEvent.Created => MarkerMatcher<TMarker>.MatchesProtoCreated(BuildCreated(scenario)),
-            MarkerWireEvent.Archived => MarkerMatcher<TMarker>.MatchesProtoArchived(BuildArchived(scenario)),
-            MarkerWireEvent.Exercised => MarkerMatcher<TMarker>.MatchesProtoExercised(BuildExercised(scenario)),
-            MarkerWireEvent.Unassigned => MarkerMatcher<TMarker>.MatchesProtoUnassigned(BuildUnassigned(scenario)),
+            MarkerWireEvent.Created => GrpcMarkerMatcher<TMarker>.MatchesProtoCreated(BuildCreated(scenario)),
+            MarkerWireEvent.Archived => GrpcMarkerMatcher<TMarker>.MatchesProtoArchived(BuildArchived(scenario)),
+            MarkerWireEvent.Exercised => GrpcMarkerMatcher<TMarker>.MatchesProtoExercised(BuildExercised(scenario)),
+            MarkerWireEvent.Unassigned => GrpcMarkerMatcher<TMarker>.MatchesProtoUnassigned(BuildUnassigned(scenario)),
             _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
         };
 

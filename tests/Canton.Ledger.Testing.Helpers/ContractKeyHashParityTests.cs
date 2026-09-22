@@ -46,7 +46,7 @@ public abstract class ContractKeyHashParityTests
         var projected = ProjectedKeyOn(path);
 
         projected.Should().NotBeNull();
-        projected.Should().Be(new ContractKey(new DamlParty(KeyParty), TemplateMarker.TemplateId));
+        projected.Should().Be(new ContractKey(new DamlParty("alice::ns1"), TemplateMarker.TemplateId));
         projected!.KeyHash.Should().Be(ProjectedKeyHash);
     }
 }

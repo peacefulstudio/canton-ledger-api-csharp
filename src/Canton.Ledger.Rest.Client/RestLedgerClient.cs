@@ -77,6 +77,7 @@ internal sealed partial class RestLedgerClient
     private const string StreamIdleTimeoutQueryParameter = "stream_idle_timeout_ms";
 
     private const long UnpacedWindowWarningThreshold = 100L;
+    private const double HonouredWindowHoldShareOfIdleTimeout = 0.5;
 
     private const string UnresumableWindowMessage =
         "The stream window carried entries but no offset the next window could resume from, so " +
@@ -145,7 +146,7 @@ internal sealed partial class RestLedgerClient
         _streamWindowLimit = options?.Value.StreamWindowLimit ?? RestLedgerClientOptions.DefaultStreamWindowLimit;
         _streamWindowIdleTimeout =
             options?.Value.StreamWindowIdleTimeout ?? RestLedgerClientOptions.DefaultStreamWindowIdleTimeout;
-        _shortestHonouredWindowHold = _streamWindowIdleTimeout / 2;
+        _shortestHonouredWindowHold = ShortestHonouredWindowHold(_streamWindowIdleTimeout);
         _logger = logger ?? NullLogger<RestLedgerClient>.Instance;
         _calls = new RestCallEnvelope(httpClientFactory, _logger);
     }
@@ -244,13 +245,13 @@ internal sealed partial class RestLedgerClient
         if (window.Fault is { } fault)
         {
             yield return new AcsSnapshotEntry<T>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
             yield break;
         }
 
         foreach (var entry in window.Entries)
         {
-            foreach (var projected in ContractStreamProjector.ProjectActiveContractEntry<T>(entry, _logger, effectiveOffset))
+            foreach (var projected in RestContractStreamProjector.ProjectActiveContractEntry<T>(entry, _logger, effectiveOffset))
             {
                 yield return ToAcsSnapshotEntry(projected);
             }
@@ -312,7 +313,7 @@ internal sealed partial class RestLedgerClient
             if (read.Fault is { } fault)
             {
                 yield return new ContractStreamEvent<T>.StreamError(
-                    fault.StatusCode, fault.Message, fault.Category, fault.SourceException);
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
                 yield break;
             }
 
@@ -359,14 +360,14 @@ internal sealed partial class RestLedgerClient
     {
         if (update.Update?.Transaction is { } transaction)
         {
-            foreach (var projected in ContractStreamProjector.ProjectTransactionEvents<T>(transaction, _logger))
+            foreach (var projected in RestContractStreamProjector.ProjectTransactionEvents<T>(transaction, _logger))
             {
                 yield return projected;
             }
         }
         else if (update.Update?.Reassignment is { } reassignment)
         {
-            foreach (var projected in ContractStreamProjector.ProjectReassignmentEvents<T>(reassignment, _logger))
+            foreach (var projected in RestContractStreamProjector.ProjectReassignmentEvents<T>(reassignment, _logger))
             {
                 yield return projected;
             }
@@ -408,6 +409,9 @@ internal sealed partial class RestLedgerClient
 
         internal static StreamWindowRead<TEntry> Failed(StreamFault fault) => new(null, fault);
     }
+
+    internal static TimeSpan ShortestHonouredWindowHold(TimeSpan streamWindowIdleTimeout) =>
+        streamWindowIdleTimeout * HonouredWindowHoldShareOfIdleTimeout;
 
     private async IAsyncEnumerable<StreamWindowRead<TEntry>> ReadWindowsAsync<TEntry>(
         string path,
@@ -529,6 +533,12 @@ internal sealed partial class RestLedgerClient
         ((long)_streamWindowIdleTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The transaction has zero or more than one exercised event for <paramref name="command"/>'s
     /// choice on a successful outcome (e.g. a nonconsuming choice that only forks other choices).
@@ -570,6 +580,12 @@ internal sealed partial class RestLedgerClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
         RuntimeCommands.SubmitterInfo submitter,
@@ -653,6 +669,12 @@ internal sealed partial class RestLedgerClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         RuntimeCommands.SubmitterInfo submitter,
@@ -666,6 +688,12 @@ internal sealed partial class RestLedgerClient
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A committed transaction that cannot be decoded, for example because a payload has no loaded
+    /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
+    /// failure: do not resubmit, and read the transaction by its
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// </remarks>
     public Task<ExerciseOutcome<TransactionResult>> TrySubmitAndWaitForTransactionAsync(
         RuntimeCommands.CommandsSubmission submission,
         TimeSpan? timeout = null,
@@ -699,11 +727,15 @@ internal sealed partial class RestLedgerClient
                 MissingTransactionMessage, MalformedTransactionPrefix),
             body => body.Transaction is { } transaction
                 ? new ExerciseOutcome<TProjection>.One(project(transaction))
-                : new ExerciseOutcome<TProjection>.InfraError(
-                    (int)HttpStatusCode.InternalServerError, MissingTransactionMessage),
+                : new ExerciseOutcome<TProjection>.CommittedUndecodable(
+                    UpdateId: null, MissingTransactionMessage, new InvalidOperationException(MissingTransactionMessage)),
+            body => NonEmptyOrNull(body.Transaction?.UpdateId),
             timeout,
             cancellationToken);
     }
+
+    private static string? NonEmptyOrNull(string? value) =>
+        string.IsNullOrEmpty(value) ? null : value;
 
     private static RuntimeCommands.CommandsSubmission NewSubmission(
         RuntimeCommands.ICommand command,

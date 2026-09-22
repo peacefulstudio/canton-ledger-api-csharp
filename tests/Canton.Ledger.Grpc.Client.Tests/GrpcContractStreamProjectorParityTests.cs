@@ -23,7 +23,7 @@ public sealed class GrpcContractStreamProjectorParityTests : ContractStreamProje
     {
         var response = BuildResponse(scenario);
         IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected =
-            ContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
+            GrpcContractStreamProjector.ProjectActiveContractEntry<TemplateMarker>(response).ToList();
         return Task.FromResult(projected);
     }
 
@@ -32,14 +32,14 @@ public sealed class GrpcContractStreamProjectorParityTests : ContractStreamProje
     {
         var response = BuildResponse(scenario);
         IReadOnlyList<InterfaceStreamEvent<InterfaceMarker, InterfaceMarkerView>> projected =
-            InterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
+            GrpcInterfaceStreamProjector.ProjectActiveContractEntry<InterfaceMarker, InterfaceMarkerView>(response).ToList();
         return Task.FromResult(projected);
     }
 
     protected override Task<IReadOnlyList<ContractStreamEvent<TemplateMarker>>> ProjectTransactionEventsAsync(
         TransactionEventScenario scenario)
     {
-        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = ContractStreamProjector
+        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = GrpcContractStreamProjector
             .ProjectTransactionEvents<TemplateMarker>(BuildTransaction(scenario)).ToList();
         return Task.FromResult(projected);
     }
@@ -47,7 +47,7 @@ public sealed class GrpcContractStreamProjectorParityTests : ContractStreamProje
     protected override Task<IReadOnlyList<ContractStreamEvent<TemplateMarker>>> ProjectReassignmentEventsAsync(
         ReassignmentEventScenario scenario)
     {
-        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = ContractStreamProjector
+        IReadOnlyList<ContractStreamEvent<TemplateMarker>> projected = GrpcContractStreamProjector
             .ProjectReassignmentEvents<TemplateMarker>(BuildReassignment(scenario)).ToList();
         return Task.FromResult(projected);
     }
@@ -97,6 +97,8 @@ public sealed class GrpcContractStreamProjectorParityTests : ContractStreamProje
                     ContractId = ActiveContractScenario.ContractId,
                     TemplateId = templateId,
                     Choice = TransactionEventScenario.ChoiceName,
+                    ChoiceArgument = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                    ExerciseResult = new Com.Daml.Ledger.Api.V2.Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
                     Consuming = true,
                     Offset = eventOffset,
                 },

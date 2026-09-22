@@ -23,7 +23,7 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
         CancellationToken cancellationToken)
         where TResponse : class
     {
-        var attempt = await AttemptAsync(call, project, timeout, cancellationToken).ConfigureAwait(false);
+        var attempt = await AttemptAsync(call, project, updateIdOf: null, timeout, cancellationToken).ConfigureAwait(false);
         return attempt switch
         {
             Attempt<TResult>.Ok ok => ok.Result,
@@ -35,11 +35,12 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
     public async Task<ExerciseOutcome<TProjection>> TrySendAsync<TResponse, TProjection>(
         RestCall call,
         Func<TResponse, ExerciseOutcome<TProjection>> project,
+        Func<TResponse, string?> updateIdOf,
         TimeSpan? timeout,
         CancellationToken cancellationToken)
         where TResponse : class
     {
-        var attempt = await AttemptAsync(call, project, timeout, cancellationToken).ConfigureAwait(false);
+        var attempt = await AttemptAsync(call, project, updateIdOf, timeout, cancellationToken).ConfigureAwait(false);
         return attempt switch
         {
             Attempt<ExerciseOutcome<TProjection>>.Ok ok => ok.Result,
@@ -73,6 +74,7 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
     private async Task<Attempt<TResult>> AttemptAsync<TResponse, TResult>(
         RestCall call,
         Func<TResponse, TResult> project,
+        Func<TResponse, string?>? updateIdOf,
         TimeSpan? timeout,
         CancellationToken cancellationToken)
         where TResponse : class
@@ -98,6 +100,7 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
 
         using (response)
         {
+            TResponse? decoded = null;
             try
             {
                 if (!response.IsSuccessStatusCode)
@@ -106,18 +109,19 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
                         await RestErrorParser.ParseAsync(response, requestToken).ConfigureAwait(false)));
                 }
 
-                var body = await response.Content
+                decoded = await response.Content
                     .ReadFromJsonAsync<TResponse>(RestRefitSettings.SerializerOptions, requestToken)
                     .ConfigureAwait(false);
 
-                return body is null
-                    ? Failed<TResult>(new RestCallFailure.Undecodable(call.MissingBodyMessage, null))
-                    : new Attempt<TResult>.Ok(project(body));
+                return decoded is null
+                    ? Failed<TResult>(new RestCallFailure.Undecodable(call.MissingBodyMessage, null, null))
+                    : new Attempt<TResult>.Ok(project(decoded));
             }
             catch (Exception failure) when (IsResponseFailure(failure, cancellationToken))
             {
+                var updateId = decoded is null ? null : updateIdOf?.Invoke(decoded);
                 return Failed<TResult>(ClassifyResponse(
-                    failure, DeadlineExceededWhileReading(timeout), call.MalformedBodyMessagePrefix));
+                    failure, DeadlineExceededWhileReading(timeout), call.MalformedBodyMessagePrefix, updateId));
             }
         }
     }
@@ -130,7 +134,15 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
         IsTransportFailure(failure, callerToken) || IsUndecodableBody(failure);
 
     private static bool IsUndecodableBody(Exception failure) =>
-        failure is JsonException || MalformedResponse.IsWireDecodeFailure(failure);
+        failure is JsonException
+        || MalformedResponse.IsWireDecodeFailure(failure)
+        || IsPayloadRefusal(failure);
+
+    private const string CommittedButUndecodablePrefix =
+        "The command committed, but its transaction could not be decoded: ";
+
+    private static bool IsPayloadRefusal(Exception failure) =>
+        failure is TemplateTypeRequiredException;
 
     private static RestCallFailure ClassifyTransport(Exception failure, string deadlineExceeded) =>
         failure is HttpRequestException transportFailure
@@ -139,12 +151,13 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
             : new RestCallFailure.Transport((int)HttpStatusCode.RequestTimeout, deadlineExceeded, failure);
 
     private RestCallFailure ClassifyResponse(
-        Exception failure, string deadlineExceeded, string malformedBodyMessagePrefix)
+        Exception failure, string deadlineExceeded, string malformedBodyMessagePrefix, string? updateId)
     {
         if (IsUndecodableBody(failure))
         {
             LogUndecodableResponseBody(logger, failure);
-            return new RestCallFailure.Undecodable($"{malformedBodyMessagePrefix}{failure.Message}", failure);
+            var messagePrefix = IsPayloadRefusal(failure) ? CommittedButUndecodablePrefix : malformedBodyMessagePrefix;
+            return new RestCallFailure.Undecodable($"{messagePrefix}{failure.Message}", failure, updateId);
         }
 
         return ClassifyTransport(failure, deadlineExceeded);
@@ -176,8 +189,10 @@ internal sealed partial class RestCallEnvelope(IHttpClientFactory httpClientFact
             new ExerciseOutcome<T>.InfraError(
                 transport.StatusCode, transport.Message, SourceException: transport.Cause),
         RestCallFailure.Undecodable undecodable =>
-            new ExerciseOutcome<T>.InfraError(
-                UndecodableBodyStatusCode, undecodable.Message, SourceException: undecodable.Cause),
+            new ExerciseOutcome<T>.CommittedUndecodable(
+                undecodable.UpdateId,
+                undecodable.Message,
+                undecodable.Cause ?? new InvalidOperationException(undecodable.Message)),
         _ => throw new InvalidOperationException($"Unhandled REST call failure: {failure.GetType().Name}"),
     };
 
