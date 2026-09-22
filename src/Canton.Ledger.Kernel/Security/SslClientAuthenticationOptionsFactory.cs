@@ -35,6 +35,16 @@ internal static class SslClientAuthenticationOptionsFactory
             authenticationOptions.CertificateChainPolicy = chainPolicy;
         }
 
+        // Windows hands a handshake that configures no client certificate the credential structure an
+        // earlier handshake in the same process built around one, so that certificate is presented
+        // anyway (dotnet/runtime#134180, open, milestone 12.0.0; dotnet/runtime#28586 records that no
+        // supported managed API isolates credentials per connection). AllowTlsResume participates in
+        // the credential cache key, so clearing it on the no-certificate path gives those handshakes
+        // a cache entry no certificate-bearing handshake ever writes to. It runs on every platform so
+        // the shipped path is the tested one.
+        if (authenticationOptions.ClientCertificateContext is null)
+            authenticationOptions.AllowTlsResume = false;
+
         return authenticationOptions;
     }
 

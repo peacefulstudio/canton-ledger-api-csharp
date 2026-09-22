@@ -17,12 +17,6 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
 {
     private const string ServerHostName = "localhost";
 
-    private const string WindowsTlsContextCacheSkipMessage =
-        "Windows TlsContext keeps reusing the first certificate a selection callback ever chose in " +
-        "the process, leaking it into handshakes that configure none — an OS-level caching bug below " +
-        "this factory's TLS options surface, tracked upstream as dotnet/runtime#134180 (open, targeted " +
-        "at .NET 12, not yet shipped for net10.0).";
-
     private readonly TlsTestMaterial _material = new();
     private readonly X509Certificate2 _certificateAuthority;
     private readonly X509Certificate2 _serverCertificate;
@@ -51,6 +45,29 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
         authenticationOptions.ClientCertificateContext.Should().BeNull();
         authenticationOptions.ClientCertificates.Should().BeNull();
         authenticationOptions.CertificateChainPolicy.Should().BeNull();
+    }
+
+    [Fact]
+    public void Create_refuses_TLS_resumption_when_no_client_certificate_is_configured()
+    {
+        var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(new TlsOptions
+        {
+            CertificateAuthorities = [_certificateAuthority]
+        });
+
+        authenticationOptions.AllowTlsResume.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Create_leaves_TLS_resumption_alone_when_a_client_certificate_is_configured()
+    {
+        var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(new TlsOptions
+        {
+            ClientCertificate = _clientCertificate,
+            CertificateAuthorities = [_certificateAuthority]
+        });
+
+        authenticationOptions.AllowTlsResume.Should().BeTrue();
     }
 
     [Fact]
@@ -307,8 +324,6 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
     [Fact]
     public async Task Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured()
     {
-        Assert.SkipUnless(!OperatingSystem.IsWindows(), WindowsTlsContextCacheSkipMessage);
-
         var presented = await HandshakeAsync(new TlsOptions { CertificateAuthorities = [_certificateAuthority] });
 
         presented.Should().BeNull();
@@ -317,8 +332,6 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
     [Fact]
     public async Task Create_presents_no_client_certificate_after_a_prior_handshake_to_the_same_host_presented_one()
     {
-        Assert.SkipUnless(!OperatingSystem.IsWindows(), WindowsTlsContextCacheSkipMessage);
-
         await HandshakeAsync(new TlsOptions
         {
             ClientCertificate = _clientCertificate,
@@ -357,7 +370,6 @@ public sealed class SslClientAuthenticationOptionsFactoryTests : IDisposable
             var authenticationOptions = SslClientAuthenticationOptionsFactory.Create(options);
             authenticationOptions.TargetHost = ServerHostName;
             authenticationOptions.EnabledSslProtocols = SslProtocols.Tls12;
-            authenticationOptions.AllowTlsResume = false;
 
             await using var clientStream = new SslStream(tcpClient.GetStream(), leaveInnerStreamOpen: false);
             await clientStream.AuthenticateAsClientAsync(authenticationOptions, cancellationToken);

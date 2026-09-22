@@ -19,9 +19,9 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Fixed
 
-- `SslClientAuthenticationOptionsFactoryTests` quarantines its two Windows-only flaky cases (`Create_presents_no_client_certificate_when_only_certificate_authorities_are_configured` and `Create_presents_no_client_certificate_after_a_prior_handshake_to_the_same_host_presented_one`) on Windows via a dynamic `Assert.SkipUnless`, rather than failing CI there. Root cause is an open upstream .NET runtime bug, not this factory: on Windows, `TlsContext` keeps reusing the first certificate a selection callback ever chose in the process, leaking it into later handshakes that configure none — tracked as [dotnet/runtime#134180](https://github.com/dotnet/runtime/issues/134180), open, targeted at .NET 12, not yet shipped for net10.0. Both tests still run and assert normally on Linux and macOS, where this caching bug doesn't reproduce. No production behavior changes; this is a test-only change.
-
 ### Security
+
+- **A TLS connection configured with no client certificate no longer presents another connection's certificate on Windows** (`Canton.Ledger.Kernel`, and through it `Canton.Ledger.Grpc.Client`, `Canton.Ledger.Rest.Client` and the client-credentials token client). If one process opened a mutual-TLS connection and then a second connection whose `TlsOptions` carried no client certificate, Windows handed the second handshake the credential structure built for the first, and a server asking for client authentication received the first connection's certificate. The behaviour is [dotnet/runtime#134180](https://github.com/dotnet/runtime/issues/134180) (open, targeted at .NET 12, not shipped for net10.0), below this library's TLS options surface, and [dotnet/runtime#28586](https://github.com/dotnet/runtime/issues/28586) records that no supported managed API isolates SChannel credentials per connection. `SslClientAuthenticationOptionsFactory` now disables TLS resumption on the no-client-certificate path only, which is enough to give those handshakes their own credential-cache entry. Connections that do configure a client certificate keep TLS resumption and are otherwise unchanged.
 
 ## [0.5.0-preview.2] - 2026-09-11
 
