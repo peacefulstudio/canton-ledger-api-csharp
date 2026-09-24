@@ -161,13 +161,14 @@ jobs:
             tests/Canton.Ledger.Client.Parity.Tests/Canton.Ledger.Client.Parity.Tests.csproj
 
       - name: Wait for ledger + PQS readiness
+        id: ready
         working-directory: canton-localnet
         run: |
           set -euo pipefail
           "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
 
       - name: Integration tests (all but the PQS round-trip, which needs a scribe restart first)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
           CANTON_LOCALNET_PROFILE: a-validator-1
           CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
@@ -185,7 +186,7 @@ jobs:
           .github/scripts/assert-tests-ran.sh "${RUNNER_TEMP}/grpc-integration.log" "gRPC integration tests" 16 3
 
       - name: Restart PQS so scribe's template filter picks up the DARs the tests uploaded
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         run: |
           set -euo pipefail
           restarted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -200,7 +201,7 @@ jobs:
           exit 1
 
       - name: PQS round-trip test
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
           CANTON_LOCALNET_PROFILE: a-validator-1
           CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
@@ -217,7 +218,7 @@ jobs:
           .github/scripts/assert-tests-ran.sh "${RUNNER_TEMP}/pqs-round-trip.log" "PQS round-trip test" 2 0
 
       - name: REST conformance tests (JSON Ledger API)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
           CANTON_LOCALNET_PROFILE: a-validator-1
           CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
@@ -234,7 +235,7 @@ jobs:
           .github/scripts/assert-tests-ran.sh "${RUNNER_TEMP}/rest-conformance.log" "REST conformance tests" 35 3
 
       - name: Cross-transport parity tests (Fake, gRPC, REST against LocalNet)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
           CANTON_LOCALNET_PROFILE: a-validator-1
           CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
