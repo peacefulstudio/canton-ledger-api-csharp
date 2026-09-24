@@ -36,11 +36,12 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 /// <para>
 /// The stream is filtered to a freshly allocated party, which no contract mentions, so an entry
 /// carrying an event would mean the filter was discarded rather than that the ledger was busy.
-/// Allocating that party is also what makes the first window liable to be answered
-/// <c>409 STALE_STREAM_AUTHORIZATION</c>: the participant opened it against a topology snapshot the
-/// allocation had already moved past, and asks for a quick retry. That status and the request
-/// timeout above are reopened rather than asserted on, because neither is evidence either way about
-/// what a window that does complete carries.
+/// The participant answers a window <c>409 STALE_STREAM_AUTHORIZATION</c> when the streaming
+/// user's rights change while it is open, and asks for a quick retry. Every lane grants and revokes
+/// act-as rights on the same validator user, so this class runs in
+/// <see cref="ValidatorUserRightsIsolation"/>, after the parallel classes have stopped changing
+/// them. That status and the request timeout above are reopened rather than asserted on, because
+/// neither is evidence either way about what a window that does complete carries.
 /// </para>
 /// <para>
 /// Reopening on that code is the caller's obligation, not a local accommodation this probe invented.
@@ -56,6 +57,7 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 /// </para>
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(nameof(ValidatorUserRightsIsolation))]
 public class RestOffsetCheckpointConformanceTests(ITestOutputHelper output)
 {
     private const string UpdatesPath = "/v2/updates";
@@ -279,7 +281,7 @@ public class RestOffsetCheckpointConformanceTests(ITestOutputHelper output)
     /// <summary>
     /// Whether the participant answered something that carries no evidence either way about offset
     /// checkpoints, and so is reopened rather than asserted on: the stale stream authorization a
-    /// fresh party allocation provokes, read off the error code the client reads, and the request
+    /// change to the user's rights provokes, read off the error code the client reads, and the request
     /// timeout a participant under load answers with before the window it was asked to hold has
     /// elapsed.
     /// </summary>
