@@ -167,7 +167,7 @@ jobs:
           set -euo pipefail
           "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
 
-      - name: Integration tests (all but the PQS round-trip, which needs a scribe restart first)
+      - name: Integration tests (except PQS round-trip)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
           CANTON_LOCALNET_PROFILE: a-validator-1
