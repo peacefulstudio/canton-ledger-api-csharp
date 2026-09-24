@@ -13,7 +13,10 @@ namespace Canton.Ledger.Kernel.Telemetry;
 /// </summary>
 /// <remarks>
 /// These are the emitted attribute names, not a schema: an operation sets only the attributes it
-/// has, so no single span carries all of them. Attribute names are part of the telemetry shape and
+/// has, so no single span carries all of them. The party and contract identifiers —
+/// <see cref="CantonSubmitterActAs"/>, <see cref="CantonSubmitterReadAs"/>, <see cref="CantonPartyId"/>,
+/// <see cref="CantonPartyIdHint"/> and <see cref="DamlContractId"/> — are off by default and emitted
+/// only when a host opts in. Attribute names are part of the telemetry shape and
 /// remain revisable in any preview before 1.0.
 /// </remarks>
 public static class LedgerActivityTagNames
@@ -21,7 +24,7 @@ public static class LedgerActivityTagNames
     /// <summary>The Daml choice being exercised on the contract this span submits against.</summary>
     public const string DamlChoice = "daml.choice";
 
-    /// <summary>The contract id the span's exercise command targets.</summary>
+    /// <summary>The contract id the span's exercise command targets. Emitted only when <c>LedgerClientOptions.EmitPartyAndContractSpanTags</c> opts in.</summary>
     public const string DamlContractId = "daml.contract_id";
 
     /// <summary>The Daml template or interface the span's operation is scoped to.</summary>
@@ -36,22 +39,22 @@ public static class LedgerActivityTagNames
     /// <summary>The exclusive offset a streaming span resumed from.</summary>
     public const string CantonFromOffset = "canton.from_offset";
 
-    /// <summary>The comma-separated parties the span's operation acts as.</summary>
+    /// <summary>The comma-separated parties the span's operation acts as. Emitted only when <c>LedgerClientOptions.EmitPartyAndContractSpanTags</c> opts in.</summary>
     public const string CantonSubmitterActAs = "canton.submitter.act_as";
 
-    /// <summary>The comma-separated parties the span's operation additionally reads as, omitted when it names none.</summary>
+    /// <summary>The comma-separated parties the span's operation additionally reads as, omitted when it names none. Emitted only when <c>LedgerClientOptions.EmitPartyAndContractSpanTags</c> opts in.</summary>
     public const string CantonSubmitterReadAs = "canton.submitter.read_as";
 
     /// <summary>The update id the span's point read asked for.</summary>
     public const string CantonUpdateId = "canton.update_id";
 
-    /// <summary>The party the span's connected-synchronizer lookup was narrowed to.</summary>
+    /// <summary>The party the span's connected-synchronizer lookup was narrowed to. Emitted only when <c>LedgerClientOptions.EmitPartyAndContractSpanTags</c> opts in.</summary>
     public const string CantonPartyId = "canton.party_id";
 
     /// <summary>The participant node the span's connected-synchronizer lookup was narrowed to.</summary>
     public const string CantonParticipantId = "canton.participant_id";
 
-    /// <summary>The hint the span's party allocation asked the participant to derive an id from.</summary>
+    /// <summary>The hint the span's party allocation asked the participant to derive an id from. Emitted only when <c>LedgerClientOptions.EmitPartyAndContractSpanTags</c> opts in.</summary>
     public const string CantonPartyIdHint = "canton.party_id_hint";
 
     /// <summary>The user the span's operation creates, or whose rights it lists, grants or revokes.</summary>

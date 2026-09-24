@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- https://learn.microsoft.com/dotnet/fundamentals/package-validation/diagnostic-ids -->
+<Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:Canton.Ledger.Rest.Client.Raw.PartyManagementServiceApiExtensions.GetPartiesAsync(Canton.Ledger.Rest.Client.Raw.IPartyManagementServiceApi,System.Collections.Generic.IEnumerable{System.String},System.String,System.Threading.CancellationToken)</Target>
+    <Left>lib/net10.0/Canton.Ledger.Rest.dll</Left>
+    <Right>lib/net10.0/Canton.Ledger.Rest.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+</Suppressions>

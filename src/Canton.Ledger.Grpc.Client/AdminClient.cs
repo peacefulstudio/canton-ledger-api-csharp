@@ -121,7 +121,7 @@ internal sealed partial class AdminClient : IAdminClient
             (headers, deadline, token) => _partyService.AllocatePartyAsync(request, headers, deadline, token),
             response => new PartyDetails(response.PartyDetails.Party, response.PartyDetails.IsLocal),
             cancellationToken,
-            configureActivity: activity => activity?.SetTag(LedgerActivityTagNames.CantonPartyIdHint, partyIdHint)).ConfigureAwait(false);
+            configureActivity: activity => activity.SetPartyOrContractTag(_options, LedgerActivityTagNames.CantonPartyIdHint, partyIdHint)).ConfigureAwait(false);
 
         LogPartyAllocated(_logger, details.Party);
         return details;

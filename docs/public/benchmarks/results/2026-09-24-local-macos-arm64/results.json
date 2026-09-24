@@ -1,0 +1,243 @@
+{
+  "environment": {
+    "startedAt": "2026-09-24T12:21:18.79766+00:00",
+    "commit": "eb33befba4efa9e637e7339d604ca87005f7b2e7",
+    "runner": "local workstation: Apple Silicon laptop, LocalNet on Docker Desktop",
+    "operatingSystem": "macOS 27.0.0",
+    "architecture": "Arm64",
+    "processorCount": 12,
+    "dotnetRuntime": ".NET 10.0.9",
+    "clientVersion": "0.5.0-preview.2\u002Beb33befba4efa9e637e7339d604ca87005f7b2e7",
+    "cantonProtoVersion": "3.5.18",
+    "ledgerApiVersion": "3.5.18",
+    "pqsMeasured": true
+  },
+  "parameters": {
+    "warmupCommands": 10,
+    "seedContractsPerTransport": 50,
+    "concurrency": 16,
+    "repetitions": 5,
+    "latencySamples": 50,
+    "tailSamples": 30,
+    "tailSpacingMs": 500,
+    "restIdleWindowsMs": [
+      250
+    ],
+    "acsContracts": 50,
+    "pqsLagSamples": 30,
+    "pqsRows": 100,
+    "commit": "eb33befba4efa9e637e7339d604ca87005f7b2e7",
+    "runner": "local workstation: Apple Silicon laptop, LocalNet on Docker Desktop"
+  },
+  "latencies": [
+    {
+      "scenario": "Submit-and-wait (sequential)",
+      "transport": "gRPC",
+      "summary": {
+        "samples": 50,
+        "meanMs": 360.244778,
+        "p50Ms": 359.9119,
+        "p95Ms": 368.3001,
+        "p99Ms": 369.2672,
+        "maxMs": 369.2672
+      }
+    },
+    {
+      "scenario": "Submit-and-wait (sequential)",
+      "transport": "REST",
+      "summary": {
+        "samples": 50,
+        "meanMs": 359.994598,
+        "p50Ms": 359.7241,
+        "p95Ms": 372.206,
+        "p99Ms": 375.0975,
+        "maxMs": 375.0975
+      }
+    },
+    {
+      "scenario": "Submit \u2192 completion on the completion stream",
+      "transport": "gRPC",
+      "summary": {
+        "samples": 30,
+        "meanMs": 337.90791333333334,
+        "p50Ms": 338.8934,
+        "p95Ms": 349.4509,
+        "p99Ms": 349.8961,
+        "maxMs": 349.8961
+      }
+    },
+    {
+      "scenario": "Submit \u2192 completion on the completion stream",
+      "transport": "REST",
+      "summary": {
+        "samples": 30,
+        "meanMs": 2560.829873333334,
+        "p50Ms": 2559.5811,
+        "p95Ms": 2567.5021,
+        "p99Ms": 2567.8063,
+        "maxMs": 2567.8063
+      }
+    },
+    {
+      "scenario": "Submit \u2192 completion on the completion stream",
+      "transport": "REST, 250 ms idle window",
+      "summary": {
+        "samples": 30,
+        "meanMs": 690.1242533333334,
+        "p50Ms": 699.3888,
+        "p95Ms": 718.0645,
+        "p99Ms": 718.5521,
+        "maxMs": 718.5521
+      }
+    },
+    {
+      "scenario": "Submit \u2192 created event on a live update tail",
+      "transport": "gRPC",
+      "summary": {
+        "samples": 30,
+        "meanMs": 338.44151000000005,
+        "p50Ms": 338.0241,
+        "p95Ms": 350.9693,
+        "p99Ms": 352.8867,
+        "maxMs": 352.8867
+      }
+    },
+    {
+      "scenario": "Submit \u2192 created event on a live update tail",
+      "transport": "REST",
+      "summary": {
+        "samples": 30,
+        "meanMs": 2561.391976666667,
+        "p50Ms": 2559.4899,
+        "p95Ms": 2570.5255,
+        "p99Ms": 2578.7609,
+        "maxMs": 2578.7609
+      }
+    },
+    {
+      "scenario": "Submit \u2192 created event on a live update tail",
+      "transport": "REST, 250 ms idle window",
+      "summary": {
+        "samples": 30,
+        "meanMs": 632.9379333333333,
+        "p50Ms": 586.2649,
+        "p95Ms": 705.388,
+        "p99Ms": 707.3165,
+        "maxMs": 707.3165
+      }
+    },
+    {
+      "scenario": "Submit \u2192 contract visible in PQS",
+      "transport": "PQS",
+      "summary": {
+        "samples": 30,
+        "meanMs": 365.69942,
+        "p50Ms": 359.3899,
+        "p95Ms": 383.0991,
+        "p99Ms": 508.4939,
+        "maxMs": 508.4939
+      }
+    }
+  ],
+  "throughputs": [
+    {
+      "scenario": "Submit-and-wait, 16 in flight",
+      "transport": "gRPC",
+      "unit": "commands/s",
+      "summary": {
+        "items": 50,
+        "repetitions": 1,
+        "medianSeconds": 1.4325415,
+        "medianItemsPerSecond": 34.90300281004076,
+        "bestItemsPerSecond": 34.90300281004076
+      }
+    },
+    {
+      "scenario": "Submit-and-wait, 16 in flight",
+      "transport": "REST",
+      "unit": "commands/s",
+      "summary": {
+        "items": 50,
+        "repetitions": 1,
+        "medianSeconds": 1.4409051,
+        "medianItemsPerSecond": 34.700411567701444,
+        "bestItemsPerSecond": 34.700411567701444
+      }
+    },
+    {
+      "scenario": "Update stream replay (bounded range)",
+      "transport": "gRPC",
+      "unit": "events/s",
+      "summary": {
+        "items": 100,
+        "repetitions": 5,
+        "medianSeconds": 0.0102542,
+        "medianItemsPerSecond": 9752.101577890036,
+        "bestItemsPerSecond": 11214.785573299838
+      }
+    },
+    {
+      "scenario": "Update stream replay (bounded range)",
+      "transport": "REST",
+      "unit": "events/s",
+      "summary": {
+        "items": 100,
+        "repetitions": 5,
+        "medianSeconds": 0.015567,
+        "medianItemsPerSecond": 6423.8453138048435,
+        "bestItemsPerSecond": 7209.857316923699
+      }
+    },
+    {
+      "scenario": "Active-contract snapshot, 50 contracts",
+      "transport": "gRPC",
+      "unit": "contracts/s",
+      "summary": {
+        "items": 50,
+        "repetitions": 5,
+        "medianSeconds": 0.0102775,
+        "medianItemsPerSecond": 4864.9963512527365,
+        "bestItemsPerSecond": 5311.238580837051
+      }
+    },
+    {
+      "scenario": "Active-contract snapshot, 50 contracts",
+      "transport": "REST",
+      "unit": "contracts/s",
+      "summary": {
+        "items": 50,
+        "repetitions": 5,
+        "medianSeconds": 0.012824,
+        "medianItemsPerSecond": 3898.939488459139,
+        "bestItemsPerSecond": 4004.6133145383483
+      }
+    },
+    {
+      "scenario": "Active-contract snapshot, 120 contracts",
+      "transport": "gRPC",
+      "unit": "contracts/s",
+      "summary": {
+        "items": 120,
+        "repetitions": 5,
+        "medianSeconds": 0.0158518,
+        "medianItemsPerSecond": 7570.11822001287,
+        "bestItemsPerSecond": 8406.834756657163
+      }
+    },
+    {
+      "scenario": "Paged template query",
+      "transport": "PQS",
+      "unit": "rows/s",
+      "summary": {
+        "items": 100,
+        "repetitions": 5,
+        "medianSeconds": 0.0014953,
+        "medianItemsPerSecond": 66876.21213134489,
+        "bestItemsPerSecond": 78603.99308284861
+      }
+    }
+  ],
+  "notes": [
+    "The 120-contract snapshot runs over gRPC only: the REST client reads the ACS in one un-paged call, and the LocalNet participant rejects JSON API lists over 200 elements (413 JSON_API_MAXIMUM_LIST_ELEMENTS_NUMBER_REACHED)."
+  ]
+}

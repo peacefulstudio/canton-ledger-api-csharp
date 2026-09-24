@@ -68,15 +68,27 @@ internal static class ActivityHelper
         activity.SetTag(ServerPort, serverPort);
     }
 
-    internal static void SetSubmitterTags(this Activity? activity, RuntimeCommands.SubmitterInfo submitter)
+    internal static void SetSubmitterTags(
+        this Activity? activity,
+        RuntimeCommands.SubmitterInfo submitter,
+        LedgerClientOptions options)
     {
-        if (activity is null) return;
+        if (activity is null || !options.EmitPartyAndContractSpanTags) return;
 
         activity.SetTag(LedgerActivityTagNames.CantonSubmitterActAs, string.Join(",", submitter.ActAs.Select(p => p.Id)));
         if (submitter.ReadAs.Count > 0)
         {
             activity.SetTag(LedgerActivityTagNames.CantonSubmitterReadAs, string.Join(",", submitter.ReadAs.Select(p => p.Id)));
         }
+    }
+
+    internal static void SetPartyOrContractTag(
+        this Activity? activity,
+        LedgerClientOptions options,
+        string name,
+        string value)
+    {
+        if (options.EmitPartyAndContractSpanTags) activity?.SetTag(name, value);
     }
 
     public static void RecordGrpcError(this Activity? activity, RpcException exception)

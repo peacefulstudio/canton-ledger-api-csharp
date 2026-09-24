@@ -21,6 +21,81 @@ Covers: `Canton.Ledger.Abstractions`, `Canton.Ledger.Grpc`, `Canton.Ledger.Grpc.
 
 ### Security
 
+## [0.5.0-preview.3] - 2026-09-24
+
+The third preview of the `0.5.0` window. Three changes dominate it.
+
+  - Traces stop carrying ledger identities by default. gRPC spans drop party and contract ids unless you opt back in, and the JSON client's `url.full` no longer records the query string.
+  - A command that committed is no longer reported as an exception. When `TryExerciseAsync` cannot read a committed choice result, it returns the `CommittedUndecodable` outcome instead of throwing an exception that looked like the command never ran.
+  - The JSON transport reads large ledgers whole and follows live ones more closely. Active-contract reads page past the participant's list limit, and a live tail's default idle window drops from 2 s to 250 ms.
+
+Package dependencies are unchanged from `0.5.0-preview.2`, so bindings generated for that release keep working without regeneration. Read the BREAKING section first. Only the `GetPartiesAsync` change is a compile error; the others change what a running client emits, returns or requires, including a new minimum of Canton `3.5.10` for the JSON client. Streaming latency benchmarks comparing the gRPC, JSON and PQS transports are now published under `docs/public/benchmarks`.
+
+### Added
+
+`IPartyManagementApi` and `IUserManagementApi` join the raw JSON surface, and send the query-parameter names the participant actually reads.
+
+  - Both are Refit interfaces in `Canton.Ledger.Rest.Client.Raw`, experimental under `CANTONREST001` like the rest of the raw surface, and `AddRestLedgerRawApis` registers them.
+  - `IPartyManagementApi.ListKnownParties` and `GetParties`, and `IUserManagementApi.GetUser`, send `filter-party` and `identity-provider-id`, so a party filter or identity-provider scope now takes effect.
+  - `IUserManagementApi.ListUsers`, `DeleteUser` and `ListUserRights` take no identity-provider parameter, because the participant reads none on those routes.
+  - `IPartyManagementServiceApi` and `IUserManagementServiceApi` stay registered and unchanged. Switch to the new interfaces on these routes to get the filtering you asked for.
+
+### Changed — BREAKING
+
+gRPC spans no longer carry party or contract ids unless you opt in.
+
+  - Five span attributes are off by default: `canton.submitter.act_as`, `canton.submitter.read_as`, `canton.party_id`, `canton.party_id_hint` and `daml.contract_id`. Every other attribute is emitted as before.
+  - The new `LedgerClientOptions.EmitPartyAndContractSpanTags` restores all five, on both ledger-client and admin-client spans. It defaults to `false` and binds from `Canton:Ledger:EmitPartyAndContractSpanTags`.
+  - **Set it to `true` if a dashboard, sampling rule or span processor reads one of the five attributes** and your tracing backend is trusted with ledger identities.
+  - The JSON and PQS clients never emit these attributes, so they have no switch.
+
+The JSON client's `url.full` span attribute drops the query string and user info.
+
+  - It now records scheme, host, path and any non-default port, following the OpenTelemetry HTTP semantic conventions. No option restores the query.
+  - Path segments are kept, so a route that embeds a party or user id still records it.
+  - No action is needed unless you group JSON spans by their full URL, query included; those spans now share one value per path.
+
+`TryExerciseAsync<TResult>` returns `CommittedUndecodable` when it cannot read a committed choice result, instead of throwing.
+
+  - Before, a transaction with zero or several exercised events for the choice threw `InvalidOperationException`, and a `TResult` with no Daml mapping threw `NotSupportedException`, although the command had committed. This replaces the `NotSupportedException` caveat in the `0.5.0-preview.2` notes.
+  - Both transports now return `ExerciseOutcome<TResult>.CommittedUndecodable`, with the transaction's `UpdateId`, a message naming the reason, and the original exception as `SourceException`.
+  - `OneOrThrow` and `OneOrThrowAsync` throw `LedgerOperationException` with `CommitState` `Committed` for it. `ThrowIfError` treats it as success.
+  - On gRPC, the submission span records it as an error with `error.type` `CommittedUndecodable`.
+  - **Remove any `catch (InvalidOperationException)` or `catch (NotSupportedException)` around `TryExerciseAsync` and handle the `CommittedUndecodable` arm instead.** Do not resubmit on it; read the transaction back by its `UpdateId`.
+
+`GetPartiesAsync` now extends `IPartyManagementApi` instead of `IPartyManagementServiceApi`.
+
+  - A call on an `IPartyManagementServiceApi` instance no longer compiles.
+  - **Resolve `IPartyManagementApi` (registered by `AddRestLedgerRawApis`) and call `GetPartiesAsync` on it with the same arguments.** Keep your `CANTONREST001` suppression.
+  - The `identityProviderId` you pass is now applied by the participant, where before it was dropped.
+
+`RestLedgerClientOptions.StreamWindowIdleTimeout` defaults to 250 ms instead of 2 s.
+
+  - A live tail over JSON — `SubscribeAsync` or `SubscribeLedgerEffectsAsync` with no end offset, and `CompletionStreamAsync` — now trails the ledger by well under a second instead of more than two.
+  - A quiet followed stream reopens its window about four times a second instead of once every two seconds, so the participant sees more requests.
+  - Bounded reads that end at or below the ledger end are unaffected.
+  - To keep the previous pacing, set `StreamWindowIdleTimeout = TimeSpan.FromSeconds(2)`, or `Canton:Rest:StreamWindowIdleTimeout` to `00:00:02`.
+
+The JSON client needs Canton `3.5.10` or later.
+
+  - Every active-contract read over JSON now uses `POST /v2/state/active-contracts-page`, which earlier `3.5.x` patches do not serve. See the active-contract fix below.
+  - **Upgrade the participant to `3.5.10` or later before upgrading the JSON client.** The gRPC client still supports any `3.5.x` patch.
+
+### Fixed
+
+JSON active-contract reads return snapshots larger than the participant's list limit.
+
+  - `SubscribeActiveAsync`, for templates and interfaces, and every read built on it, such as `QueryActiveAsync`, used to fail with `413 Content Too Large` once a party held more matching contracts than the participant's `http-list-max-elements-limit`, which defaults to 200.
+  - The snapshot is now read page by page at one offset, so the pages together form one consistent snapshot ending in the same checkpoint as before.
+  - `StreamWindowLimit` now also sets each page's size. **Keep it at 10000 or below**: the participant rejects larger pages, and the read then ends with a `StreamError` on its first page.
+  - A page that fails ends the stream with an in-band `StreamError` after the contracts already read, with no checkpoint.
+  - A snapshot at offset 0 comes back empty without contacting the participant.
+
+A party filter or identity-provider scope sent through the raw JSON party and user endpoints was silently ignored.
+
+  - `IPartyManagementServiceApi.ListKnownParties`, `IPartyManagementServiceApi.GetParties` and `IUserManagementServiceApi.GetUser` send parameter names the participant does not read. It answered as if no filter or scope had been sent.
+  - Those interfaces are unchanged. Call `IPartyManagementApi` and `IUserManagementApi`, listed under **Added**, to have the filter and scope applied.
+
 ## [0.5.0-preview.2] - 2026-09-22
 
 The second preview of the `0.5.0` window, and three changes dominate it.

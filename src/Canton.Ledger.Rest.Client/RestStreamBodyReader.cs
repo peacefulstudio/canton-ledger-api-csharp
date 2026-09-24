@@ -9,9 +9,10 @@ namespace Canton.Ledger.Rest.Client;
 
 /// <summary>
 /// Parses the body the Canton JSON Ledger API returns for one window of a streaming read
-/// (<c>POST /v2/state/active-contracts</c>, <c>POST /v2/updates</c>,
-/// <c>POST /v2/commands/completions</c>): one JSON array of entries, <c>[]</c> when the window
-/// closed with nothing to report. Each window is a blocking call whose whole body is buffered by
+/// (<c>POST /v2/updates</c>, <c>POST /v2/commands/completions</c>): one JSON array of entries,
+/// <c>[]</c> when the window closed with nothing to report — and for one page of the ACS snapshot
+/// (<c>POST /v2/state/active-contracts-page</c>): one JSON object carrying the page's entries and
+/// the token to the next page. Each window is a blocking call whose whole body is buffered by
 /// the transport before this parses it, unlike the gRPC transport's true server streaming; the
 /// pagination loop stitches the windows back into one continuous stream.
 /// </summary>
@@ -50,6 +51,42 @@ internal static class RestStreamBodyReader
         catch (Exception failure) when (StreamEventClassifier.IsNotCancellation(failure))
         {
             entries = [];
+            decodeFailure = failure;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Parses <paramref name="body"/> as one page of <c>POST /v2/state/active-contracts-page</c>,
+    /// handing back the decode failure instead of throwing it, as <see cref="TryParse{TEntry}"/>
+    /// does. A page whose <c>activeContracts</c> is absent carries no entries, and an absent or
+    /// empty <c>nextPageToken</c> marks the last page.
+    /// </summary>
+    public static bool TryParseActiveContractsPage(
+        string body,
+        out IReadOnlyList<Raw.GetActiveContractsResponse> entries,
+        out string? nextPageToken,
+        [NotNullWhen(false)] out Exception? decodeFailure)
+    {
+        try
+        {
+            var page = JsonSerializer.Deserialize<Raw.GetActiveContractsPageResponse>(body, RestRefitSettings.SerializerOptions)
+                ?? throw new JsonException("The active-contracts page response body deserialized to null.");
+            var pageEntries = page.ActiveContracts?.ToList() ?? [];
+            if (pageEntries.Any(entry => entry is null))
+            {
+                throw new JsonException("The active-contracts page response body contains a null entry.");
+            }
+
+            entries = pageEntries;
+            nextPageToken = string.IsNullOrEmpty(page.NextPageToken) ? null : page.NextPageToken;
+            decodeFailure = null;
+            return true;
+        }
+        catch (Exception failure) when (StreamEventClassifier.IsNotCancellation(failure))
+        {
+            entries = [];
+            nextPageToken = null;
             decodeFailure = failure;
             return false;
         }

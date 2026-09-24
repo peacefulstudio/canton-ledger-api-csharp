@@ -44,13 +44,15 @@ public class RestSubscribeRequestBuilderTests
     private static readonly Party Bob = new("party::bob");
 
     [Fact]
-    public void BuildGetActiveContractsRequest_sets_the_active_at_offset_and_a_template_filter_per_party()
+    public void BuildGetActiveContractsPageRequest_sets_the_active_at_offset_the_page_size_and_a_template_filter_per_party()
     {
         var submitter = (SubmitterInfo)Alice;
 
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<TemplateMarker>(submitter, 42L);
+        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<TemplateMarker>(submitter, 42L, 75);
 
         request.ActiveAtOffset.Should().Be("42");
+        request.MaxPageSize.Should().Be(75);
+        request.PageToken.Should().BeNull();
         var filters = request.EventFormat.FiltersByParty.Should().ContainKey("party::alice").WhoseValue;
         var identifierFilter = filters.Cumulative.Should().ContainSingle().Subject.IdentifierFilter;
         identifierFilter.Should().NotBeNull();
@@ -62,11 +64,11 @@ public class RestSubscribeRequestBuilderTests
     }
 
     [Fact]
-    public void BuildGetActiveContractsRequest_sets_an_interface_filter_for_an_interface_marker()
+    public void BuildGetActiveContractsPageRequest_sets_an_interface_filter_for_an_interface_marker()
     {
         var submitter = (SubmitterInfo)Alice;
 
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<InterfaceMarker>(submitter, 1L);
+        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<InterfaceMarker>(submitter, 1L, 75);
 
         var filters = request.EventFormat.FiltersByParty.Should().ContainKey("party::alice").WhoseValue;
         var identifierFilter = filters.Cumulative.Should().ContainSingle().Subject.IdentifierFilter;
@@ -78,21 +80,21 @@ public class RestSubscribeRequestBuilderTests
     }
 
     [Fact]
-    public void BuildGetActiveContractsRequest_scopes_the_filter_to_every_actAs_and_readAs_party()
+    public void BuildGetActiveContractsPageRequest_scopes_the_filter_to_every_actAs_and_readAs_party()
     {
         var submitter = new SubmitterInfo(Alice, new HashSet<Party> { Bob });
 
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<TemplateMarker>(submitter, 1L);
+        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<TemplateMarker>(submitter, 1L, 75);
 
         request.EventFormat.FiltersByParty.Keys.Should().BeEquivalentTo(["party::alice", "party::bob"]);
     }
 
     [Fact]
-    public void BuildGetActiveContractsRequest_gives_each_party_an_independently_mutable_filter()
+    public void BuildGetActiveContractsPageRequest_gives_each_party_an_independently_mutable_filter()
     {
         var submitter = new SubmitterInfo(Alice, new HashSet<Party> { Bob });
 
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<TemplateMarker>(submitter, 1L);
+        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<TemplateMarker>(submitter, 1L, 75);
 
         var aliceFilter = request.EventFormat.FiltersByParty["party::alice"].Cumulative.Single();
         aliceFilter.IdentifierFilter = new Raw.IdentifierFilter { WildcardFilter = new Raw.WildcardFilter() };

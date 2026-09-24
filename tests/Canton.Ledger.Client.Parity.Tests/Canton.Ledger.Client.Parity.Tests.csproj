@@ -13,6 +13,7 @@
     <PackageReference Include="Daml.Runtime" />
     <PackageReference Include="Daml.Codegen.Testing.Conformance" />
     <PackageReference Include="Peaceful.Canton.Localnet.Testing" />
+    <PackageReference Include="Splice.Amulet" />
   </ItemGroup>
 
   <ItemGroup>

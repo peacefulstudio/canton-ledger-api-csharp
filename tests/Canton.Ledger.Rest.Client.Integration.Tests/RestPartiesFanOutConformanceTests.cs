@@ -39,7 +39,7 @@ public class RestPartiesFanOutConformanceTests
         var second = await AllocatePartyAsync(lane, "rest-parties-fan-out-second");
         using var wireClient = lane.CreateWireLevelClient();
 
-        var adapted = await lane.Api<IPartyManagementServiceApi>().GetPartiesAsync(
+        var adapted = await lane.Api<IPartyManagementApi>().GetPartiesAsync(
             [first, second], cancellationToken: TestContext.Current.CancellationToken);
 
         adapted.Select(details => details.Party).Should().Equal(

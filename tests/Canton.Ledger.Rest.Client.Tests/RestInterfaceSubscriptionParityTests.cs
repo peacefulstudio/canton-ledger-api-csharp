@@ -34,7 +34,7 @@ public sealed class RestInterfaceSubscriptionParityTests : InterfaceSubscription
 internal sealed class ViewedParticipantHandler : HttpMessageHandler
 {
     private const string LedgerEndPath = "/v2/state/ledger-end";
-    private const string ActiveContractsPath = "/v2/state/active-contracts";
+    private const string ActiveContractsPagePath = "/v2/state/active-contracts-page";
     private const string UpdatesPath = "/v2/updates";
 
     private static readonly string CreatedEventJson =
@@ -64,9 +64,9 @@ internal sealed class ViewedParticipantHandler : HttpMessageHandler
     private static readonly string LedgerEndJson =
         $$"""{"offset": {{InterfaceSubscriptionParityTests.Window.To.Value}}}""";
 
-    private static readonly string ActiveContractsJson =
+    private static readonly string ActiveContractsPageJson =
         $$"""
-        [
+        {"activeContracts": [
           {
             "contractEntry": {
               "JsActiveContract": {
@@ -76,7 +76,7 @@ internal sealed class ViewedParticipantHandler : HttpMessageHandler
               }
             }
           }
-        ]
+        ]}
         """;
 
     private static readonly string UpdatesJson =
@@ -104,7 +104,7 @@ internal sealed class ViewedParticipantHandler : HttpMessageHandler
         var body = request.RequestUri!.AbsolutePath switch
         {
             LedgerEndPath => LedgerEndJson,
-            ActiveContractsPath => ActiveContractsJson,
+            ActiveContractsPagePath => ActiveContractsPageJson,
             UpdatesPath => UpdatesJson,
             var unexpected => throw new InvalidOperationException(
                 $"The interface-subscription lane seeds no response for '{unexpected}'."),

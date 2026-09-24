@@ -18,8 +18,8 @@ public class PartyManagementServiceApiExtensionsTests
     private static string Details(params string[] parties) =>
         $$"""{"partyDetails":[{{string.Join(",", parties.Select(party => $$"""{"party":"{{party}}"}"""))}}]}""";
 
-    private static (IPartyManagementServiceApi Api, RecordingHttpHandler Transport) BuildApi() =>
-        RestApiFactory.Build<IPartyManagementServiceApi>();
+    private static (IPartyManagementApi Api, RecordingHttpHandler Transport) BuildApi() =>
+        RestApiFactory.Build<IPartyManagementApi>();
 
     [Fact]
     public async Task GetPartiesAsync_issues_one_request_per_party()
@@ -72,7 +72,7 @@ public class PartyManagementServiceApiExtensionsTests
             [Alice, Bob], identityProviderId: "idp-1", TestContext.Current.CancellationToken);
 
         transport.Requests.Select(request => request.PathAndQuery).Should().AllSatisfy(
-            path => path.Should().EndWith("?identityProviderId=idp-1"));
+            path => path.Should().EndWith("?identity-provider-id=idp-1"));
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public class PartyManagementServiceApiExtensionsTests
     [Fact]
     public void GetPartiesAsync_rejects_a_null_api_synchronously()
     {
-        IPartyManagementServiceApi api = null!;
+        IPartyManagementApi api = null!;
 
         var act = () => { _ = api.GetPartiesAsync(["alice::ns"]); };
 

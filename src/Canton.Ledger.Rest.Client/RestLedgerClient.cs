@@ -20,6 +20,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RuntimeCommands = Daml.Runtime.Commands;
+using WireGetActiveContractsPageRequest = Canton.Ledger.Rest.Client.Raw.GetActiveContractsPageRequest;
 using WireGetActiveContractsResponse = Canton.Ledger.Rest.Client.Raw.GetActiveContractsResponse;
 using WireGetUpdatesResponse = Canton.Ledger.Rest.Client.Raw.GetUpdatesResponse;
 
@@ -48,8 +49,9 @@ namespace Canton.Ledger.Rest.Client;
 /// reached the participant still throws.
 /// <see cref="Canton.Ledger.Abstractions.ICantonLedgerClient.CompletionStreamAsync"/> runs over that
 /// same loop and is a live tail for the same reason.
-/// <see cref="SubscribeActiveAsync{T}"/> is the one read that does not loop: the ACS snapshot is
-/// taken at a single offset, and paging it belongs to a different endpoint.
+/// <see cref="SubscribeActiveAsync{T}"/> pages too, over <c>POST /v2/state/active-contracts-page</c>
+/// rather than the offset-range loop: every page is read at the same snapshot offset, and the
+/// participant's page token, not an observed offset, carries the read to the next page.
 /// </remarks>
 internal sealed partial class RestLedgerClient
     : Canton.Ledger.Abstractions.ICantonLedgerClient, Canton.Ledger.Abstractions.IUnboundedStreamingCapability
@@ -57,7 +59,7 @@ internal sealed partial class RestLedgerClient
     private const string LedgerEndPath = "/v2/state/ledger-end";
     private const string SubmitAndWaitPath = "/v2/commands/submit-and-wait";
     private const string SubmitAndWaitForTransactionPath = "/v2/commands/submit-and-wait-for-transaction";
-    private const string ActiveContractsPath = "/v2/state/active-contracts";
+    private const string ActiveContractsPagePath = "/v2/state/active-contracts-page";
     private const string UpdatesPath = "/v2/updates";
 
     private const long EmptyLedgerEndOffset = 0L;
@@ -91,6 +93,7 @@ internal sealed partial class RestLedgerClient
     private readonly RestCallEnvelope _calls;
     private readonly string? _userId;
     private readonly long _streamWindowLimit;
+    private readonly int _activeContractsPageSize;
     private readonly TimeSpan _streamWindowIdleTimeout;
     private readonly TimeSpan _shortestHonouredWindowHold;
     private readonly ILogger<RestLedgerClient> _logger;
@@ -144,6 +147,7 @@ internal sealed partial class RestLedgerClient
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         _userId = options?.Value.UserId;
         _streamWindowLimit = options?.Value.StreamWindowLimit ?? RestLedgerClientOptions.DefaultStreamWindowLimit;
+        _activeContractsPageSize = (int)Math.Min(_streamWindowLimit, int.MaxValue);
         _streamWindowIdleTimeout =
             options?.Value.StreamWindowIdleTimeout ?? RestLedgerClientOptions.DefaultStreamWindowIdleTimeout;
         _shortestHonouredWindowHold = ShortestHonouredWindowHold(_streamWindowIdleTimeout);
@@ -213,16 +217,20 @@ internal sealed partial class RestLedgerClient
 
     /// <inheritdoc />
     /// <remarks>
-    /// A bounded ACS snapshot over one window of <c>POST /v2/state/active-contracts</c>: the whole
-    /// response is read before any entry is yielded, then the snapshot ends with a terminal
-    /// <see cref="AcsSnapshotEntry{T}.Checkpoint"/> carrying the effective offset — even when the
-    /// snapshot is empty — so a caller can resume <see cref="SubscribeAsync{T}"/> from it. A
-    /// failure ends the snapshot with a terminal <see cref="AcsSnapshotEntry{T}.StreamError"/>
-    /// instead, mutually exclusive with that checkpoint, so a caller is never handed a resume
-    /// offset for a snapshot it did not receive in full. A 413 (past the participant's
-    /// <c>http-list-max-elements-limit</c>) is one such failure and names the window limit to
-    /// lower. Resolving the ledger end for a null <paramref name="activeAtOffset"/> happens before
-    /// the snapshot begins, so a failure there still throws.
+    /// An ACS snapshot read page by page over <c>POST /v2/state/active-contracts-page</c>, each
+    /// page at most <see cref="RestLedgerClientOptions.StreamWindowLimit"/> contracts, so a
+    /// snapshot larger than the participant's <c>http-list-max-elements-limit</c> is read in full
+    /// rather than refused. Every page is requested at the same effective offset and event format,
+    /// the conditions the participant's page token is valid under, so the pages stitch into one
+    /// snapshot at that offset. Each page is read whole before its entries are yielded; the
+    /// snapshot ends with a terminal <see cref="AcsSnapshotEntry{T}.Checkpoint"/> carrying the
+    /// effective offset — even when the snapshot is empty — so a caller can resume
+    /// <see cref="SubscribeAsync{T}"/> from it. A failed page ends the snapshot with a terminal
+    /// <see cref="AcsSnapshotEntry{T}.StreamError"/> instead, after the entries of the pages before
+    /// it, and mutually exclusive with that checkpoint, so a caller is never handed a resume offset
+    /// for a snapshot it did not receive in full. Resolving the ledger end for a null
+    /// <paramref name="activeAtOffset"/> happens before the snapshot begins, so a failure there
+    /// still throws.
     /// </remarks>
     public IAsyncEnumerable<AcsSnapshotEntry<T>> SubscribeActiveAsync<T>(
         RuntimeCommands.SubmitterInfo submitter,
@@ -238,19 +246,21 @@ internal sealed partial class RestLedgerClient
         where T : ITemplate, IDamlRecord<T>
     {
         var effectiveOffset = activeAtOffset ?? await GetLedgerEndAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<T>(submitter, effectiveOffset.Value);
-
-        var window = await ReadWindowAsync<WireGetActiveContractsResponse>(
-            ActiveContractsPath, request, cancellationToken).ConfigureAwait(false);
-        if (window.Fault is { } fault)
+        var pages = ReadActiveContractPagesAsync<T>(submitter, effectiveOffset, cancellationToken);
+        await foreach (var read in pages.ConfigureAwait(false))
         {
-            yield return new AcsSnapshotEntry<T>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
-            yield break;
-        }
+            if (read.Fault is { } fault)
+            {
+                yield return new AcsSnapshotEntry<T>.StreamError(
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
+                yield break;
+            }
 
-        foreach (var entry in window.Entries)
-        {
+            if (read.Entry is not { } entry)
+            {
+                continue;
+            }
+
             foreach (var projected in RestContractStreamProjector.ProjectActiveContractEntry<T>(entry, _logger, effectiveOffset))
             {
                 yield return ToAcsSnapshotEntry(projected);
@@ -402,6 +412,14 @@ internal sealed partial class RestLedgerClient
         internal static StreamWindow<TEntry> Failed(StreamFault fault) => new([], fault);
     }
 
+    private readonly record struct ActiveContractsPage(
+        IReadOnlyList<WireGetActiveContractsResponse> Entries, string? NextPageToken, StreamFault? Fault)
+    {
+        internal static ActiveContractsPage Failed(StreamFault fault) => new([], null, fault);
+    }
+
+    private readonly record struct WindowBody(string? Body, StreamFault? Fault);
+
     private readonly record struct StreamWindowRead<TEntry>(TEntry? Entry, StreamFault? Fault)
         where TEntry : class
     {
@@ -480,9 +498,91 @@ internal sealed partial class RestLedgerClient
         }
     }
 
+    private async IAsyncEnumerable<StreamWindowRead<WireGetActiveContractsResponse>> ReadActiveContractPagesAsync<T>(
+        RuntimeCommands.SubmitterInfo submitter,
+        LedgerOffset activeAtOffset,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+        where T : IDamlType
+    {
+        // Workaround: Canton 3.5.18's POST /v2/state/active-contracts-page reads an activeAtOffset of
+        // 0 as unset and answers at the ledger end, where its own documentation (and the un-paged
+        // /v2/state/active-contracts) answer the empty snapshot of ledger begin.
+        if (activeAtOffset.Value == EmptyLedgerEndOffset)
+        {
+            yield break;
+        }
+
+        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<T>(
+            submitter, activeAtOffset.Value, _activeContractsPageSize);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var page = await ReadActiveContractsPageAsync(request, cancellationToken).ConfigureAwait(false);
+            if (page.Fault is { } fault)
+            {
+                yield return StreamWindowRead<WireGetActiveContractsResponse>.Failed(fault);
+                yield break;
+            }
+
+            foreach (var entry in page.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                yield return StreamWindowRead<WireGetActiveContractsResponse>.Of(entry);
+            }
+
+            if (page.NextPageToken is not { } nextPageToken)
+            {
+                yield break;
+            }
+
+            request.PageToken = nextPageToken;
+        }
+    }
+
+    private async Task<ActiveContractsPage> ReadActiveContractsPageAsync(
+        WireGetActiveContractsPageRequest request, CancellationToken cancellationToken)
+    {
+        var read = await PostWindowAsync(ActiveContractsPagePath, request, cancellationToken).ConfigureAwait(false);
+        if (read.Fault is { } fault)
+        {
+            return ActiveContractsPage.Failed(fault);
+        }
+
+        if (!RestStreamBodyReader.TryParseActiveContractsPage(
+                read.Body!, out var entries, out var nextPageToken, out var decodeFailure))
+        {
+            LogStreamWindowBodyUndecodable(_logger, ActiveContractsPagePath, decodeFailure);
+            return ActiveContractsPage.Failed(StreamFault.FromUndecodableBody(
+                $"Could not decode the active-contracts page response body: {decodeFailure.Message}", decodeFailure));
+        }
+
+        return new ActiveContractsPage(entries, nextPageToken, null);
+    }
+
     private async Task<StreamWindow<TEntry>> ReadWindowAsync<TEntry>(
         string requestUri, object request, CancellationToken cancellationToken)
         where TEntry : class
+    {
+        var read = await PostWindowAsync(requestUri, request, cancellationToken).ConfigureAwait(false);
+        if (read.Fault is { } fault)
+        {
+            return StreamWindow<TEntry>.Failed(fault);
+        }
+
+        if (!RestStreamBodyReader.TryParse<TEntry>(read.Body!, out var entries, out var decodeFailure))
+        {
+            LogStreamWindowBodyUndecodable(_logger, requestUri, decodeFailure);
+            return StreamWindow<TEntry>.Failed(StreamFault.FromUndecodableBody(
+                $"Could not decode the stream window response body: {decodeFailure.Message}", decodeFailure));
+        }
+
+        return new StreamWindow<TEntry>(entries, null);
+    }
+
+    private async Task<WindowBody> PostWindowAsync(
+        string requestUri, object request, CancellationToken cancellationToken)
     {
         var client = _calls.CreateClient();
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri)
@@ -493,19 +593,11 @@ internal sealed partial class RestLedgerClient
 
         if (!response.IsSuccessStatusCode)
         {
-            return StreamWindow<TEntry>.Failed(
-                await WindowFaultAsync(response, cancellationToken).ConfigureAwait(false));
+            return new WindowBody(null, await WindowFaultAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!RestStreamBodyReader.TryParse<TEntry>(body, out var entries, out var decodeFailure))
-        {
-            LogStreamWindowBodyUndecodable(_logger, requestUri, decodeFailure);
-            return StreamWindow<TEntry>.Failed(StreamFault.FromUndecodableBody(
-                $"Could not decode the stream window response body: {decodeFailure.Message}", decodeFailure));
-        }
-
-        return new StreamWindow<TEntry>(entries, null);
+        return new WindowBody(
+            await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false), null);
     }
 
     private async Task<StreamFault> WindowFaultAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -522,10 +614,8 @@ internal sealed partial class RestLedgerClient
 
     /// <summary>
     /// The request URI for one window of a looped read: the endpoint plus the bounds that make the
-    /// participant close the window. The ACS snapshot deliberately does not go through here. It is
-    /// a single un-paged read, so an explicit <c>limit</c> would cap it at a window's worth of
-    /// contracts and hand the caller a short snapshot that looks complete, where deferring to the
-    /// participant's own cap makes an oversized snapshot a loud failure instead.
+    /// participant close the window. The ACS snapshot does not go through here: its page size
+    /// travels in the request body as <c>maxPageSize</c>.
     /// </summary>
     private string WindowPath(string path) =>
         $"{path}?{LimitQueryParameter}={_streamWindowLimit.ToString(CultureInfo.InvariantCulture)}" +
@@ -537,15 +627,12 @@ internal sealed partial class RestLedgerClient
     /// A committed transaction that cannot be decoded, for example because a payload has no loaded
     /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
     /// failure: do not resubmit, and read the transaction by its
-    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one. The same
+    /// holds when the committed transaction's choice result cannot be read as
+    /// <typeparamref name="TResult"/>: <typeparamref name="TResult"/> has no Daml mapping, or the
+    /// transaction has zero or more than one exercised event for <paramref name="command"/>'s choice
+    /// (e.g. a nonconsuming choice that only forks other choices).
     /// </remarks>
-    /// <exception cref="InvalidOperationException">
-    /// The transaction has zero or more than one exercised event for <paramref name="command"/>'s
-    /// choice on a successful outcome (e.g. a nonconsuming choice that only forks other choices).
-    /// The projection calls <see cref="TransactionResultExerciseExtensions.ExerciseResult{TReturn}(TransactionResult, string)"/>,
-    /// which throws for those shapes rather than surfacing them through
-    /// <see cref="ExerciseOutcome{T}"/>, so both transports raise the same failure.
-    /// </exception>
     public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,
         RuntimeCommands.SubmitterInfo submitter,

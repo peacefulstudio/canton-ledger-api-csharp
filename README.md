@@ -227,6 +227,10 @@ See the [configuration reference](docs/public/configuration-reference.md) for ev
 
 See the [architecture overview](docs/public/architecture-overview.md) for how the codegen pipeline, the `Daml.Runtime` library, and the `Canton.Ledger.*` client packages fit together.
 
+## Performance
+
+See the [streaming benchmarks](docs/public/benchmarks/README.md) for measured submission latency, stream delivery latency and read throughput over gRPC, REST and PQS, and how to reproduce them against a LocalNet.
+
 ## Canton Version Compatibility
 
 This library targets Canton Ledger API v2. The proto files are automatically downloaded from Maven Central during build.
@@ -239,7 +243,7 @@ This library targets Canton Ledger API v2. The proto files are automatically dow
 | 0.2.x | 3.4.x |
 | 0.1.x | 3.4.x |
 
-From `0.4.1` the vendored protos and JSON Ledger API spec are pinned at Canton `3.5.18`, and the library supports Canton 3.5 only — running it against a 3.4.x participant is untested and unsupported. Any `3.5.x` patch release is fine: the vendored surface is stable within the minor.
+From `0.4.1` the vendored protos and JSON Ledger API spec are pinned at Canton `3.5.18`, and the library supports Canton 3.5 only — running it against a 3.4.x participant is untested and unsupported. Any `3.5.x` patch release is fine for the gRPC client: the vendored surface is stable within the minor. From `0.5.0-preview.3` the REST client needs Canton `3.5.10` or later, the first patch that serves `POST /v2/state/active-contracts-page`, which every REST active-contract-set read pages over.
 
 From `0.4.x`, the `Canton.Ledger.*` package minor tracks the `Daml.Runtime` / `Daml.Ledger.Abstractions` minor line — package `0.N.x` embeds `Daml.* 0.N.x` — so the Daml runtime line is legible straight off the package version (the `0.3.x` line is skipped to realign). Patch and `-preview.N` suffixes evolve independently.
 

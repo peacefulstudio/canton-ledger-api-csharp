@@ -124,6 +124,8 @@ public class ServiceCollectionExtensionsTests
         provider.GetService<IHealthApi>().Should().NotBeNull();
         provider.GetService<IInteractiveSubmissionApi>().Should().NotBeNull();
         provider.GetService<IPackageApi>().Should().NotBeNull();
+        provider.GetService<IPartyManagementApi>().Should().NotBeNull();
+        provider.GetService<IUserManagementApi>().Should().NotBeNull();
     }
 
     [Fact]

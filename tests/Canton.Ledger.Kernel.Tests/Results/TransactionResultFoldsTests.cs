@@ -112,6 +112,20 @@ public class TransactionResultFoldsTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    [Fact]
+    public void ToChoiceResult_reports_no_update_id_when_the_committed_transaction_declares_none()
+    {
+        var result = Result() with { UpdateId = "" };
+
+        var outcome = TransactionResultFolds.ToChoiceResult<DamlUnit>(result, new ChoiceName("Archive"));
+
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().BeNull();
+        undecodable.Message.Should().Be(
+            "The command committed, but its choice result could not be read: Transaction contains no exercised event for choice 'Archive'.");
+        undecodable.SourceException.Should().BeOfType<InvalidOperationException>();
+    }
+
     private static CreatedContract Created(string contractId) =>
         new("0", contractId, TemplateId, DamlRecord.Create(), [], [], [], ContractKey: null);
 

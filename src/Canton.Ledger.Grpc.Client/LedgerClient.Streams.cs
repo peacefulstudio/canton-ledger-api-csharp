@@ -45,7 +45,7 @@ internal sealed partial class LedgerClient
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, CommandCompletionService.Descriptor, "CompletionStream");
         activity?.SetTag(LedgerActivityTagNames.CantonFromOffset, beginExclusiveOffset);
-        activity.SetSubmitterTags(submitter);
+        activity.SetSubmitterTags(submitter, _options);
 
         var request = BuildCompletionStreamRequest(submitter, beginExclusiveOffset);
         LogCompletionStreamStarted(_logger, beginExclusiveOffset);
@@ -199,7 +199,7 @@ internal sealed partial class LedgerClient
         _invoker.TagServerCall(activity, UpdateService.Descriptor, "GetUpdates");
         activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(T).Name);
         activity?.SetTag(LedgerActivityTagNames.CantonFromOffset, fromOffset);
-        activity.SetSubmitterTags(submitter);
+        activity.SetSubmitterTags(submitter, _options);
 
         var request = GrpcSubscribeRequestBuilder.BuildGetUpdatesRequest(
             submitter,
@@ -303,7 +303,7 @@ internal sealed partial class LedgerClient
         using var activity = LedgerActivitySource.StartActivity<LedgerClient>(LedgerCallInvoker.Source);
         _invoker.TagServerCall(activity, StateService.Descriptor, "GetActiveContracts");
         activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(T).Name);
-        activity.SetSubmitterTags(submitter);
+        activity.SetSubmitterTags(submitter, _options);
 
         var effectiveOffset = activeAtOffset ?? (await GetLedgerEndForSnapshotAsync(cancellationToken).ConfigureAwait(false)).Offset;
         var sharedHeaders = await _invoker.GetHeadersAsync(cancellationToken).ConfigureAwait(false);

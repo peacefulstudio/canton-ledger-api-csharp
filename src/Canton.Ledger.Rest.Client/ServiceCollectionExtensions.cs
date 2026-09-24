@@ -279,6 +279,8 @@ public static class ServiceCollectionExtensions
         AddApi<IHealthApi>(services);
         AddApi<IInteractiveSubmissionApi>(services);
         AddApi<IPackageApi>(services);
+        AddApi<IPartyManagementApi>(services);
+        AddApi<IUserManagementApi>(services);
 #pragma warning restore CANTONREST001
 
         return services;

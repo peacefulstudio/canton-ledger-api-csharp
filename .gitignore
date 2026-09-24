@@ -82,3 +82,4 @@ src/Canton.Ledger.Grpc/Proto/
 # Coverage reports
 coverage/
 CodeCoverage/
+benchmark-results/

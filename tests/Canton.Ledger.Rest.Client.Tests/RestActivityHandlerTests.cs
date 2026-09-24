@@ -61,6 +61,32 @@ public sealed class RestActivityHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task SendAsync_drops_the_query_string_from_url_full()
+    {
+        await _client.GetAsync(
+            new Uri("/v2/state/connected-synchronizers?party=alice%3A%3A1220ab&participantId=p1", UriKind.Relative),
+            TestContext.Current.CancellationToken);
+
+        var activity = _activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("url.full").Should().Be($"http://{_ownHost}:7575/v2/state/connected-synchronizers");
+        activity.GetTagItem("http.request.method").Should().Be("GET");
+        activity.GetTagItem("server.address").Should().Be(_ownHost);
+        activity.GetTagItem("server.port").Should().Be(7575);
+        activity.GetTagItem("http.response.status_code").Should().Be(200);
+    }
+
+    [Fact]
+    public async Task SendAsync_drops_the_user_info_from_url_full()
+    {
+        await _client.GetAsync(
+            new Uri($"http://operator:hunter2@{_ownHost}:7575/v2/version"),
+            TestContext.Current.CancellationToken);
+
+        var activity = _activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("url.full").Should().Be($"http://{_ownHost}:7575/v2/version");
+    }
+
+    [Fact]
     public async Task SendAsync_marks_the_span_as_error_on_a_non_success_status_code()
     {
         _transport.WithResponse(HttpStatusCode.ServiceUnavailable, "not ready");

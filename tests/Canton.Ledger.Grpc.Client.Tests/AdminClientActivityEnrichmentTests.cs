@@ -48,27 +48,11 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
 
     private static string Unique(string prefix) => $"{prefix}-{Guid.NewGuid():N}";
 
-
     [Fact]
-    public async Task AllocatePartyAsync_tags_the_activity_with_grpc_semconv_and_canton_party_id_hint()
+    public async Task AllocatePartyAsync_tags_the_activity_with_grpc_semconv()
     {
         var partyIdHint = Unique("alice");
-        var response = new AllocatePartyResponse
-        {
-            PartyDetails = new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = $"party::{partyIdHint}", IsLocal = true }
-        };
-        _partyService
-            .AllocatePartyAsync(
-                Arg.Any<AllocatePartyRequest>(),
-                Arg.Any<Metadata>(),
-                Arg.Any<DateTime?>(),
-                Arg.Any<CancellationToken>())
-            .Returns(new AsyncUnaryCall<AllocatePartyResponse>(
-                Task.FromResult(response),
-                Task.FromResult(new Metadata()),
-                () => Status.DefaultSuccess,
-                () => new Metadata(),
-                () => { }));
+        StubAllocatePartySuccess(partyIdHint);
 
         using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
 
@@ -76,7 +60,7 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonPartyIdHint) as string == partyIdHint)
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "AllocateParty")
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
         activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
@@ -84,6 +68,39 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("AllocateParty");
         activity.GetTagItem(ActivityHelper.ServerAddress).Should().Be("localhost");
         activity.GetTagItem(ActivityHelper.ServerPort).Should().Be(5001);
+    }
+
+    [Fact]
+    public async Task AllocatePartyAsync_leaves_the_party_id_hint_off_the_span_by_default()
+    {
+        var partyIdHint = Unique("alice");
+        StubAllocatePartySuccess(partyIdHint);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
+
+        var client = CreateClient();
+        await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.party_id_hint").Should().BeNull();
+        activity.GetTagItem("rpc.method").Should().Be("AllocateParty");
+    }
+
+    [Fact]
+    public async Task AllocatePartyAsync_tags_the_party_id_hint_when_opted_in()
+    {
+        _options.EmitPartyAndContractSpanTags = true;
+        var partyIdHint = Unique("alice");
+        StubAllocatePartySuccess(partyIdHint);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcAdminClient);
+
+        var client = CreateClient();
+        await client.AllocatePartyAsync(partyIdHint, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.party_id_hint").Should().Be(partyIdHint);
+        activity.GetTagItem("rpc.method").Should().Be("AllocateParty");
     }
 
     [Fact]
@@ -111,7 +128,7 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
         await act.Should().ThrowAsync<RpcException>();
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.CantonPartyIdHint) as string == partyIdHint)
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "AllocateParty")
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.AlreadyExists.ToString());
@@ -151,5 +168,25 @@ public sealed class AdminClientActivityEnrichmentTests : IDisposable
             .Subject;
         activity.GetTagItem(ActivityHelper.RpcService).Should().Be("com.daml.ledger.api.v2.PackageService");
         activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("GetPackage");
+    }
+
+    private void StubAllocatePartySuccess(string partyIdHint)
+    {
+        var response = new AllocatePartyResponse
+        {
+            PartyDetails = new Com.Daml.Ledger.Api.V2.Admin.PartyDetails { Party = $"party::{partyIdHint}", IsLocal = true }
+        };
+        _partyService
+            .AllocatePartyAsync(
+                Arg.Any<AllocatePartyRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(new AsyncUnaryCall<AllocatePartyResponse>(
+                Task.FromResult(response),
+                Task.FromResult(new Metadata()),
+                () => Status.DefaultSuccess,
+                () => new Metadata(),
+                () => { }));
     }
 }

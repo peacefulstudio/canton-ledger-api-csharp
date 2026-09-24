@@ -11,7 +11,8 @@ namespace Canton.Ledger.Rest.Client;
 /// Emits an OpenTelemetry HTTP client span for every JSON Ledger API request, following the
 /// kernel's <see cref="LedgerActivitySource"/> naming convention. Register the
 /// source as <c>tracing.AddSource(LedgerActivitySourceNames.RestLedgerClient)</c>.
-/// Span names and tags follow the OpenTelemetry HTTP semantic conventions.
+/// Span names and tags follow the OpenTelemetry HTTP semantic conventions, with <c>url.full</c>
+/// sanitized of its query string and user info, which can carry party ids and credentials.
 /// </summary>
 internal sealed class RestActivityHandler : DelegatingHandler
 {
@@ -53,8 +54,11 @@ internal sealed class RestActivityHandler : DelegatingHandler
         activity.SetTag(HttpRequestMethod, request.Method.Method);
         activity.SetTag(ServerAddress, uri.Host);
         activity.SetTag(ServerPort, uri.Port);
-        activity.SetTag(UrlFull, uri.AbsoluteUri);
+        activity.SetTag(UrlFull, WithoutQueryOrUserInfo(uri));
     }
+
+    private static string WithoutQueryOrUserInfo(Uri uri) =>
+        uri.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
 
     private static void RecordResponse(Activity? activity, HttpResponseMessage response)
     {
