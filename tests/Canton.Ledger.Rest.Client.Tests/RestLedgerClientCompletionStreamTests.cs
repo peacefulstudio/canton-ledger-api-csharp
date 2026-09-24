@@ -467,7 +467,7 @@ public sealed class RestLedgerClientCompletionStreamTests : IDisposable
     }
 
     [Fact]
-    public async Task CompletionStreamAsync_sends_the_documented_defaults_when_neither_bound_is_configured()
+    public async Task CompletionStreamAsync_sends_the_default_bounds_when_neither_bound_is_configured()
     {
         var transport = RespondingWith(CheckpointWindow);
         var client = ClientWith(transport);
@@ -477,7 +477,7 @@ public sealed class RestLedgerClientCompletionStreamTests : IDisposable
             client.CompletionStreamAsync(AliceSubmitter, 0L, cancellation.Token), cancellation, stopAfter: 1);
 
         transport.LastRequest!.RequestUri!.PathAndQuery
-            .Should().Be($"{CompletionsPath}?limit=200&stream_idle_timeout_ms=2000");
+            .Should().Be($"{CompletionsPath}?limit=200&stream_idle_timeout_ms=250");
     }
 
     [Fact]
@@ -555,12 +555,12 @@ public sealed class RestLedgerClientCompletionStreamTests : IDisposable
     }
 
     [Fact]
-    public void StreamWindowLimit_and_StreamWindowIdleTimeout_default_to_the_values_Canton_documents()
+    public void StreamWindowLimit_defaults_to_200_and_StreamWindowIdleTimeout_to_250_milliseconds()
     {
         var options = new RestLedgerClientOptions { HttpAddress = "http://localhost:7575" };
 
         options.StreamWindowLimit.Should().Be(200L);
-        options.StreamWindowIdleTimeout.Should().Be(TimeSpan.FromSeconds(2));
+        options.StreamWindowIdleTimeout.Should().Be(TimeSpan.FromMilliseconds(250));
         options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options))
             .Should().BeEmpty();
     }

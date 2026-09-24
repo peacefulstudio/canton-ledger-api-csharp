@@ -177,7 +177,7 @@ public sealed record RestConformanceProbe([property: DamlFieldAttribute("owner")
 internal sealed class ConformanceParticipantHandler : HttpMessageHandler
 {
     private const string LedgerEndPath = "/v2/state/ledger-end";
-    private const string ActiveContractsPath = "/v2/state/active-contracts";
+    private const string ActiveContractsPagePath = "/v2/state/active-contracts-page";
     private const string UpdatesPath = "/v2/updates";
     private const string LedgerEffectsShape = "TRANSACTION_SHAPE_LEDGER_EFFECTS";
     private const string AcsDeltaShape = "TRANSACTION_SHAPE_ACS_DELTA";
@@ -206,7 +206,7 @@ internal sealed class ConformanceParticipantHandler : HttpMessageHandler
         object payload = request.RequestUri!.AbsolutePath switch
         {
             LedgerEndPath => new { offset = LedgerEndOffset },
-            ActiveContractsPath => ActiveContractsAt(OffsetField(body, "activeAtOffset")),
+            ActiveContractsPagePath => new { activeContracts = ActiveContractsAt(OffsetField(body, "activeAtOffset")) },
             UpdatesPath => UpdatesFor(body),
             var unexpected => throw new InvalidOperationException(
                 $"The conformance scenario seeds no response for '{unexpected}'."),

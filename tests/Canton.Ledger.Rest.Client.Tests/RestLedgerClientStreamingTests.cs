@@ -76,12 +76,12 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     }
 
     [Fact]
-    public async Task SubscribeActiveAsync_posts_to_v2_state_active_contracts_and_ends_with_a_checkpoint()
+    public async Task SubscribeActiveAsync_posts_to_v2_state_active_contracts_page_and_ends_with_a_checkpoint()
     {
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "synchronizerId": "sync-1"}}}]
+            {"activeContracts": [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "synchronizerId": "sync-1"}}}]}
             """);
         var client = ClientWith(transport);
 
@@ -92,7 +92,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             entries.Add(entry);
         }
 
-        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/state/active-contracts");
+        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/state/active-contracts-page");
         entries.Should().HaveCount(2);
         var created = entries[0].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Created>().Subject;
         created.ContractId.Value.Should().Be("00holding");
@@ -106,7 +106,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"contractEntry": {"JsIncompleteUnassigned": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "unassignedEvent": {"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "11", "reassignmentId": "reassignment-1", "reassignmentCounter": "7"}}}}]
+            {"activeContracts": [{"contractEntry": {"JsIncompleteUnassigned": {"createdEvent": {"offset": "10", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "unassignedEvent": {"contractId": "00holding", "source": "sync-1", "target": "sync-2", "offset": "11", "reassignmentId": "reassignment-1", "reassignmentCounter": "7"}}}}]}
             """);
         var client = ClientWith(transport);
 
@@ -131,7 +131,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
         var transport = new RecordingHttpHandler().WithResponse(
             HttpStatusCode.OK,
             """
-            [{"contractEntry": {"JsActiveContract": {"synchronizerId": "sync-1"}}}]
+            {"activeContracts": [{"contractEntry": {"JsActiveContract": {"synchronizerId": "sync-1"}}}]}
             """);
         var client = ClientWith(transport);
 
@@ -156,7 +156,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             .WithResponse(
                 HttpStatusCode.OK,
                 """
-                [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "not-a-number", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}}, "synchronizerId": "sync-1"}}}]
+                {"activeContracts": [{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "not-a-number", "contractId": "00holding", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "StreamingTemplate"}, "createArgument": {}}, "synchronizerId": "sync-1"}}}]}
                 """)
             .WithResponseForPath("/v2/state/ledger-end", HttpStatusCode.OK, """{"offset": 5}""");
         var client = ClientWith(transport);
@@ -178,7 +178,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
     public async Task SubscribeActiveAsync_resolves_the_ledger_end_when_activeAtOffset_is_null()
     {
         var transport = new RecordingHttpHandler()
-            .WithResponse(HttpStatusCode.OK, "[]")
+            .WithResponse(HttpStatusCode.OK, """{"activeContracts": [], "activeAtOffset": 5}""")
             .WithResponseForPath("/v2/state/ledger-end", HttpStatusCode.OK, """{"offset": 5}""");
         var client = ClientWith(transport);
 
@@ -189,9 +189,7 @@ public sealed class RestLedgerClientStreamingTests : IDisposable
             entries.Add(entry);
         }
 
-        // Ledger-end resolution is a GET before the ACS POST; the recorder only keeps the last
-        // request, which must be the bounded snapshot call, scoped to the resolved ledger end.
-        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/state/active-contracts");
+        transport.LastRequest!.RequestUri!.PathAndQuery.Should().Be("/v2/state/active-contracts-page");
         transport.LastRequestBody.Should().Contain("\"activeAtOffset\":\"5\"");
         entries.OfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>().Should().ContainSingle()
             .Which.Resume.Offset.Value.Should().Be(5L);

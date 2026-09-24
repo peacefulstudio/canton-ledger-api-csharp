@@ -29,8 +29,8 @@ public class RestEndpointCoverageTests
         + "spec operation must reach the raw surface as exactly one Refit route on the interface and "
         + "method its operationId names, and the only extra endpoints allowed are the hand-authored "
         + "off-spec ones in PinnedOffSpecEndpoints. Endpoints are qualified by declaring interface "
-        + "because the off-spec IDarApi, IPackageApi and IInteractiveSubmissionApi deliberately "
-        + "re-declare routes the generated "
+        + "because the off-spec IDarApi, IPackageApi, IInteractiveSubmissionApi, IPartyManagementApi "
+        + "and IUserManagementApi deliberately re-declare routes the generated "
         + "surface also carries, and by "
         + "declaring method because two methods sharing one route on one interface would otherwise "
         + "collapse into a single entry and stand in for each other. The cost of the method qualifier "
@@ -107,6 +107,12 @@ public class RestEndpointCoverageTests
         "IHealthApi.CheckReadiness: GET /readyz",
         "IInteractiveSubmissionApi.GetPreferredPackageVersion: GET /v2/interactive-submission/preferred-package-version",
         "IPackageApi.GetPackage: GET /v2/packages/{packageId}",
+        "IPartyManagementApi.GetParties: GET /v2/parties/{party}",
+        "IPartyManagementApi.ListKnownParties: GET /v2/parties",
+        "IUserManagementApi.DeleteUser: DELETE /v2/users/{userId}",
+        "IUserManagementApi.GetUser: GET /v2/users/{userId}",
+        "IUserManagementApi.ListUserRights: GET /v2/users/{userId}/rights",
+        "IUserManagementApi.ListUsers: GET /v2/users",
     };
 
     private static string VendoredSpecPath => Path.Combine(AppContext.BaseDirectory, "spec", "openapi.yaml");

@@ -118,6 +118,19 @@ public class LedgerClientOptions : IValidatableObject
     public TlsOptions Tls { get; set; } = new();
 
     /// <summary>
+    /// Whether the client's spans carry the party and contract identifiers of the call they trace:
+    /// <c>canton.submitter.act_as</c>, <c>canton.submitter.read_as</c>, <c>canton.party_id</c>,
+    /// <c>canton.party_id_hint</c> and <c>daml.contract_id</c>. Off by default, so anyone with read
+    /// access to the tracing backend cannot read who transacted on which contract; every other span
+    /// attribute is emitted either way.
+    /// </summary>
+    /// <remarks>
+    /// Opt in only where the tracing backend is trusted with the same data as the ledger itself:
+    /// the identifiers are exported verbatim, with no hashing or truncation.
+    /// </remarks>
+    public bool EmitPartyAndContractSpanTags { get; set; }
+
+    /// <summary>
     /// Recurses into <see cref="Retry"/> and <see cref="Tls"/> so their validation runs under the same
     /// <c>ValidateDataAnnotations().ValidateOnStart()</c> pipeline as this type — runtime
     /// data-annotation validation does not descend into nested options on its own — surfacing a

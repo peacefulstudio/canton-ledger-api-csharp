@@ -561,34 +561,35 @@ public sealed class RestLedgerClientTests : IDisposable
         one.Result.Value.Should().Be("00holding");
     }
 
+    private const string GetOwnerExercisedTransactionResponse =
+        """
+        {
+          "transaction": {
+            "updateId": "upd-1",
+            "offset": "1",
+            "events": [
+              {
+                "ExercisedEvent": {
+                  "offset": "1",
+                  "contractId": "00holding",
+                  "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
+                  "choice": "GetOwner",
+                  "choiceArgument": {},
+                  "actingParties": ["party::alice"],
+                  "consuming": false,
+                  "witnessParties": ["party::alice"],
+                  "exerciseResult": "party::alice"
+                }
+              }
+            ]
+          }
+        }
+        """;
+
     [Fact]
     public async Task TryExerciseAsync_exercises_the_choice_and_projects_the_typed_result()
     {
-        var transport = new RecordingHttpHandler().WithResponse(
-            HttpStatusCode.OK,
-            """
-            {
-              "transaction": {
-                "updateId": "upd-1",
-                "offset": "1",
-                "events": [
-                  {
-                    "ExercisedEvent": {
-                      "offset": "1",
-                      "contractId": "00holding",
-                      "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "LedgerClientTemplate"},
-                      "choice": "GetOwner",
-                      "choiceArgument": {},
-                      "actingParties": ["party::alice"],
-                      "consuming": false,
-                      "witnessParties": ["party::alice"],
-                      "exerciseResult": "party::alice"
-                    }
-                  }
-                ]
-              }
-            }
-            """);
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, GetOwnerExercisedTransactionResponse);
         var client = ClientWith(transport);
         var command = ExerciseCommand.For(
             new ContractId<TestTemplate>("00holding"), new ChoiceName("GetOwner"), DamlUnit.Instance);
@@ -599,6 +600,25 @@ public sealed class RestLedgerClientTests : IDisposable
         var one = outcome.Should().BeOfType<ExerciseOutcome<Party>.One>().Subject;
         one.Result.Should().Be(Alice);
     }
+
+    [Fact]
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_the_result_type_has_no_Daml_mapping()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, GetOwnerExercisedTransactionResponse);
+        var client = ClientWith(transport);
+        var command = ExerciseCommand.For(
+            new ContractId<TestTemplate>("00holding"), new ChoiceName("GetOwner"), DamlUnit.Instance);
+
+        var outcome = await client.TryExerciseAsync<ResultTypeWithoutDamlMapping>(
+            command, Alice, cancellationToken: TestContext.Current.CancellationToken);
+
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<ResultTypeWithoutDamlMapping>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("upd-1");
+        undecodable.Message.Should().StartWith("The command committed, but its choice result could not be read: ");
+        undecodable.SourceException.Should().BeOfType<NotSupportedException>();
+    }
+
+    private sealed class ResultTypeWithoutDamlMapping;
 
     private const string MissingTemplateExercisedTransactionResponse =
         """

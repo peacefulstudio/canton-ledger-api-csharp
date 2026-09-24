@@ -141,7 +141,7 @@ public sealed class RestLedgerClientWindowLoopTests : IDisposable
 
         transport.Requests.Should().HaveCount(2);
         transport.Requests.Should().OnlyContain(
-            request => request.PathAndQuery == "/v2/updates?limit=200&stream_idle_timeout_ms=2000");
+            request => request.PathAndQuery == "/v2/updates?limit=200&stream_idle_timeout_ms=250");
     }
 
     [Fact]
@@ -305,24 +305,167 @@ public sealed class RestLedgerClientWindowLoopTests : IDisposable
         transport.Requests[1].Body.Should().Contain("\"beginExclusive\":\"11\"");
     }
 
-    [Fact]
-    public async Task SubscribeActiveAsync_reads_one_un_paged_window_and_leaves_the_entry_cap_to_the_participant()
-    {
-        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, "[]");
-        var client = ClientWith(transport);
+    private const string ActiveContractEntry =
+        """{"contractEntry": {"JsActiveContract": {"createdEvent": {"offset": "3", "contractId": "OFFSET", "templateId": {"packageId": "pkg", "moduleName": "Module", "entityName": "WindowLoopTemplate"}, "createArgument": {}, "witnessParties": ["party::alice"]}, "synchronizerId": "sync-1"}}}""";
 
+    private static string ActiveContractsPage(string? nextPageToken, params string[] contractIds)
+    {
+        var nextPageTokenField = nextPageToken is null ? "" : $", \"nextPageToken\": \"{nextPageToken}\"";
+        return "{\"activeAtOffset\": 9, \"activeContracts\": " + Window(ActiveContractEntry, contractIds) +
+            nextPageTokenField + "}";
+    }
+
+    private async Task<List<AcsSnapshotEntry<TestTemplate>>> SnapshotAsync(
+        RecordingHttpHandler transport, long? windowLimit = null)
+    {
+        var client = ClientWith(transport, windowLimit);
         var entries = new List<AcsSnapshotEntry<TestTemplate>>();
         await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
-            Alice, LedgerOffset.At(5), TestContext.Current.CancellationToken))
+            Alice, LedgerOffset.At(9), TestContext.Current.CancellationToken))
         {
             entries.Add(entry);
         }
 
+        return entries;
+    }
+
+    private static string[] CreatedContractIds(IEnumerable<AcsSnapshotEntry<TestTemplate>> entries) =>
+        [.. entries.OfType<AcsSnapshotEntry<TestTemplate>.Created>().Select(created => created.ContractId.Value)];
+
+    [Fact]
+    public async Task SubscribeActiveAsync_follows_the_page_token_until_a_page_carries_none()
+    {
+        var transport = new RecordingHttpHandler().WithResponseSequence(
+            (HttpStatusCode.OK, ActiveContractsPage("page-2", "00a", "00b")),
+            (HttpStatusCode.OK, ActiveContractsPage("page-3", "00c", "00d")),
+            (HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null, "00e")));
+
+        var entries = await SnapshotAsync(transport, windowLimit: 2);
+
+        CreatedContractIds(entries).Should().Equal("00a", "00b", "00c", "00d", "00e");
+        entries.Should().HaveCount(6);
+        entries[^1].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>()
+            .Which.Resume.Offset.Value.Should().Be(9L);
+        transport.Requests.Should().HaveCount(3);
+        transport.Requests.Select(request => request.PathAndQuery).Should().AllBe("/v2/state/active-contracts-page");
+        transport.Requests[0].Body.Should().NotContain("pageToken");
+        transport.Requests[1].Body.Should().Contain("\"pageToken\":\"page-2\"");
+        transport.Requests[2].Body.Should().Contain("\"pageToken\":\"page-3\"");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_requests_every_page_at_the_same_offset_and_page_size()
+    {
+        var transport = new RecordingHttpHandler().WithResponseSequence(
+            (HttpStatusCode.OK, ActiveContractsPage("page-2", "00a")),
+            (HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null, "00b")));
+
+        await SnapshotAsync(transport, windowLimit: 1);
+
+        transport.Requests.Should().HaveCount(2).And.AllSatisfy(request =>
+        {
+            request.Body.Should().Contain("\"activeAtOffset\":\"9\"");
+            request.Body.Should().Contain("\"maxPageSize\":1");
+        });
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_sends_the_default_window_limit_as_the_page_size()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null));
+
+        await SnapshotAsync(transport);
+
+        transport.Requests.Should().ContainSingle().Which.Body.Should().Contain("\"maxPageSize\":200");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_ends_an_empty_snapshot_with_its_checkpoint_after_one_page()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK, """{"activeAtOffset": 9, "activeContracts": [], "nextPageToken": null}""");
+
+        var entries = await SnapshotAsync(transport);
+
+        entries.Should().ContainSingle().Which.Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>()
+            .Which.Resume.Offset.Value.Should().Be(9L);
+        transport.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_reads_a_page_without_an_activeContracts_field_as_empty()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(HttpStatusCode.OK, """{"activeAtOffset": 9}""");
+
+        var entries = await SnapshotAsync(transport);
+
         entries.Should().ContainSingle().Which.Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>();
-        transport.Requests.Should().ContainSingle()
-            .Which.PathAndQuery.Should().Be(
-                "/v2/state/active-contracts",
-                "an explicit limit on a read that cannot page would truncate the snapshot instead of failing");
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_treats_an_empty_page_token_as_the_last_page()
+    {
+        var transport = new RecordingHttpHandler().WithResponseSequence(
+            (HttpStatusCode.OK, ActiveContractsPage(nextPageToken: "", "00a")),
+            (HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null, "00unrequested")));
+
+        var entries = await SnapshotAsync(transport);
+
+        CreatedContractIds(entries).Should().Equal("00a");
+        transport.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_ends_with_a_StreamError_and_no_checkpoint_when_a_later_page_fails()
+    {
+        var transport = new RecordingHttpHandler().WithResponseSequence(
+            (HttpStatusCode.OK, ActiveContractsPage("page-2", "00a", "00b")),
+            (HttpStatusCode.BadRequest, """{"code": "INVALID_ARGUMENT", "cause": "page token expired"}"""),
+            (HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null, "00unrequested")));
+
+        var entries = await SnapshotAsync(transport, windowLimit: 2);
+
+        CreatedContractIds(entries).Should().Equal("00a", "00b");
+        entries.Should().HaveCount(3);
+        entries[^1].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Which.StatusCode.Should().Be(400);
+        entries.OfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>().Should().BeEmpty();
+        transport.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_ends_with_a_StreamError_when_a_page_body_cannot_be_decoded()
+    {
+        var transport = new RecordingHttpHandler().WithResponseSequence(
+            (HttpStatusCode.OK, ActiveContractsPage("page-2", "00a")),
+            (HttpStatusCode.OK, "[]"));
+
+        var entries = await SnapshotAsync(transport, windowLimit: 1);
+
+        CreatedContractIds(entries).Should().Equal("00a");
+        entries[^1].Should().BeOfType<AcsSnapshotEntry<TestTemplate>.StreamError>()
+            .Which.StatusCode.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SubscribeActiveAsync_at_ledger_begin_answers_the_empty_snapshot_without_a_request()
+    {
+        var transport = new RecordingHttpHandler().WithResponse(
+            HttpStatusCode.OK, ActiveContractsPage(nextPageToken: null, "00at-ledger-end"));
+        var client = ClientWith(transport);
+
+        var entries = new List<AcsSnapshotEntry<TestTemplate>>();
+        await foreach (var entry in client.SubscribeActiveAsync<TestTemplate>(
+            Alice, LedgerOffset.At(0), TestContext.Current.CancellationToken))
+        {
+            entries.Add(entry);
+        }
+
+        entries.Should().ContainSingle().Which.Should().BeOfType<AcsSnapshotEntry<TestTemplate>.Checkpoint>()
+            .Which.Resume.Offset.Value.Should().Be(0L);
+        transport.Requests.Should().BeEmpty(
+            "the page endpoint reads an activeAtOffset of 0 as unset and answers at the ledger end");
     }
 
     [Fact]

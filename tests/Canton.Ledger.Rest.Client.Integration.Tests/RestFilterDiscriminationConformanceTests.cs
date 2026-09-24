@@ -47,7 +47,8 @@ namespace Canton.Ledger.Rest.Client.Integration.Tests;
 [Trait("Category", "Integration")]
 public class RestFilterDiscriminationConformanceTests
 {
-    private const string ActiveContractsPath = "/v2/state/active-contracts";
+    private const string ActiveContractsPagePath = "/v2/state/active-contracts-page";
+    private const int PageSizeAboveTheTwoSeededContracts = 10;
 
     private static string DarPath() => RichTypesDar.Path;
 
@@ -88,10 +89,10 @@ public class RestFilterDiscriminationConformanceTests
         var activeAtOffset = await lane.LedgerClient.GetLedgerEndAsync(
             cancellationToken: TestContext.Current.CancellationToken);
         var submitter = new SubmitterInfo(owner, new HashSet<Party>());
-        var templateRequest = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<Marker>(
-            submitter, activeAtOffset.Value);
-        var wildcardRequest = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<Marker>(
-            submitter, activeAtOffset.Value);
+        var templateRequest = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<Marker>(
+            submitter, activeAtOffset.Value, PageSizeAboveTheTwoSeededContracts);
+        var wildcardRequest = RestSubscribeRequestBuilder.BuildGetActiveContractsPageRequest<Marker>(
+            submitter, activeAtOffset.Value, PageSizeAboveTheTwoSeededContracts);
         foreach (var cumulative in wildcardRequest.EventFormat.FiltersByParty.Values.SelectMany(filters => filters.Cumulative))
         {
             cumulative.IdentifierFilter = new WireIdentifierFilter { WildcardFilter = new WireWildcardFilter() };
@@ -131,7 +132,7 @@ public class RestFilterDiscriminationConformanceTests
 
     private static async Task<int> CountActiveContractsAsync(
         HttpClient wireClient, object request, CancellationToken cancellationToken) =>
-        CountEntries(await PostAsync(wireClient, ActiveContractsPath, request, cancellationToken));
+        CountEntries(await PostAsync(wireClient, ActiveContractsPagePath, request, cancellationToken));
 
     private static async Task<string> PostAsync(
         HttpClient wireClient, string path, object request, CancellationToken cancellationToken)
@@ -149,8 +150,8 @@ public class RestFilterDiscriminationConformanceTests
     {
         using var document = JsonDocument.Parse(payload);
         document.RootElement.ValueKind.Should().Be(
-            JsonValueKind.Array,
-            "the bounded stream endpoints answer with one JSON array, not newline-delimited JSON");
-        return document.RootElement.GetArrayLength();
+            JsonValueKind.Object,
+            "the active-contracts page endpoint answers with one JSON object carrying the page");
+        return document.RootElement.GetProperty("activeContracts").GetArrayLength();
     }
 }

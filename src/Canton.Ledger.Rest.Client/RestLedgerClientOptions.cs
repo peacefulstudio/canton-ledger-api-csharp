@@ -82,15 +82,18 @@ public class RestLedgerClientOptions : IValidatableObject
 
     /// <summary>
     /// The <see cref="StreamWindowIdleTimeout"/> a client applies when a consumer configures none:
-    /// two seconds, the <c>http-list-wait-time</c> value Canton's own documentation uses in its
-    /// worked example.
+    /// 250 milliseconds. A live tail delivers an entry only once its window closes, so this bounds
+    /// how far a followed stream trails the ledger; the repository's LocalNet benchmarks measured
+    /// live-tail delivery at about 2.56 s with a two-second window and about 0.6–0.7 s with this one.
     /// </summary>
-    public static readonly TimeSpan DefaultStreamWindowIdleTimeout = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan DefaultStreamWindowIdleTimeout = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
     /// Caps how many entries one window of a looped read returns, sent as the <c>limit</c> query
     /// parameter on every window the pagination loop opens — <c>POST /v2/updates</c> and
-    /// <c>POST /v2/commands/completions</c>. Defaults to <see cref="DefaultStreamWindowLimit"/>.
+    /// <c>POST /v2/commands/completions</c> — and as the <c>maxPageSize</c> of every page of an
+    /// ACS snapshot read over <c>POST /v2/state/active-contracts-page</c>. Defaults to
+    /// <see cref="DefaultStreamWindowLimit"/>.
     /// </summary>
     /// <remarks>
     /// Canton documents that an explicit <c>limit</c> at or below the participant's
@@ -100,9 +103,9 @@ public class RestLedgerClientOptions : IValidatableObject
     /// below this value answers the first window with a 413, which reaches the caller as a terminal
     /// in-band stream error naming this option; lower it to match that participant.
     /// <para>
-    /// The ACS snapshot is deliberately not bounded by this. It is a single read the client does
-    /// not page, so capping it would hand a caller a short snapshot that looks complete, where
-    /// leaving the participant's own cap to answer makes an oversized snapshot a loud failure.
+    /// The ACS snapshot reads every page, so this bounds each page, never the snapshot. The
+    /// participant rejects a <c>maxPageSize</c> above 10000, which answers the first page with a
+    /// terminal in-band stream error.
     /// </para>
     /// </remarks>
     public long StreamWindowLimit { get; set; } = DefaultStreamWindowLimit;
@@ -115,9 +118,11 @@ public class RestLedgerClientOptions : IValidatableObject
     /// </summary>
     /// <remarks>
     /// Canton's documentation states that a window carrying neither an end offset nor this timeout
-    /// never closes, so the client always sends it; two seconds is the <c>http-list-wait-time</c>
-    /// its worked example uses. This bounds how long a single request blocks on a quiet ledger, so
-    /// a consumer following a stream trades window latency against request volume here.
+    /// never closes, so the client always sends it. This bounds how long a single request blocks on
+    /// a quiet ledger, so a consumer following a stream trades window latency against request volume
+    /// here: the 250 ms default favours latency, and a quiet followed stream costs about four
+    /// requests a second. Raise it — two seconds is the <c>http-list-wait-time</c> Canton's worked
+    /// example uses — where request volume matters more than how far a live tail trails the ledger.
     /// <para>
     /// That trade has a ceiling the participant imposes rather than answers: a LocalNet participant
     /// running Canton 3.5.11 abandons a request it has held for twenty seconds and replies

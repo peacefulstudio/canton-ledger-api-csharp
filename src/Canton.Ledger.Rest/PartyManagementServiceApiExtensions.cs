@@ -15,7 +15,12 @@ public static class PartyManagementServiceApiExtensions
     /// Reads the details of several parties, the read the gRPC Ledger API's
     /// <c>PartyManagementService.GetParties</c> serves in one call from a repeated request field.
     /// </summary>
-    /// <param name="api">The party management interface to read through.</param>
+    /// <param name="api">
+    /// The party management interface to read through. Routed through
+    /// <see cref="IPartyManagementApi"/> rather than the proto-derived
+    /// <see cref="IPartyManagementServiceApi"/>, because the latter sends the identity-provider
+    /// scope as <c>identityProviderId</c>, which the participant silently ignores.
+    /// </param>
     /// <param name="parties">
     /// The parties to read, in the order their details come back. An empty sequence issues no
     /// request and answers with an empty list.
@@ -28,7 +33,7 @@ public static class PartyManagementServiceApiExtensions
     /// <returns>
     /// The details of every party the participant knows, in the order asked for. A party the
     /// participant does not know contributes nothing, because
-    /// <see cref="IPartyManagementServiceApi.GetParties"/> answers an unknown party with an empty
+    /// <see cref="IPartyManagementApi.GetParties"/> answers an unknown party with an empty
     /// list rather than an error — so a read of N parties can come back with fewer than N details,
     /// exactly as the gRPC batch does.
     /// </returns>
@@ -49,7 +54,7 @@ public static class PartyManagementServiceApiExtensions
     /// already reached the participant.
     /// </exception>
     public static Task<IReadOnlyList<PartyDetails>> GetPartiesAsync(
-        this IPartyManagementServiceApi api,
+        this IPartyManagementApi api,
         IEnumerable<string> parties,
         string? identityProviderId = null,
         CancellationToken cancellationToken = default)
@@ -61,7 +66,7 @@ public static class PartyManagementServiceApiExtensions
     }
 
     private static async Task<IReadOnlyList<PartyDetails>> ReadPartyByPartyAsync(
-        IPartyManagementServiceApi api,
+        IPartyManagementApi api,
         IEnumerable<string> parties,
         string? identityProviderId,
         CancellationToken cancellationToken)

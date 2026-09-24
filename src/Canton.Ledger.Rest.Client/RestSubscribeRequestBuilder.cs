@@ -9,7 +9,7 @@ using WireCompletionStreamRequest = Canton.Ledger.Rest.Client.Raw.CompletionStre
 using WireCumulativeFilter = Canton.Ledger.Rest.Client.Raw.CumulativeFilter;
 using WireEventFormat = Canton.Ledger.Rest.Client.Raw.EventFormat;
 using WireFilters = Canton.Ledger.Rest.Client.Raw.Filters;
-using WireGetActiveContractsRequest = Canton.Ledger.Rest.Client.Raw.GetActiveContractsRequest;
+using WireGetActiveContractsPageRequest = Canton.Ledger.Rest.Client.Raw.GetActiveContractsPageRequest;
 using WireGetUpdatesRequest = Canton.Ledger.Rest.Client.Raw.GetUpdatesRequest;
 using WireIdentifierFilter = Canton.Ledger.Rest.Client.Raw.IdentifierFilter;
 using WireInterfaceFilter = Canton.Ledger.Rest.Client.Raw.InterfaceFilter;
@@ -31,19 +31,20 @@ internal enum RestTransactionShape
 
 /// <summary>
 /// Builds the wire request bodies for the JSON Ledger API's bounded, blocking stream endpoints
-/// (<c>POST /v2/state/active-contracts</c>, <c>POST /v2/updates</c>,
+/// (<c>POST /v2/state/active-contracts-page</c>, <c>POST /v2/updates</c>,
 /// <c>POST /v2/commands/completions</c>), mirroring the gRPC transport's
 /// <c>SubscribeRequestBuilder</c>.
 /// </summary>
 internal static class RestSubscribeRequestBuilder
 {
-    public static WireGetActiveContractsRequest BuildGetActiveContractsRequest<T>(
-        RuntimeCommands.SubmitterInfo submitter, long activeAtOffset)
+    public static WireGetActiveContractsPageRequest BuildGetActiveContractsPageRequest<T>(
+        RuntimeCommands.SubmitterInfo submitter, long activeAtOffset, int maxPageSize)
         where T : IDamlType =>
         new()
         {
             ActiveAtOffset = FormatOffset(activeAtOffset),
             EventFormat = BuildEventFormat<T>(submitter),
+            MaxPageSize = maxPageSize,
         };
 
     public static WireGetUpdatesRequest BuildGetUpdatesRequest<T>(

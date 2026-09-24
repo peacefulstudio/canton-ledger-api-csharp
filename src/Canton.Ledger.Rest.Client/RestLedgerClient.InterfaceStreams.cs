@@ -8,7 +8,6 @@ using Daml.Runtime.Contracts;
 using Daml.Runtime.Data;
 using Daml.Runtime.Streams;
 using RuntimeCommands = Daml.Runtime.Commands;
-using WireGetActiveContractsResponse = Canton.Ledger.Rest.Client.Raw.GetActiveContractsResponse;
 using WireGetUpdatesResponse = Canton.Ledger.Rest.Client.Raw.GetUpdatesResponse;
 
 namespace Canton.Ledger.Rest.Client;
@@ -17,8 +16,8 @@ internal sealed partial class RestLedgerClient
 {
     /// <inheritdoc />
     /// <remarks>
-    /// The interface-family counterpart of <see cref="SubscribeActiveAsync{T}"/>: one window of
-    /// <c>POST /v2/state/active-contracts</c> whose <c>InterfaceFilter</c> for
+    /// The interface-family counterpart of <see cref="SubscribeActiveAsync{T}"/>, paged over
+    /// <c>POST /v2/state/active-contracts-page</c> the same way, whose <c>InterfaceFilter</c> for
     /// <typeparamref name="TInterface"/> sets <c>includeInterfaceView</c>, so each row carries the
     /// participant-computed view decoded into <typeparamref name="TView"/> rather than the
     /// implementing template's create argument. A row delivered without a usable view arrives as
@@ -26,7 +25,7 @@ internal sealed partial class RestLedgerClient
     /// <see cref="UnclassifiedKind.InterfaceViewUnavailable"/>. The snapshot ends with a terminal
     /// <see cref="InterfaceAcsSnapshotEntry{TInterface, TView}.Checkpoint"/> even when empty, or
     /// with a terminal <see cref="InterfaceAcsSnapshotEntry{TInterface, TView}.StreamError"/> — a
-    /// 413 among them — when the window failed, never both.
+    /// failed page among them — never both.
     /// </remarks>
     public IAsyncEnumerable<InterfaceAcsSnapshotEntry<TInterface, TView>> SubscribeActiveAsync<TInterface, TView>(
         ViewDescriptor<TInterface, TView> view,
@@ -100,20 +99,21 @@ internal sealed partial class RestLedgerClient
     {
         var effectiveOffset = activeAtOffset
             ?? await GetLedgerEndAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-        var request = RestSubscribeRequestBuilder.BuildGetActiveContractsRequest<TInterface>(
-            submitter, effectiveOffset.Value);
-
-        var window = await ReadWindowAsync<WireGetActiveContractsResponse>(
-            ActiveContractsPath, request, cancellationToken).ConfigureAwait(false);
-        if (window.Fault is { } fault)
+        var pages = ReadActiveContractPagesAsync<TInterface>(submitter, effectiveOffset, cancellationToken);
+        await foreach (var read in pages.ConfigureAwait(false))
         {
-            yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
-                fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
-            yield break;
-        }
+            if (read.Fault is { } fault)
+            {
+                yield return new InterfaceAcsSnapshotEntry<TInterface, TView>.StreamError(
+                    fault.StatusCode, fault.Message, fault.Category, fault.ErrorId, fault.SourceException);
+                yield break;
+            }
 
-        foreach (var entry in window.Entries)
-        {
+            if (read.Entry is not { } entry)
+            {
+                continue;
+            }
+
             foreach (var projected in RestInterfaceStreamProjector.ProjectActiveContractEntry<TInterface, TView>(
                 entry, _logger, effectiveOffset))
             {

@@ -397,7 +397,7 @@ public sealed class LedgerClientTests : IDisposable
     }
 
     [Fact]
-    public async Task TryExerciseAsync_throws_when_no_matching_event()
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_the_committed_transaction_has_no_matching_event()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
 
@@ -409,10 +409,14 @@ public sealed class LedgerClientTests : IDisposable
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*no exercised event for choice*Archive*");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<object>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("update-456");
+        undecodable.Message.Should().Be(
+            "The command committed, but its choice result could not be read: Transaction contains no exercised event for choice 'Archive'.");
+        undecodable.SourceException.Should().BeOfType<InvalidOperationException>();
     }
 
     [Fact]
@@ -653,7 +657,7 @@ public sealed class LedgerClientTests : IDisposable
     }
 
     [Fact]
-    public async Task TryExerciseAsync_throws_when_multiple_matching_events()
+    public async Task TryExerciseAsync_returns_CommittedUndecodable_when_the_committed_transaction_has_multiple_matching_events()
     {
         var transaction = new Transaction { UpdateId = "update-456", Offset = 789L };
         transaction.Events.Add(new Event
@@ -687,10 +691,14 @@ public sealed class LedgerClientTests : IDisposable
 
         var client = CreateClient();
 
-        var action = () => client.TryExerciseAsync<object>(exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
+        var outcome = await client.TryExerciseAsync<object>(
+            exerciseCommand, ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
-        await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Bump*");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<object>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("update-456");
+        undecodable.Message.Should().Be(
+            "The command committed, but its choice result could not be read: Transaction contains 2 exercised events for choice 'Bump', expected exactly 1.");
+        undecodable.SourceException.Should().BeOfType<InvalidOperationException>();
     }
 
     [Fact]

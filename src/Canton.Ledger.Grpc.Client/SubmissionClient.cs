@@ -262,7 +262,7 @@ internal sealed partial class SubmissionClient
             },
             RecordOutcome,
             cancellationToken,
-            configureActivity: activity => activity.SetSubmitterTags(submitter));
+            configureActivity: activity => activity.SetSubmitterTags(submitter, _options));
 
     internal Task<ExerciseOutcome<ContractId<TTemplate>>> TryCreateAsync<TTemplate>(
         TTemplate payload,
@@ -291,7 +291,7 @@ internal sealed partial class SubmissionClient
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerActivityTagNames.DamlTemplateId, typeof(TTemplate).Name);
-                activity.SetSubmitterTags(submitter);
+                activity.SetSubmitterTags(submitter, _options);
             },
             activityKind: ActivityKind.Internal);
 
@@ -512,8 +512,8 @@ internal sealed partial class SubmissionClient
         RuntimeCommands.CommandId? commandId)
     {
         activity?.SetTag(LedgerActivityTagNames.DamlChoice, command.Choice.Value);
-        activity?.SetTag(LedgerActivityTagNames.DamlContractId, command.ContractId.Value);
-        activity.SetSubmitterTags(submitter);
+        activity.SetPartyOrContractTag(_options, LedgerActivityTagNames.DamlContractId, command.ContractId.Value);
+        activity.SetSubmitterTags(submitter, _options);
         LogExercisingChoice(_logger, command.Choice, command.ContractId);
         return NewSubmission(
             command, submitter, workflowId ?? $"exercise-{command.Choice.Value.ToLowerInvariant()}", commandId);

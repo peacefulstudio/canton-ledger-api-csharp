@@ -20,7 +20,7 @@ namespace Canton.Ledger.Rest.Client.Tests;
 /// Pins the REST exercise path's behavior on two shapes a live participant is known to send:
 /// the bytes it submits; a transaction carrying an ArchivedEvent and no ExercisedEvent, which
 /// the participant returned under the ACS-delta default the client no longer requests and
-/// which must still fail loudly if it ever arrives; and a ledger-effects transaction whose
+/// which must still surface as committed but undecodable if it ever arrives; and a ledger-effects transaction whose
 /// choiceArgument and exerciseResult arrive as <c>{}</c>, the Daml-LF JSON encoding of Unit,
 /// decoded against the choice's declared Unit types.
 /// </summary>
@@ -99,7 +99,7 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
         """;
 
     [Fact]
-    public async Task TryExerciseAsync_requests_the_ledger_effects_shape_and_throws_when_the_transaction_carries_no_ExercisedEvent()
+    public async Task TryExerciseAsync_requests_the_ledger_effects_shape_and_reports_CommittedUndecodable_when_the_transaction_carries_no_ExercisedEvent()
     {
         _transport.WithResponse(
             HttpStatusCode.OK,
@@ -115,11 +115,14 @@ public sealed class RestExerciseQuarantinePinTests : IDisposable
             """);
         var client = Client();
 
-        var decodeFailure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.TryExerciseAsync<DamlUnit>(
-                ArchiveCommand(), Alice, cancellationToken: TestContext.Current.CancellationToken));
+        var outcome = await client.TryExerciseAsync<DamlUnit>(
+            ArchiveCommand(), Alice, cancellationToken: TestContext.Current.CancellationToken);
 
-        decodeFailure.Message.Should().Be("Transaction contains no exercised event for choice 'Archive'.");
+        var undecodable = outcome.Should().BeOfType<ExerciseOutcome<DamlUnit>.CommittedUndecodable>().Subject;
+        undecodable.UpdateId.Should().Be("upd-1");
+        undecodable.Message.Should().Be(
+            "The command committed, but its choice result could not be read: Transaction contains no exercised event for choice 'Archive'.");
+        undecodable.SourceException.Should().BeOfType<InvalidOperationException>();
         SubmittedTransactionShape().Should().Be("TRANSACTION_SHAPE_LEDGER_EFFECTS",
             "the exercise path asks for ledger effects so the ExercisedEvent is present at all");
     }

@@ -56,7 +56,7 @@ internal sealed partial class LedgerClient
             configureActivity: activity =>
             {
                 if (party is { } taggedParty)
-                    activity?.SetTag(LedgerActivityTagNames.CantonPartyId, taggedParty.Id);
+                    activity.SetPartyOrContractTag(_options, LedgerActivityTagNames.CantonPartyId, taggedParty.Id);
                 if (participantId is not null)
                     activity?.SetTag(LedgerActivityTagNames.CantonParticipantId, participantId);
             });

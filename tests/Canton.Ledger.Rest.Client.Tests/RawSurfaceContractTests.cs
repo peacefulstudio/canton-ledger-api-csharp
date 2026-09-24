@@ -24,7 +24,7 @@ public class RawSurfaceContractTests
     [Fact]
     public void The_raw_surface_exposes_every_declared_ledger_api_interface()
     {
-        DiscoverRawInterfaces().Should().HaveCount(19);
+        DiscoverRawInterfaces().Should().HaveCount(21);
     }
 
     [Theory]

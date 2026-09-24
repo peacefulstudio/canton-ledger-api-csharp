@@ -140,7 +140,11 @@ internal sealed partial class LedgerClient : ICantonLedgerClient, IUnboundedStre
     /// A committed transaction that cannot be decoded, for example because a payload has no loaded
     /// generated type, is returned as <see cref="ExerciseOutcome{T}.CommittedUndecodable"/>, never as a
     /// failure: do not resubmit, and read the transaction by its
-    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one.
+    /// <see cref="ExerciseOutcome{T}.CommittedUndecodable.UpdateId"/> when it carries one. The same
+    /// holds when the committed transaction's choice result cannot be read as
+    /// <typeparamref name="TResult"/>: <typeparamref name="TResult"/> has no Daml mapping, or the
+    /// transaction has zero or more than one exercised event for <paramref name="command"/>'s choice
+    /// (e.g. a nonconsuming choice that only forks other choices).
     /// </remarks>
     public Task<ExerciseOutcome<TResult>> TryExerciseAsync<TResult>(
         RuntimeCommands.ExerciseCommand command,

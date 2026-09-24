@@ -25,10 +25,15 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
 {
     private static readonly Party ActAs = new("party::alice");
 
+    private static readonly RuntimeCommands.SubmitterInfo AliceReadingAsObserver = new(
+        new HashSet<Party> { ActAs },
+        new HashSet<Party> { new("party::observer") });
+
     private readonly LedgerClientOptions _options;
     private readonly GrpcChannel _channel;
     private readonly CommandService.CommandServiceClient _commandService;
     private readonly StateService.StateServiceClient _stateService;
+    private readonly UpdateService.UpdateServiceClient _updateService;
     private readonly Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient _interactiveSubmissionService;
     private readonly ITokenProvider _tokenProvider = new StaticTokenProvider("test-token");
 
@@ -40,6 +45,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
         var callInvoker = Substitute.For<CallInvoker>();
         _commandService = Substitute.ForPartsOf<CommandService.CommandServiceClient>(callInvoker);
         _stateService = Substitute.ForPartsOf<StateService.StateServiceClient>(callInvoker);
+        _updateService = Substitute.ForPartsOf<UpdateService.UpdateServiceClient>(callInvoker);
         _interactiveSubmissionService = Substitute
             .ForPartsOf<Interactive.InteractiveSubmissionService.InteractiveSubmissionServiceClient>(callInvoker);
     }
@@ -54,6 +60,14 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
         _commandService,
         new UpdateService.UpdateServiceClient(_channel),
         _stateService,
+        tokenProvider: _tokenProvider);
+
+    private LedgerClient CreateClientWithUpdateService() => new(
+        _options,
+        _channel,
+        _commandService,
+        _updateService,
+        new StateService.StateServiceClient(_channel),
         tokenProvider: _tokenProvider);
 
     private LedgerClient CreateClientWithInteractiveSubmissionService() => new(
@@ -76,31 +90,11 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
 
     private static string UniqueContractId() => $"00{Guid.NewGuid():N}";
 
-
     [Fact]
     public async Task TryExerciseAsync_tags_the_activity_with_grpc_semconv_and_daml_attributes()
     {
         var contractId = UniqueContractId();
-        var transaction = new Transaction { UpdateId = "update-1", Offset = 1L };
-        transaction.Events.Add(new Event
-        {
-            Exercised = new Com.Daml.Ledger.Api.V2.ExercisedEvent
-            {
-                ContractId = contractId,
-                TemplateId = new Com.Daml.Ledger.Api.V2.Identifier
-                {
-                    PackageId = "pkg", ModuleName = "Module", EntityName = "Template"
-                },
-                Choice = "Archive",
-                ChoiceArgument = new Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
-                ExerciseResult = new Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
-                Consuming = true,
-                ActingParties = { "party::alice" },
-                WitnessParties = { "party::alice" },
-            }
-        });
-        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
-        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
+        StubExerciseSuccess(contractId);
 
         using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
 
@@ -109,16 +103,122 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "SubmitAndWaitForTransaction")
             .Subject;
         activity.Kind.Should().Be(ActivityKind.Client);
-        activity.GetTagItem(ActivityHelper.RpcSystem).Should().Be("grpc");
-        activity.GetTagItem(ActivityHelper.RpcService).Should().Be("com.daml.ledger.api.v2.CommandService");
-        activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("SubmitAndWaitForTransaction");
-        activity.GetTagItem(ActivityHelper.ServerAddress).Should().Be("localhost");
-        activity.GetTagItem(ActivityHelper.ServerPort).Should().Be(5001);
-        activity.GetTagItem(LedgerActivityTagNames.DamlChoice).Should().Be("Archive");
-        activity.GetTagItem(LedgerActivityTagNames.CantonSubmitterActAs).Should().Be("party::alice");
+        activity.GetTagItem("rpc.system").Should().Be("grpc");
+        activity.GetTagItem("rpc.service").Should().Be("com.daml.ledger.api.v2.CommandService");
+        activity.GetTagItem("server.address").Should().Be("localhost");
+        activity.GetTagItem("server.port").Should().Be(5001);
+        activity.GetTagItem("daml.choice").Should().Be("Archive");
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_leaves_the_contract_id_and_submitter_parties_off_the_span_by_default()
+    {
+        var contractId = UniqueContractId();
+        StubExerciseSuccess(contractId);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClient();
+        await client.TryExerciseAsync<DamlUnit>(
+            ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("daml.contract_id").Should().BeNull();
+        activity.GetTagItem("canton.submitter.act_as").Should().BeNull();
+        activity.GetTagItem("canton.submitter.read_as").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TryExerciseAsync_tags_the_contract_id_and_submitter_parties_when_opted_in()
+    {
+        _options.EmitPartyAndContractSpanTags = true;
+        var contractId = UniqueContractId();
+        StubExerciseSuccess(contractId);
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClient();
+        await client.TryExerciseAsync<DamlUnit>(
+            ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("daml.contract_id").Should().Be(contractId);
+        activity.GetTagItem("canton.submitter.act_as").Should().Be("party::alice");
+        activity.GetTagItem("daml.choice").Should().Be("Archive");
+        activity.GetTagItem("rpc.method").Should().Be("SubmitAndWaitForTransaction");
+    }
+
+    [Fact]
+    public async Task GetUpdateByOffsetAsync_leaves_the_submitter_parties_off_the_span_by_default()
+    {
+        StubGetUpdateByOffset();
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClientWithUpdateService();
+        await client.GetUpdateByOffsetAsync(
+            7L, AliceReadingAsObserver, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.submitter.act_as").Should().BeNull();
+        activity.GetTagItem("canton.submitter.read_as").Should().BeNull();
+        activity.GetTagItem("canton.offset").Should().Be(7L);
+        activity.GetTagItem("rpc.method").Should().Be("GetUpdateByOffset");
+    }
+
+    [Fact]
+    public async Task GetUpdateByOffsetAsync_tags_the_submitter_parties_when_opted_in()
+    {
+        _options.EmitPartyAndContractSpanTags = true;
+        StubGetUpdateByOffset();
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClientWithUpdateService();
+        await client.GetUpdateByOffsetAsync(
+            7L, AliceReadingAsObserver, cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.submitter.act_as").Should().Be("party::alice");
+        activity.GetTagItem("canton.submitter.read_as").Should().Be("party::observer");
+        activity.GetTagItem("canton.offset").Should().Be(7L);
+    }
+
+    [Fact]
+    public async Task GetConnectedSynchronizersAsync_leaves_the_party_off_the_span_by_default()
+    {
+        StubGetConnectedSynchronizers();
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClientWithStateService();
+        await client.GetConnectedSynchronizersAsync(
+            ActAs, "participant::p1", cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.party_id").Should().BeNull();
+        activity.GetTagItem("canton.participant_id").Should().Be("participant::p1");
+        activity.GetTagItem("rpc.method").Should().Be("GetConnectedSynchronizers");
+    }
+
+    [Fact]
+    public async Task GetConnectedSynchronizersAsync_tags_the_party_when_opted_in()
+    {
+        _options.EmitPartyAndContractSpanTags = true;
+        StubGetConnectedSynchronizers();
+
+        using var capture = ActivityCapture.Of(LedgerActivitySourceNames.GrpcLedgerClient);
+
+        var client = CreateClientWithStateService();
+        await client.GetConnectedSynchronizersAsync(
+            ActAs, "participant::p1", cancellationToken: TestContext.Current.CancellationToken);
+
+        var activity = capture.Activities.Should().ContainSingle().Subject;
+        activity.GetTagItem("canton.party_id").Should().Be("party::alice");
+        activity.GetTagItem("canton.participant_id").Should().Be("participant::p1");
     }
 
     [Fact]
@@ -137,7 +237,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "SubmitAndWaitForTransaction")
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(errorId);
@@ -157,7 +257,7 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             ArchiveCommand(contractId), ActAs, cancellationToken: TestContext.Current.CancellationToken);
 
         var activity = capture.Activities.Should()
-            .ContainSingle(a => a.GetTagItem(LedgerActivityTagNames.DamlContractId) as string == contractId)
+            .ContainSingle(a => a.GetTagItem(ActivityHelper.RpcMethod) as string == "SubmitAndWaitForTransaction")
             .Subject;
         activity.Status.Should().Be(ActivityStatusCode.Error);
         activity.GetTagItem(ActivityHelper.ErrorType).Should().Be(StatusCode.Unavailable.ToString());
@@ -333,4 +433,54 @@ public sealed class LedgerClientActivityEnrichmentTests : IDisposable
             .Be("com.daml.ledger.api.v2.interactive.InteractiveSubmissionService");
         activity.GetTagItem(ActivityHelper.RpcMethod).Should().Be("PrepareSubmission");
     }
+
+    private void StubExerciseSuccess(string contractId)
+    {
+        var transaction = new Transaction { UpdateId = "update-1", Offset = 1L };
+        transaction.Events.Add(new Event
+        {
+            Exercised = new Com.Daml.Ledger.Api.V2.ExercisedEvent
+            {
+                ContractId = contractId,
+                TemplateId = new Com.Daml.Ledger.Api.V2.Identifier
+                {
+                    PackageId = "pkg", ModuleName = "Module", EntityName = "Template"
+                },
+                Choice = "Archive",
+                ChoiceArgument = new Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                ExerciseResult = new Value { Unit = new Google.Protobuf.WellKnownTypes.Empty() },
+                Consuming = true,
+                ActingParties = { "party::alice" },
+                WitnessParties = { "party::alice" },
+            }
+        });
+        var response = new SubmitAndWaitForTransactionResponse { Transaction = transaction };
+        LedgerClientTestFixtures.StubCommandServiceSuccess(_commandService, response);
+    }
+
+    private void StubGetUpdateByOffset() =>
+        _updateService
+            .GetUpdateByOffsetAsync(
+                Arg.Any<GetUpdateByOffsetRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new GetUpdateResponse { Transaction = new Transaction { UpdateId = "u-1", Offset = 7L } }));
+
+    private void StubGetConnectedSynchronizers() =>
+        _stateService
+            .GetConnectedSynchronizersAsync(
+                Arg.Any<GetConnectedSynchronizersRequest>(),
+                Arg.Any<Metadata>(),
+                Arg.Any<DateTime?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Ok(new GetConnectedSynchronizersResponse()));
+
+    private static AsyncUnaryCall<T> Ok<T>(T value) =>
+        new(
+            Task.FromResult(value),
+            Task.FromResult(new Metadata()),
+            () => Status.DefaultSuccess,
+            () => new Metadata(),
+            () => { });
 }

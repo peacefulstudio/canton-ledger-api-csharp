@@ -56,7 +56,18 @@ internal static class TransactionResultFolds
 
     internal static ExerciseOutcome<TResult> ToChoiceResult<TResult>(TransactionResult result, ChoiceName choice)
     {
-        var choiceResult = result.ExerciseResult<TResult>(choice);
+        TResult? choiceResult;
+        try
+        {
+            choiceResult = result.ExerciseResult<TResult>(choice);
+        }
+        catch (Exception projectionFailure) when (projectionFailure is not OperationCanceledException)
+        {
+            return new ExerciseOutcome<TResult>.CommittedUndecodable(
+                string.IsNullOrEmpty(result.UpdateId) ? null : result.UpdateId,
+                $"The command committed, but its choice result could not be read: {projectionFailure.Message}",
+                projectionFailure);
+        }
 
         return choiceResult is null
             ? new ExerciseOutcome<TResult>.None()

@@ -73,30 +73,45 @@ public sealed class RestLedgerClientCantonTests : IDisposable
     private const string ViewedInterfaceIdJson =
         """{"packageId": "viewed-pkg", "moduleName": "Token.Api", "entityName": "IViewedHolding"}""";
 
+    private const string OkViewJson =
+        $$"""
+        {
+          "interfaceId": {{ViewedInterfaceIdJson}},
+          "viewStatus": {"code": 0, "message": ""},
+          "viewValue": {"amount": "42.5"}
+        }
+        """;
+
     private static RecordingHttpHandler SnapshotTransport(string interfaceViewJson) =>
         new RecordingHttpHandler()
             .WithResponseForPath("/v2/state/ledger-end", HttpStatusCode.OK, """{"offset": 9}""")
             .WithResponseForPath(
-                "/v2/state/active-contracts",
+                "/v2/state/active-contracts-page",
                 HttpStatusCode.OK,
-                $$$"""
-                [{
-                  "contractEntry": {
-                    "JsActiveContract": {
-                      "createdEvent": {
-                        "offset": "9",
-                        "contractId": "00impl",
-                        "templateId": {"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"},
-                        "createArgument": {"amount": "999"},
-                        "interfaceViews": [{{{interfaceViewJson}}}],
-                        "witnessParties": ["party::alice"]
-                      },
-                      "synchronizerId": "sync-1",
-                      "reassignmentCounter": "0"
-                    }
-                  }
-                }]
-                """);
+                ViewedActiveContractsPage("00impl", interfaceViewJson, nextPageToken: null));
+
+    private static string ViewedActiveContractsPage(string contractId, string interfaceViewJson, string? nextPageToken)
+    {
+        var nextPageTokenField = nextPageToken is null ? "" : $", \"nextPageToken\": \"{nextPageToken}\"";
+        return $$$"""
+            {"activeContracts": [{
+              "contractEntry": {
+                "JsActiveContract": {
+                  "createdEvent": {
+                    "offset": "9",
+                    "contractId": "{{{contractId}}}",
+                    "templateId": {"packageId": "impl-pkg", "moduleName": "Token.Impl", "entityName": "Asset"},
+                    "createArgument": {"amount": "999"},
+                    "interfaceViews": [{{{interfaceViewJson}}}],
+                    "witnessParties": ["party::alice"]
+                  },
+                  "synchronizerId": "sync-1",
+                  "reassignmentCounter": "0"
+                }
+              }
+            }]{{{nextPageTokenField}}}}
+            """;
+    }
 
     [Fact]
     public async Task QueryActiveAsync_decodes_the_participant_computed_interface_view_into_the_view_record()
@@ -118,6 +133,27 @@ public sealed class RestLedgerClientCantonTests : IDisposable
         holdings[0].Contract.View.Amount.Should().Be(42.5m);
         holdings[0].LastUpdateOffset.Should().Be(LedgerOffset.At(9));
         holdings[0].SynchronizerId.Should().Be((SynchronizerId)"sync-1");
+    }
+
+    [Fact]
+    public async Task QueryActiveAsync_reads_every_page_of_an_interface_snapshot()
+    {
+        var transport = new RecordingHttpHandler()
+            .WithResponseForPath("/v2/state/ledger-end", HttpStatusCode.OK, """{"offset": 9}""")
+            .WithResponseSequence(
+                (HttpStatusCode.OK, ViewedActiveContractsPage("00impl-1", OkViewJson, nextPageToken: "page-2")),
+                (HttpStatusCode.OK, ViewedActiveContractsPage("00impl-2", OkViewJson, nextPageToken: null)));
+        ICantonLedgerClient client = ClientWith(transport);
+
+        var holdings = await client.QueryActiveAsync<IViewedInterfaceMarker, ViewedInterfaceView>(
+            AliceSubmitter, cancellationToken: TestContext.Current.CancellationToken);
+
+        holdings.Select(holding => holding.Contract.Id.Value).Should().Equal("00impl-1", "00impl-2");
+        var pageRequests = transport.Requests
+            .Where(request => request.PathAndQuery == "/v2/state/active-contracts-page")
+            .ToList();
+        pageRequests.Should().HaveCount(2);
+        pageRequests[1].Body.Should().Contain("\"pageToken\":\"page-2\"");
     }
 
     [Fact]

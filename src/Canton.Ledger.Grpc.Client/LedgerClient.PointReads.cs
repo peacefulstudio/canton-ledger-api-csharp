@@ -37,7 +37,7 @@ internal sealed partial class LedgerClient
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerActivityTagNames.CantonOffset, offset);
-                activity.SetSubmitterTags(submitter);
+                activity.SetSubmitterTags(submitter, _options);
             });
     }
 
@@ -67,7 +67,7 @@ internal sealed partial class LedgerClient
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerActivityTagNames.CantonUpdateId, updateId);
-                activity.SetSubmitterTags(submitter);
+                activity.SetSubmitterTags(submitter, _options);
             });
     }
 
@@ -97,7 +97,7 @@ internal sealed partial class LedgerClient
             configureActivity: activity =>
             {
                 activity?.SetTag(LedgerActivityTagNames.CantonOffset, offset);
-                activity.SetSubmitterTags(submitter);
+                activity.SetSubmitterTags(submitter, _options);
             });
     }
 

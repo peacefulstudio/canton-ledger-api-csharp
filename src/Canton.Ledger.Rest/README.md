@@ -136,10 +136,11 @@ That correspondence is pinned **by name, not by count**, in
 `tests/Canton.Ledger.Rest.Client.Tests/RestEndpointCoverageTests.cs`, whose
 `PinnedSpecOperations` maps all 52 `operationId`s to their `VERB route` and asserts that
 `spec/openapi.yaml` declares exactly those and that the raw Refit surface routes every one of
-them plus the seven hand-authored off-spec endpoints in `PinnedOffSpecEndpoints`. The raw
+them plus the thirteen hand-authored off-spec endpoints in `PinnedOffSpecEndpoints`. The raw
 surface is compared per declaring interface **and method** —
 `IPackageManagementServiceApi.UploadDarFile: POST /v2/dars`, not `POST /v2/dars` — because
-`IDarApi`, `IPackageApi` and `IInteractiveSubmissionApi` re-declare off-spec routes the generated
+`IDarApi`, `IPackageApi`, `IInteractiveSubmissionApi`, `IPartyManagementApi` and
+`IUserManagementApi` re-declare off-spec routes the generated
 surface also carries and an unqualified route set would let them stand in for a regeneration that
 dropped them, and because two methods sharing one route on one
 interface would otherwise collapse into a single entry and stand in for each other. The method
