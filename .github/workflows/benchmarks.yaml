@@ -176,20 +176,6 @@ jobs:
             --warmup 1 --seed-contracts 1 --acs-contracts 1 --latency-samples 1 --tail-samples 1 \
             --pqs-lag-samples 1 --pqs-rows 1 --repetitions 1 --output "${RUNNER_TEMP}/priming"
 
-      - name: Restart PQS so scribe's template filter picks up the benchmark DAR
-        run: |
-          set -euo pipefail
-          restarted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          docker restart pqs-a-validator-1
-          for _ in $(seq 1 60); do
-            if docker logs --since "${restarted_at}" pqs-a-validator-1 2>&1 | grep -q "Contract filter inclusive"; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::scribe did not re-subscribe within 120s of restart" >&2
-          exit 1
-
       - name: Run benchmarks
         env:
           CANTON_LOCALNET_A_VALIDATOR_1_PQS_CONNECTION_STRING: ${{ env.PQS_CONNECTION_STRING }}

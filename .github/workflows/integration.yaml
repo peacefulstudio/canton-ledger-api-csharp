@@ -185,21 +185,6 @@ jobs:
             --output Detailed 2>&1 | tee "${RUNNER_TEMP}/grpc-integration.log"
           .github/scripts/assert-tests-ran.sh "${RUNNER_TEMP}/grpc-integration.log" "gRPC integration tests" 16 3
 
-      - name: Restart PQS so scribe's template filter picks up the DARs the tests uploaded
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          restarted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          docker restart pqs-a-validator-1
-          for _ in $(seq 1 60); do
-            if docker logs --since "${restarted_at}" pqs-a-validator-1 2>&1 | grep -q "Contract filter inclusive"; then
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "::error::scribe did not re-subscribe within 120s of restart" >&2
-          exit 1
-
       - name: PQS round-trip test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
         env:
