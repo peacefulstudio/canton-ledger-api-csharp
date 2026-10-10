@@ -20,51 +20,14 @@ jobs:
     name: integration (localnet, multi-sync)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      LOCALNET_DIR: ${{ github.workspace }}/canton-localnet
-      LOCALNET_GRPC_URL: http://localhost:11901
-      LOCALNET_JSON_API_URL: http://localhost:11975
-      LOCALNET_TOKEN_URL: http://localhost:8082/realms/AValidator1/protocol/openid-connect/token
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Checkout canton-localnet (fixtures + compose stack)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: peacefulstudio/canton-localnet
-          ref: dev
-          path: canton-localnet
-          persist-credentials: false
-
-      - name: Read validator OAuth2 client credentials from LocalNet fixtures
-        run: |
-          set -euo pipefail
-          oauth2_env="${LOCALNET_DIR}/compose/modules/keycloak/env/a-validator-1/on/oauth2.env"
-          read_fixture_value() {
-            value="$(grep -m 1 -oP "^${1}=\K\S+" "${oauth2_env}")" \
-              || { echo "::error::${1} not found in ${oauth2_env}" >&2; return 1; }
-            value="${value%\"}"
-            printf '%s' "${value#\"}"
-          }
-          client_id="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_ID)"
-          client_secret="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_SECRET)"
-          echo "::add-mask::${client_secret}"
-          {
-            echo "LOCALNET_CLIENT_ID=${client_id}"
-            echo "LOCALNET_CLIENT_SECRET=${client_secret}"
-          } >> "${GITHUB_ENV}"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
           global-json-file: global.json
-
-      - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: '1.26'
-          cache-dependency-path: canton-localnet/cli/go.sum
 
       - name: Show docker / compose versions
         run: |
@@ -72,31 +35,12 @@ jobs:
           docker version
           docker compose version
 
-      - name: Build canton-localnet CLI
-        working-directory: canton-localnet/cli
-        run: |
-          set -euo pipefail
-          go build -o "${LOCALNET_DIR}/canton-localnet" ./cmd/canton-localnet
-
-      - name: Bring up the multi-synchronizer LocalNet (one retry on splice bootstrap race)
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          # Splice's SV-validator can lose a startup race on slower runners
-          # — "Ensuring decentralized synchronizer registered failed:
-          # UNAVAILABLE: No active synchronizer serial found". The initial
-          # bring-up is setup, not test signal, so one retry is allowed;
-          # mirrors canton-localnet's own integration-tests.yaml multi-sync
-          # scenario.
-          if ! "${LOCALNET_DIR}/canton-localnet" up --multi-sync; then
-            echo "::warning::canton-localnet up --multi-sync failed on first attempt — capturing diagnostics, tearing down with volumes, and retrying once"
-            docker ps -a > /tmp/docker-ps-attempt1.txt 2>&1 || true
-            timeout 60 make logs > /tmp/logs-attempt1.txt 2>&1 || true
-            docker logs multi-sync-startup > /tmp/multi-sync-startup-attempt1.txt 2>&1 || true
-            "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::pre-retry teardown failed; second up may fail with leaked state"
-            sleep 30
-            "${LOCALNET_DIR}/canton-localnet" up --multi-sync
-          fi
+      - name: Boot the multi-synchronizer LocalNet (canton-localnet v0.8.4-3)
+        uses: peacefulstudio/canton-localnet@1cf682aae212d4e2fefb882bcf9c97ea95036a59 # v0.8.4-3
+        with:
+          validators: a b c d
+          multi-sync: 'true'
+          timeout: 25m
 
       - name: Restore
         run: |
@@ -109,20 +53,8 @@ jobs:
           dotnet build --configuration Release --no-restore \
             tests/Canton.Ledger.Grpc.Client.Integration.Tests/Canton.Ledger.Grpc.Client.Integration.Tests.csproj
 
-      - name: Wait for ledger readiness (2 connected synchronizers)
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          "${LOCALNET_DIR}/canton-localnet" wait-ready --synchronizers 2 --timeout 15m --interval 5s
-
       - name: Reassignment write+read conformance tests (multi-sync)
         env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
           CANTON_REASSIGNMENT_REQUIRE_MULTI_SYNC: "1"
         run: |
           set -euo pipefail
@@ -144,11 +76,6 @@ jobs:
 
       - name: REST reassignment conformance tests (multi-sync)
         env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
           CANTON_REASSIGNMENT_REQUIRE_MULTI_SYNC: "1"
         run: |
           set -euo pipefail
@@ -159,11 +86,13 @@ jobs:
 
       - name: Capture LocalNet state on failure
         if: failure()
-        working-directory: canton-localnet
         run: |
           set -euo pipefail
-          make status > /tmp/localnet-status.txt 2>&1 || true
-          timeout 30 make logs > /tmp/localnet-logs.txt 2>&1 || true
+          docker ps -a --filter label=com.docker.compose.project=localnet > /tmp/localnet-status.txt 2>&1 || true
+          for container in $(docker ps -a --filter label=com.docker.compose.project=localnet --format '{{.Names}}'); do
+            echo "===== ${container}"
+            timeout 30 docker logs --timestamps --tail 400 "${container}" 2>&1 || true
+          done > /tmp/localnet-logs.txt 2>&1 || true
           docker logs multi-sync-startup > /tmp/multi-sync-startup.txt 2>&1 || true
           docker ps -a > /tmp/docker-ps.txt 2>&1 || true
 
@@ -185,7 +114,4 @@ jobs:
 
       - name: Tear down LocalNet
         if: always()
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::teardown failed (non-fatal in CI; runner is ephemeral)"
+        uses: peacefulstudio/canton-localnet/teardown@1cf682aae212d4e2fefb882bcf9c97ea95036a59 # v0.8.4-3

@@ -23,71 +23,14 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      LOCALNET_DIR: ${{ github.workspace }}/canton-localnet
-      LOCALNET_GRPC_URL: http://localhost:11901
-      LOCALNET_JSON_API_URL: http://localhost:11975
-      LOCALNET_TOKEN_URL: http://localhost:8082/realms/AValidator1/protocol/openid-connect/token
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Checkout canton-localnet (fixtures + compose stack)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: peacefulstudio/canton-localnet
-          ref: dev
-          path: canton-localnet
-          persist-credentials: false
-
-      - name: Read validator OAuth2 client credentials from LocalNet fixtures
-        run: |
-          set -euo pipefail
-          oauth2_env="${LOCALNET_DIR}/compose/modules/keycloak/env/a-validator-1/on/oauth2.env"
-          read_fixture_value() {
-            value="$(grep -m 1 -oP "^${1}=\K\S+" "${oauth2_env}")" \
-              || { echo "::error::${1} not found in ${oauth2_env}" >&2; return 1; }
-            value="${value%\"}"
-            printf '%s' "${value#\"}"
-          }
-          client_id="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_ID)"
-          client_secret="$(read_fixture_value AUTH_A_VALIDATOR_1_VALIDATOR_CLIENT_SECRET)"
-          echo "::add-mask::${client_secret}"
-          {
-            echo "LOCALNET_CLIENT_ID=${client_id}"
-            echo "LOCALNET_CLIENT_SECRET=${client_secret}"
-          } >> "${GITHUB_ENV}"
-
-      - name: Read PQS connection string from LocalNet fixtures
-        run: |
-          set -euo pipefail
-          common_env="${LOCALNET_DIR}/compose/modules/localnet/env/common.env"
-          raw="$(grep -m 1 -oP '^DB_PASSWORD=\K\S+' "${common_env}" || true)"
-          [[ -n "${raw}" ]] || { echo "::error::DB_PASSWORD not found in ${common_env}" >&2; exit 1; }
-          raw="${raw%\"}"
-          raw="${raw#\"}"
-          if [[ "${raw}" == '${DB_PASSWORD:-'*'}' ]]; then
-            file_default="${raw#\$\{DB_PASSWORD:-}"
-            file_default="${file_default%\}}"
-            db_password="${DB_PASSWORD:-${file_default}}"
-          else
-            db_password="${raw}"
-          fi
-          echo "::add-mask::${db_password}"
-          pqs_conn="Host=localhost;Port=5432;Database=pqs-a-validator-1;Username=cnadmin;Password=${db_password}"
-          echo "::add-mask::${pqs_conn}"
-          echo "CANTON_LOCALNET_A_VALIDATOR_1_PQS_CONNECTION_STRING=${pqs_conn}" >> "${GITHUB_ENV}"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
           global-json-file: global.json
-
-      - name: Setup Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: '1.26'
-          cache-dependency-path: canton-localnet/cli/go.sum
 
       - name: Show docker / compose versions
         run: |
@@ -95,52 +38,13 @@ jobs:
           docker version
           docker compose version
 
-      - name: Build canton-localnet CLI
-        working-directory: canton-localnet/cli
-        run: |
-          set -euo pipefail
-          go build -o "${LOCALNET_DIR}/canton-localnet" ./cmd/canton-localnet
-
-      - name: Configure a minimal LocalNet (one authenticated validator)
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          # canton-localnet's default topology loads SV + a/b/c/d validators in
-          # one canton JVM, which OOM-restarts on ubuntu-latest and resets the
-          # JSON API mid-request (broken pipe). The tests only use a-validator-1;
-          # slot selection is config-file only (no CLI flag).
-          cat > canton-localnet.yaml <<'YAML'
-          schemaVersion: preview-1
-          modules:
-            obs: false
-          validators:
-            a-validator-1:
-              enabled: true
-            b-validator-1:
-              enabled: false
-            c-validator-1:
-              enabled: false
-            d-validator-1:
-              enabled: false
-          YAML
-
-      - name: Bring up LocalNet (one retry on splice bootstrap race)
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          # Splice's SV-validator can lose a startup race on slower runners
-          # — "Ensuring decentralized synchronizer registered failed:
-          # UNAVAILABLE: No active synchronizer serial found". The initial
-          # bring-up is setup, not test signal, so one retry is allowed;
-          # mirrors canton-localnet compose-integration.yaml.
-          if ! "${LOCALNET_DIR}/canton-localnet" up; then
-            echo "::warning::canton-localnet up failed on first attempt — capturing diagnostics, tearing down with volumes, and retrying once"
-            docker ps -a > /tmp/docker-ps-attempt1.txt 2>&1 || true
-            timeout 60 make logs > /tmp/logs-attempt1.txt 2>&1 || true
-            "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::pre-retry teardown failed; second up may fail with leaked state"
-            sleep 30
-            "${LOCALNET_DIR}/canton-localnet" up
-          fi
+      - name: Boot LocalNet with PQS on a-validator-1 (canton-localnet v0.8.4-3)
+        id: ready
+        uses: peacefulstudio/canton-localnet@1cf682aae212d4e2fefb882bcf9c97ea95036a59 # v0.8.4-3
+        with:
+          validators: a
+          pqs: 'true'
+          timeout: 20m
 
       - name: Restore
         run: |
@@ -160,22 +64,8 @@ jobs:
           dotnet build --configuration Release --no-restore \
             tests/Canton.Ledger.Client.Parity.Tests/Canton.Ledger.Client.Parity.Tests.csproj
 
-      - name: Wait for ledger + PQS readiness
-        id: ready
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          "${LOCALNET_DIR}/canton-localnet" wait-ready --timeout 15m --interval 5s
-
       - name: Integration tests (except PQS round-trip)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
-        env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \
@@ -187,13 +77,6 @@ jobs:
 
       - name: PQS round-trip test
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
-        env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \
@@ -204,13 +87,6 @@ jobs:
 
       - name: REST conformance tests (JSON Ledger API)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
-        env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \
@@ -221,13 +97,6 @@ jobs:
 
       - name: Cross-transport parity tests (Fake, gRPC, REST against LocalNet)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.ready.outcome == 'success' }}
-        env:
-          CANTON_LOCALNET_PROFILE: a-validator-1
-          CANTON_LOCALNET_A_VALIDATOR_1_GRPC_URL: ${{ env.LOCALNET_GRPC_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_JSON_API_URL: ${{ env.LOCALNET_JSON_API_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_TOKEN_URL: ${{ env.LOCALNET_TOKEN_URL }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_ID: ${{ env.LOCALNET_CLIENT_ID }}
-          CANTON_LOCALNET_A_VALIDATOR_1_CLIENT_SECRET: ${{ env.LOCALNET_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           dotnet test --configuration Release --no-build \
@@ -238,11 +107,13 @@ jobs:
 
       - name: Capture LocalNet state on failure
         if: failure()
-        working-directory: canton-localnet
         run: |
           set -euo pipefail
-          make status > /tmp/localnet-status.txt 2>&1 || true
-          timeout 30 make logs > /tmp/localnet-logs.txt 2>&1 || true
+          docker ps -a --filter label=com.docker.compose.project=localnet > /tmp/localnet-status.txt 2>&1 || true
+          for container in $(docker ps -a --filter label=com.docker.compose.project=localnet --format '{{.Names}}'); do
+            echo "===== ${container}"
+            timeout 30 docker logs --timestamps --tail 400 "${container}" 2>&1 || true
+          done > /tmp/localnet-logs.txt 2>&1 || true
           docker ps -a > /tmp/docker-ps.txt 2>&1 || true
 
       - name: Upload diagnostics on failure
@@ -254,14 +125,9 @@ jobs:
             /tmp/localnet-status.txt
             /tmp/localnet-logs.txt
             /tmp/docker-ps.txt
-            /tmp/docker-ps-attempt1.txt
-            /tmp/logs-attempt1.txt
           if-no-files-found: warn
           retention-days: 7
 
       - name: Tear down LocalNet
         if: always()
-        working-directory: canton-localnet
-        run: |
-          set -euo pipefail
-          "${LOCALNET_DIR}/canton-localnet" down --volumes || echo "::warning::teardown failed (non-fatal in CI; runner is ephemeral)"
+        uses: peacefulstudio/canton-localnet/teardown@1cf682aae212d4e2fefb882bcf9c97ea95036a59 # v0.8.4-3
